@@ -1,4 +1,4 @@
-# laravel-vilt
+# eb-laravel-vilt
 
 The base application for a series of small sub-projects built to learn the **VILT** stack —
 Vue, Inertia, Laravel, Tailwind — one piece at a time. This repo is the foundation they mount
@@ -51,7 +51,7 @@ No SPA framework, no Alpine, no Bootstrap, no CSS-in-JS. See
 **1. Install dependencies and create the env file.**
 
 ```bash
-git clone <this repo> laravel-vilt && cd laravel-vilt
+git clone <this repo> eb-laravel-vilt && cd eb-laravel-vilt
 composer install
 cp .env.example .env
 php artisan key:generate
@@ -61,12 +61,12 @@ php artisan key:generate
 
 ```bash
 sudo -u postgres psql \
-    -c "CREATE ROLE laravel_vilt WITH LOGIN PASSWORD 'choose-a-password';" \
-    -c "CREATE DATABASE laravel_vilt OWNER laravel_vilt;"
+    -c "CREATE ROLE eb_laravel_vilt WITH LOGIN PASSWORD 'choose-a-password';" \
+    -c "CREATE DATABASE eb_laravel_vilt OWNER eb_laravel_vilt;"
 ```
 
 Put that password in `DB_PASSWORD` in `.env`. On the machine this was scaffolded on, the
-generated password is already stored at `~/secrets/laravel-vilt-local-db-password`.
+generated password is already stored at `~/secrets/eb-laravel-vilt-local-db-password`.
 
 **3. Migrate, seed, and build assets.**
 
@@ -85,7 +85,7 @@ composer run setup
 Seeding creates a sign-in you can use immediately:
 
 ```
-dev@laravel-vilt.test  /  password
+dev@eb-laravel-vilt.test  /  password
 ```
 
 ---

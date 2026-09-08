@@ -1,4 +1,4 @@
-# Setup Log — laravel-vilt
+# Setup Log — eb-laravel-vilt
 
 A running, append-only record of how this project was scaffolded and configured: what was
 installed, what was decided, and *why* — especially where the rationale isn't obvious from
@@ -540,3 +540,53 @@ exactly the kind of thing a future session would otherwise redo.
 Removed. Worth noting the failure mode: Tailwind v4 purges unused *utility* classes
 automatically, but hand-written SASS is compiled verbatim, so orphaned rules in the custom
 layer ship silently and only a grep finds them.
+
+---
+
+## 2026-09-08 — Renamed the project to `eb-laravel-vilt`
+
+Matches the `eb-` prefix already used across this developer's work (`eb-portfolio`,
+`eb-ssh-2026`, the `eb-*` entries in `~/secrets/`).
+
+**Earlier entries in this log still say `laravel-vilt`, and that's deliberate** — they
+describe what was actually run at the time, under the name the project had then. Rewriting
+them would break this log's append-only rule and make the `laravel new` invocation in the
+scaffold entry wrong. Only the H1 changed.
+
+### What was renamed
+
+| thing | from | to |
+|---|---|---|
+| directory | `~/projects/laravel-vilt` | `~/projects/eb-laravel-vilt` |
+| Postgres database | `laravel_vilt` | `eb_laravel_vilt` |
+| Postgres role | `laravel_vilt` | `eb_laravel_vilt` |
+| DB password file | `~/secrets/laravel-vilt-local-db-password` | `~/secrets/eb-laravel-vilt-local-db-password` |
+| seeded dev sign-in | `dev@laravel-vilt.test` | `dev@eb-laravel-vilt.test` |
+| npm package name | `laravel-vilt` | `eb-laravel-vilt` |
+
+Plus every reference in `.env`, `.env.example`, `.mcp.json`, `README.md`, the CI workflow's
+Postgres service, and `DatabaseSeeder`.
+
+### Three things worth knowing
+
+**Renaming the Postgres role did not clear its password.** Postgres warns that renaming a
+role wipes an MD5-encrypted password, because MD5 verifiers use the role name as the salt.
+Checked first: `SHOW password_encryption` is `scram-sha-256` on this cluster and the stored
+verifier starts with `SCRAM-SHA-256$`, which is salt-independent — so
+`ALTER ROLE ... RENAME TO ...` was safe in place. Confirmed afterwards by connecting over TCP
+with the existing password. Had it been MD5, the password would have needed resetting in the
+same transaction.
+
+Existing connections had to be dropped with `pg_terminate_backend` first — Postgres refuses
+to rename a database that anything is connected to.
+
+**`.mcp.json` hardcodes an absolute path** to `artisan` (`/home/ebasham/projects/.../artisan`,
+invoked through `wsl.exe`). Moving the directory without updating it would have left Laravel
+Boost's MCP server pointing at a path that no longer exists — failing at MCP startup rather
+than anywhere obvious. This is the one file where a directory rename is a *functional* change
+rather than a cosmetic one.
+
+**`APP_NAME` was left as `"Laravel VILT"`.** It's the human-facing title rendered in the
+header and `<title>`, not an identifier — and `eb-portfolio` follows the same split, with
+`APP_NAME="Ethan Basham"` rather than its repo slug. `composer.json`'s `name` was likewise
+left at Laravel's default `laravel/laravel`, matching `eb-portfolio`.

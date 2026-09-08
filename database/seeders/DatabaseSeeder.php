@@ -17,7 +17,7 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         User::firstOrCreate(
-            ['email' => 'dev@laravel-vilt.test'],
+            ['email' => 'dev@eb-laravel-vilt.test'],
             ['name' => 'Ethan Basham', 'password' => 'password', 'email_verified_at' => now()],
         );
     }
