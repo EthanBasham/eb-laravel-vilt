@@ -1,0 +1,121 @@
+@use 'variables' as vars;
+@use 'mixins';
+
+// Mobile nav. The menu is collapsed below `md` and always open at `md` and up.
+// The jQuery handler in resources/js/app.js only toggles `.is-open`; the
+// breakpoint behaviour is pure CSS, so with JS disabled the nav is simply
+// always expanded rather than unreachable.
+.nav-toggle {
+    transition: transform vars.$transition-fast;
+
+    &[aria-expanded='true'] {
+        transform: rotate(90deg);
+    }
+}
+
+.nav-toggle__label {
+    @include mixins.visually-hidden;
+}
+
+.nav-menu {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height vars.$transition-base;
+
+    &.is-open {
+        max-height: 32rem;
+    }
+
+    @include mixins.respond-above(vars.$breakpoint-md) {
+        max-height: none;
+        overflow: visible;
+    }
+}
+
+// Dropdown replacing Breeze's Alpine-driven x-dropdown component. Open state is
+// a single `.is-open` class set by jQuery; everything else is CSS.
+.dropdown__menu {
+    position: absolute;
+    z-index: vars.$z-dropdown;
+    display: none;
+
+    .dropdown.is-open & {
+        display: block;
+    }
+
+    @include mixins.motion-safe {
+        .dropdown.is-open & {
+            animation: dropdown-in vars.$transition-fast;
+        }
+    }
+}
+
+@keyframes dropdown-in {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+// Modal built on the native <dialog> element rather than a div soup. The
+// browser supplies the focus trap, Escape-to-close, inertness of the page
+// behind it, and top-layer stacking — all of which Breeze's Alpine version
+// reimplemented by hand.
+.modal {
+    width: 100%;
+    max-width: 32rem;
+    padding: 0;
+    border: 0;
+    border-radius: 0.5rem;
+    background-color: #fff;
+    box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+
+    &::backdrop {
+        background-color: rgb(17 24 39 / 0.6);
+    }
+
+    @include mixins.motion-safe {
+        &[open] {
+            animation: modal-in vars.$transition-base;
+        }
+    }
+}
+
+@keyframes modal-in {
+    from {
+        opacity: 0;
+        transform: translateY(0.5rem);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+// Transient status messages ("Saved.") that jQuery fades out after a delay.
+.auto-dismiss {
+    transition: opacity vars.$transition-base;
+
+    &.is-dismissed {
+        opacity: 0;
+    }
+}
+
+// A milestone row whose checkbox has been toggled via AJAX. Struck through
+// rather than hidden so the list doesn't reflow under the cursor mid-click.
+.milestone.is-complete .milestone__title {
+    text-decoration: line-through;
+    opacity: 0.55;
+}
+
+// Brief flash after a successful AJAX save, so the toggle has visible feedback
+// even though nothing else on the page changes.
+.milestone.is-saving {
+    opacity: 0.5;
+}

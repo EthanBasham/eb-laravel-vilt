@@ -1,0 +1,9 @@
+// Custom styles that don't belong in Tailwind's utility layer: element-level
+// defaults, multi-state components, and anything needing selectors a utility
+// class can't express (::backdrop, ::selection, keyframes, descendant state).
+//
+// Compiled by Vite as its own entrypoint alongside resources/css/app.css.
+// Utility-first still wins: reach for a Tailwind class in the Blade template
+// first, and only add a rule here when there isn't one.
+@use 'base';
+@use 'components';

@@ -1,0 +1,16 @@
+{
+    "preset": "laravel",
+    "rules": {
+        "class_attributes_separation": {
+            "elements": {
+                "const": "one",
+                "method": "none",
+                "property": "one",
+                "trait_import": "none"
+            }
+        },
+        "ordered_imports": {
+            "sort_algorithm": "none"
+        }
+    }
+}

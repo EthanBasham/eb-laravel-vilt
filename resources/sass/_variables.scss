@@ -1,0 +1,22 @@
+// Design tokens that live *outside* Tailwind's utility system.
+//
+// Tailwind's own tokens (colors, fonts) are declared with @theme in
+// resources/css/app.css and are available to Blade as utility classes. This
+// file is for values that only custom SASS needs to reference — durations,
+// z-index ordering, layout measurements shared between components.
+//
+// Rule of thumb: if a Blade template would ever want it as a class, it belongs
+// in @theme. If only a .scss rule needs it, it belongs here.
+
+// Matches Tailwind's default breakpoints so SASS media queries and `md:`
+// utilities agree about where the layout changes.
+$breakpoint-sm: 640px;
+$breakpoint-md: 768px;
+$breakpoint-lg: 1024px;
+
+$transition-fast: 150ms ease-in-out;
+$transition-base: 250ms ease-in-out;
+
+$z-dropdown: 30;
+$z-header: 40;
+$z-modal: 50;

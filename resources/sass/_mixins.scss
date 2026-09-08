@@ -1,0 +1,29 @@
+@use 'variables' as vars;
+
+@mixin respond-above($breakpoint) {
+    @media (min-width: $breakpoint) {
+        @content;
+    }
+}
+
+// Hides content visually while leaving it in the accessibility tree — used for
+// the text labels on icon-only controls like the mobile nav toggle.
+@mixin visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+// Respects a user's OS-level "reduce motion" setting. Wrap any animation or
+// non-trivial transition so it degrades to an instant state change.
+@mixin motion-safe {
+    @media (prefers-reduced-motion: no-preference) {
+        @content;
+    }
+}
