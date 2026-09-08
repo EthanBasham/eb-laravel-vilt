@@ -2,14 +2,16 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\HomeController;
-use App\Http\Controllers\MilestoneController;
+use App\Http\Controllers\PipelineCheckController;
 use App\Http\Controllers\ProfileController;
-use App\Http\Controllers\ProjectController;
 
 Route::get('/', [HomeController::class, 'index'])->name('home');
 
-Route::get('/projects', [ProjectController::class, 'index'])->name('projects.index');
-Route::get('/projects/{project:slug}', [ProjectController::class, 'show'])->name('projects.show');
+// Throttled because it's an unauthenticated write endpoint, even though it
+// writes nothing — there's no reason to let it be hammered.
+Route::post('/pipeline-check', [PipelineCheckController::class, 'store'])
+    ->middleware('throttle:20,1')
+    ->name('pipeline-check.store');
 
 Route::middleware('auth')->group(function () {
     Route::get('/dashboard', function () {
@@ -19,10 +21,6 @@ Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
-
-    // Editing the learning log is owner-only; reading it is public.
-    Route::patch('/projects/{project:slug}/milestones/{milestone}', [MilestoneController::class, 'update'])
-        ->name('projects.milestones.update');
 });
 
 require __DIR__.'/auth.php';

@@ -33,10 +33,6 @@
                         Home
                     </x-nav-link>
 
-                    <x-nav-link :href="route('projects.index')" :active="request()->routeIs('projects.*')">
-                        Projects
-                    </x-nav-link>
-
                     @guest
                         <x-nav-link :href="route('login')" :active="request()->routeIs('login')">
                             Log in

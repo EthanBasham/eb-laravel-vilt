@@ -5,7 +5,6 @@
 
             <nav aria-label="Footer" class="flex items-center gap-6">
                 <a href="{{ route('home') }}" class="hover:text-gray-700">Home</a>
-                <a href="{{ route('projects.index') }}" class="hover:text-gray-700">Projects</a>
 
                 @guest
                     <a href="{{ route('login') }}" class="hover:text-gray-700">Log in</a>

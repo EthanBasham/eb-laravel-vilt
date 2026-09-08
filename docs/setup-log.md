@@ -462,3 +462,75 @@ infrastructure — the workflow is verified by simulating each step locally (Pin
 manifest check including its negative case), not by a green run. First push to GitHub will be
 the real test. `workflow_dispatch` is included so it can be run manually from a branch before
 `main` ever depends on it.
+
+---
+
+## 2026-09-08 — Removed the Projects/Milestones domain
+
+**Reversal of the schema decision in the "Schema, models, routes, pages" entry above.**
+Recorded as a new entry rather than by editing that one, per this log's own rule.
+
+### What was wrong with it
+
+The `projects` table was copied from `eb-portfolio` almost column-for-column — `title`,
+`slug`, `summary`, `description`, `repo_url`, `is_featured`, `sort_order`, `published_at`.
+Those columns encode a **portfolio-showcase** concept: things you publish, feature, and
+display to a visitor. That's exactly what `eb-portfolio` is for, and recreating it here gave
+this project a second, competing notion of a "project" that meant something different
+(a learning sub-app) while looking identical in the schema.
+
+Mirroring the sibling project's conventions was right for tooling, code style and CI shape.
+Mirroring its *domain* was not, and the resemblance was close enough to be actively
+misleading.
+
+### What was removed
+
+Fifteen files deleted outright: both models, both controllers, `UpdateMilestoneRequest`, both
+factories, `ProjectSeeder`, both migrations, `resources/views/projects/`, `project-card`, and
+the two feature test files. Another twelve edited: routes, `HomeController`, the home page,
+header and footer nav, `app.js`, `DatabaseSeeder`, `HomeTest`, README and CLAUDE.md.
+
+`users` is now the only table beyond Laravel's own `cache` and `jobs`. Sub-projects bring
+their own migrations, named for whatever they actually model.
+
+### What replaced the AJAX example
+
+The milestone toggle had been the brief's required jQuery AJAX example, and it went with the
+domain. Replaced by a **pipeline check** on the home page: a form that posts a message and
+gets it back reversed, alongside the PHP and Laravel versions that handled it.
+
+Deliberately trivial and deliberately stateless — it stores nothing. Its whole job is to
+prove the front end is connected end to end: Blade markup → the jQuery bundle → the CSRF
+header registered by `$.ajaxSetup` → `PipelineCheckRequest` validation → a JSON reply
+rendered into the DOM without a reload, with the `422` branch surfacing validation errors in
+place.
+
+It keeps the same progressive-enhancement shape the milestone toggle had, which was the part
+worth preserving: a real `<form>` that posts normally and re-renders server-side, which
+`app.js` merely intercepts to skip the reload. `PipelineCheckController::store()` branches on
+`expectsJson()` to serve both.
+
+One markup detail worth recording: the error target is a plain `<p data-error>` rather than
+Breeze's `<x-input-error>`. That component renders **nothing** when there are no messages, so
+on first load there'd be no element for jQuery to write a 422 into. The hand-rolled element is
+always in the DOM, carrying the server-rendered error on the no-JS path and acting as the
+write target on the JS path.
+
+Throttled at `20,1` — it's an unauthenticated endpoint, and although it writes nothing there's
+no reason to let it be hammered.
+
+### Verification
+
+- `php artisan test --compact` → **33 passed, 84 assertions** (was 42; the 9 removed were the
+  domain's own).
+- New `PipelineCheckTest` covers both transports, the redirect-and-render path, validation
+  (missing and oversized, as a dataset), and that no auth is required.
+- Live-checked all three paths against a running server: AJAX success returned
+  `{"received":"Hello from Blade","reversed":"edalB morf olleH",...}`; an empty message
+  returned `422` with Laravel's error envelope; a plain form post 302'd home and rendered the
+  reversed string in the markup.
+- `/projects` now 404s; `/` `/login` `/register` 200; `/dashboard` `/profile` still 302.
+
+A note was added to `CLAUDE.md` explaining why there's no domain model and warning against
+reintroducing a generic `projects` table by mirroring `eb-portfolio` a second time — this is
+exactly the kind of thing a future session would otherwise redo.

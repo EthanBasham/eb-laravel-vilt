@@ -1,8 +1,8 @@
 # laravel-vilt
 
-A hub for a series of small sub-projects built to learn the **VILT** stack — Vue, Inertia,
-Laravel, Tailwind — one piece at a time. Each sub-project lives as a `Project` record with
-its own milestone checklist, so progress is visible rather than remembered.
+The base application for a series of small sub-projects built to learn the **VILT** stack —
+Vue, Inertia, Laravel, Tailwind — one piece at a time. This repo is the foundation they mount
+onto; it deliberately has no domain model of its own.
 
 This initial scaffold is deliberately **Blade + jQuery**: it establishes the Laravel,
 Tailwind, SASS and Vite half of the stack on solid ground first. Vue and Inertia arrive as
@@ -117,7 +117,7 @@ npm run dev            # Vite dev server + hot reload
 
 ```bash
 php artisan test --compact          # run the suite
-php artisan test --filter=Milestone # run one file's worth
+php artisan test --filter=Pipeline  # run one file's worth
 vendor/bin/pint --format agent      # format PHP (run after any PHP change)
 vendor/bin/pint --test              # check formatting without writing
 npm run build                       # production asset build
@@ -182,57 +182,57 @@ needs it, it belongs in `_variables.scss`.
 
 `resources/js/app.js` exposes `$` globally, registers the CSRF token on every AJAX request,
 and holds five behaviours: the mobile nav toggle, dropdown menus, `<dialog>`-based modals,
-auto-dismissing status messages, and the milestone toggle.
+auto-dismissing status messages, and the pipeline check.
 
 Everything is written as progressive enhancement. The mobile nav is CSS-collapsed below `md`
 and always open above it, so with JS off it's permanently expanded rather than unreachable.
-The milestone checkboxes sit inside real `<form>`s with submit buttons; `app.js` removes
-those buttons and takes over the `change` event, so turning JS off costs a page reload and
-nothing else.
 
-The **AJAX example** is that milestone toggle: `PATCH` to
-`projects.milestones.update`, validated by `UpdateMilestoneRequest`, answered as JSON with
-the recomputed progress label (which the handler writes back into `#milestone-progress`).
-The same controller action returns a redirect when the request isn't asking for JSON.
+The **AJAX example** is the *pipeline check* on the home page — a deliberately trivial
+endpoint whose only job is to prove the front-end stack is connected end to end: Blade markup,
+the jQuery bundle, the CSRF header registered by `app.js`, `PipelineCheckRequest` validation,
+and a JSON reply rendered without a reload. Its `422` branch surfaces Laravel's validation
+errors in place.
+
+It is also a working plain form. With JS off it posts normally and
+`PipelineCheckController` redirects back with the result in the session, which the same markup
+renders. Delete the whole thing once a real sub-project gives the scaffold something better to
+exercise.
 
 ### Routes and models
 
 ```
-GET    /                                              home            HomeController@index
-GET    /projects                                      projects.index  ProjectController@index
-GET    /projects/{project:slug}                       projects.show   ProjectController@show
-PATCH  /projects/{project:slug}/milestones/{milestone} …update        MilestoneController@update   [auth]
-GET    /dashboard                                     dashboard                                    [auth, verified]
-GET    /profile                                       profile.edit    ProfileController@edit       [auth]
+GET    /                  home                 HomeController@index
+POST   /pipeline-check    pipeline-check.store PipelineCheckController@store  [throttle:20,1]
+GET    /dashboard         dashboard                                           [auth, verified]
+GET    /profile           profile.edit         ProfileController@edit         [auth]
 ```
 
 Plus Breeze's `routes/auth.php`.
 
-`Project` **hasMany** `Milestone`; `Project` **belongsTo** `User`. Deleting a user nulls
-`projects.user_id` (the log outlives the account); deleting a project cascades its
-milestones (they mean nothing without it).
+**There are no domain models.** The only table beyond Laravel's and Breeze's own is `users`.
+Sub-projects bring their own migrations, models and routes; the scaffold deliberately doesn't
+presuppose what they'll be.
 
-Projects bind on `slug`, declared explicitly in the route as `{project:slug}` rather than via
-`getRouteKeyName()` — see the note in `docs/setup-log.md` on why the binding column belongs
-at the URL that uses it.
+When you do add one, two conventions from `CLAUDE.md` apply immediately: declare the binding
+column in the route (`{thing:slug}`) rather than via `getRouteKeyName()`, and index foreign
+key columns explicitly — Postgres, unlike InnoDB, won't do it for you.
 
 ### Where things live
 
 ```
-app/Http/Controllers/    HomeController, ProjectController, MilestoneController
-app/Http/Requests/       UpdateMilestoneRequest
-app/Models/              Project, Milestone, User
-database/migrations/     projects, milestones
-database/seeders/        ProjectSeeder — the real starter set, not faker noise
+app/Http/Controllers/    HomeController, PipelineCheckController, ProfileController
+app/Http/Requests/       PipelineCheckRequest, ProfileUpdateRequest
+app/Models/              User
+database/migrations/     users, cache, jobs — Laravel's own, nothing else yet
+database/seeders/        DatabaseSeeder — a local dev sign-in, nothing more
 resources/css/app.css    Tailwind entry + @theme tokens
 resources/sass/          custom SASS layer
 resources/js/app.js      jQuery entry
 resources/views/
   layouts/               app (site shell), guest (auth screens)
   partials/              header, footer
-  components/            Breeze's set, plus project-card; dropdown & modal are de-Alpined
-  projects/              index, show
-tests/Feature/           HomeTest, ProjectTest, MilestoneTest, plus Breeze's auth tests
+  components/            Breeze's set; dropdown & modal are de-Alpined
+tests/Feature/           HomeTest, PipelineCheckTest, plus Breeze's auth tests
 docs/setup-log.md        why everything above is the way it is
 ```
 

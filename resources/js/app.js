@@ -117,51 +117,58 @@ $(function () {
 });
 
 /**
- * Milestone completion toggle — the AJAX example.
+ * Pipeline check on the home page — the AJAX example.
  *
- * Each milestone checkbox PATCHes its own route and the server returns the new
- * state as JSON. The surrounding <form> is a real, working non-JS fallback:
- * with JS off the checkbox is accompanied by a submit button that posts the
- * same route normally, so this only removes a page reload.
+ * The form is a real, working plain form: with JS off it posts normally and the
+ * controller redirects back with the result in the session. This only removes
+ * the page reload, which is the shape every jQuery behaviour here should take.
+ *
+ * The CSRF token comes from the $.ajaxSetup call at the top of this file.
  */
 $(function () {
-    const $list = $('#milestones');
+    const $form = $('#pipeline-check');
 
-    if (!$list.length) {
+    if (!$form.length) {
         return;
     }
 
-    // The no-JS submit buttons are only needed when this handler isn't running,
-    // so they're removed here rather than hidden with CSS — that way they're
-    // genuinely present for anyone without JS.
-    $list.find('.milestone__submit').remove();
+    const $result = $('#pipeline-result');
+    const $error = $form.find('[data-error]');
+    const $button = $form.find('button[type="submit"]');
 
-    $list.on('change', '.milestone__checkbox', function () {
-        const $checkbox = $(this);
-        const $milestone = $checkbox.closest('.milestone');
+    $form.on('submit', function (event) {
+        event.preventDefault();
 
-        $milestone.addClass('is-saving');
-        $checkbox.prop('disabled', true);
+        $button.prop('disabled', true);
 
         $.ajax({
-            url: $milestone.data('toggle-url'),
-            method: 'PATCH',
+            url: $form.attr('action'),
+            method: 'POST',
             dataType: 'json',
-            data: { is_complete: $checkbox.is(':checked') ? 1 : 0 },
+            data: { message: $('#pipeline-message').val() },
         })
             .done(function (response) {
-                $milestone.toggleClass('is-complete', response.is_complete);
-                $('#milestone-progress').text(response.progress_label);
+                $error.text('').addClass('hidden');
+
+                // Each <dd> declares which field it shows, so adding a field to
+                // the JSON only means adding markup — not editing this loop.
+                $result.removeClass('hidden').find('[data-field]').each(function () {
+                    $(this).text(response[$(this).data('field')] ?? '');
+                });
             })
-            .fail(function () {
-                // Put the checkbox back where it was — the server is the source
-                // of truth and it didn't accept the change.
-                $checkbox.prop('checked', !$checkbox.is(':checked'));
-                window.alert('Could not save that change. Please try again.');
+            .fail(function (xhr) {
+                $result.addClass('hidden');
+
+                // 422 carries Laravel's validation errors; anything else is a
+                // genuine failure and shouldn't be reported as a bad message.
+                const message = xhr.status === 422
+                    ? (xhr.responseJSON?.errors?.message?.[0] ?? 'That message was rejected.')
+                    : 'Could not reach the server. Please try again.';
+
+                $error.text(message).removeClass('hidden');
             })
             .always(function () {
-                $milestone.removeClass('is-saving');
-                $checkbox.prop('disabled', false);
+                $button.prop('disabled', false);
             });
     });
 });

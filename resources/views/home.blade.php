@@ -11,55 +11,150 @@
                 </h1>
 
                 <p class="mt-6 text-lg leading-relaxed text-gray-600">
-                    This is a hub for a series of small, self-contained sub-projects — each one built to
-                    learn a specific piece of the stack properly rather than in the abstract. Every project
-                    keeps its own set of milestones, so progress is visible instead of remembered.
+                    A base application for building small, self-contained sub-projects — each one
+                    written to learn a specific piece of the stack properly rather than in the
+                    abstract. This is the foundation they mount onto: Laravel on PostgreSQL, Blade
+                    layouts, Vite compiling Tailwind, SASS and jQuery, and Breeze handling auth.
                 </p>
 
                 <div class="mt-8 flex flex-wrap gap-3">
-                    <a
-                        href="{{ route('projects.index') }}"
-                        class="inline-flex items-center rounded-md bg-brand-600 px-5 py-3 text-sm font-medium text-white hover:bg-brand-700"
-                    >
-                        Browse the projects
-                    </a>
-
-                    @guest
+                    @auth
+                        <a
+                            href="{{ route('dashboard') }}"
+                            class="inline-flex items-center rounded-md bg-brand-600 px-5 py-3 text-sm font-medium text-white hover:bg-brand-700"
+                        >
+                            Go to dashboard
+                        </a>
+                    @else
                         <a
                             href="{{ route('register') }}"
-                            class="inline-flex items-center rounded-md border border-gray-300 bg-white px-5 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                            class="inline-flex items-center rounded-md bg-brand-600 px-5 py-3 text-sm font-medium text-white hover:bg-brand-700"
                         >
                             Create an account
                         </a>
-                    @endguest
+
+                        <a
+                            href="{{ route('login') }}"
+                            class="inline-flex items-center rounded-md border border-gray-300 bg-white px-5 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                        >
+                            Log in
+                        </a>
+                    @endauth
                 </div>
             </div>
         </div>
     </section>
 
-    <section class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8" aria-labelledby="featured-heading">
-        <div class="flex items-baseline justify-between gap-4">
-            <h2 id="featured-heading" class="text-2xl font-semibold tracking-tight text-gray-900">
-                Featured projects
+    <div class="mx-auto grid max-w-7xl gap-10 px-4 py-16 sm:px-6 lg:grid-cols-2 lg:px-8">
+        <section aria-labelledby="stack-heading">
+            <h2 id="stack-heading" class="text-2xl font-semibold tracking-tight text-gray-900">
+                What's wired up
             </h2>
 
-            <a href="{{ route('projects.index') }}" class="text-sm font-medium text-brand-600 hover:text-brand-700">
-                View all &rarr;
-            </a>
-        </div>
-
-        @if ($featured->isEmpty())
-            <p class="mt-6 rounded-lg border border-dashed border-gray-300 p-8 text-center text-gray-500">
-                No featured projects yet. Run <code class="font-mono text-sm">php artisan db:seed</code> to load the starter set.
-            </p>
-        @else
-            <ul role="list" class="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                @foreach ($featured as $project)
-                    <li>
-                        <x-project-card :project="$project" />
-                    </li>
+            <dl class="mt-6 space-y-4">
+                @foreach ([
+                    'Laravel '.Illuminate\Foundation\Application::VERSION => 'On PostgreSQL, with Breeze providing login, registration and route protection.',
+                    'Blade' => 'Server-rendered throughout. Vue and Inertia arrive inside sub-projects, not here.',
+                    'Tailwind CSS v4' => 'Configured from CSS — design tokens live in an @theme block, not a JS config file.',
+                    'SASS' => 'A separate Vite entrypoint for anything a utility class can\'t express.',
+                    'jQuery' => 'Progressive enhancement only. Everything works with JavaScript disabled.',
+                ] as $name => $detail)
+                    <div class="border-l-2 border-brand-200 pl-4">
+                        <dt class="font-medium text-gray-900">{{ $name }}</dt>
+                        <dd class="mt-1 text-sm leading-relaxed text-gray-600">{{ $detail }}</dd>
+                    </div>
                 @endforeach
-            </ul>
-        @endif
-    </section>
+            </dl>
+        </section>
+
+        {{--
+            Proves the front-end pipeline is connected end to end: this form is
+            submitted by jQuery, with the CSRF header app.js registers, to a real
+            validated endpoint, and the JSON reply is rendered without a reload.
+
+            It is also a working plain form. With JavaScript off it posts
+            normally and the controller redirects back with the result in the
+            session, which is what the @session block below renders.
+        --}}
+        <section aria-labelledby="pipeline-heading">
+            <h2 id="pipeline-heading" class="text-2xl font-semibold tracking-tight text-gray-900">
+                Pipeline check
+            </h2>
+
+            <p class="mt-2 text-sm leading-relaxed text-gray-600">
+                Send a message to the server and get it back. Nothing is stored — this exists to
+                show Blade, jQuery, CSRF, validation and JSON all talking to each other.
+            </p>
+
+            <form
+                id="pipeline-check"
+                method="POST"
+                action="{{ route('pipeline-check.store') }}"
+                class="mt-6 rounded-lg border border-gray-200 bg-white p-6"
+            >
+                @csrf
+
+                <label for="pipeline-message" class="block text-sm font-medium text-gray-700">
+                    Message
+                </label>
+
+                <div class="mt-2 flex flex-wrap gap-2">
+                    <input
+                        type="text"
+                        id="pipeline-message"
+                        name="message"
+                        value="{{ old('message') }}"
+                        maxlength="100"
+                        required
+                        class="flex-1 rounded-md border-gray-300 text-sm"
+                        placeholder="Hello from Blade"
+                    >
+
+                    <button
+                        type="submit"
+                        class="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+                    >
+                        Send
+                    </button>
+                </div>
+
+                {{--
+                    Not <x-input-error>: that component renders nothing when there
+                    are no messages, so jQuery would have no element to write a
+                    validation error into. This one is always in the DOM, carrying
+                    the server-rendered error on the no-JS path and acting as the
+                    target for the 422 branch in app.js on the JS path.
+                --}}
+                <p
+                    data-error
+                    role="alert"
+                    class="mt-2 text-sm text-red-600 @unless ($errors->has('message')) hidden @endunless"
+                >{{ $errors->first('message') }}</p>
+
+                {{-- aria-live so the AJAX reply is announced, not just painted. --}}
+                <dl
+                    id="pipeline-result"
+                    class="mt-4 space-y-1 text-sm text-gray-600 @unless (session('pipeline_check')) hidden @endunless"
+                    aria-live="polite"
+                >
+                    @php($result = session('pipeline_check'))
+
+                    <div class="flex gap-2">
+                        <dt class="font-medium text-gray-900">Reversed</dt>
+                        <dd data-field="reversed" class="font-mono">{{ $result['reversed'] ?? '' }}</dd>
+                    </div>
+
+                    <div class="flex gap-2">
+                        <dt class="font-medium text-gray-900">Handled by</dt>
+                        <dd data-field="handled_by">{{ $result['handled_by'] ?? '' }}</dd>
+                    </div>
+
+                    <div class="flex gap-2">
+                        <dt class="font-medium text-gray-900">At</dt>
+                        <dd data-field="at" class="font-mono">{{ $result['at'] ?? '' }}</dd>
+                    </div>
+                </dl>
+            </form>
+        </section>
+    </div>
 </x-app-layout>

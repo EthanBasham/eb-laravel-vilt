@@ -194,6 +194,13 @@ app exists to hold. Alpine in particular was removed from Breeze's scaffolding o
 don't reintroduce it to "fix" the dropdown or modal components, which are jQuery and native
 `<dialog>` respectively.
 
+**No domain model in the scaffold.** `users` is the only table beyond Laravel's own. An
+earlier version of this project carried `Project`/`Milestone` tables whose schema was copied
+almost column-for-column from `eb-portfolio` — which recreated that project's
+portfolio-showcase concept here, where it doesn't belong. They were removed deliberately.
+Don't reintroduce a generic "projects" table by mirroring `eb-portfolio` again; sub-projects
+bring their own tables, named for whatever they actually model.
+
 **Tailwind is v4, CSS-first.** There is no `tailwind.config.js` and there should not be one;
 design tokens go in the `@theme` block in `resources/css/app.css`. Don't add a `@config`
 compatibility bridge.
@@ -234,13 +241,13 @@ space two individual methods apart. When editing that rule, specify **all four**
 keys — a partial map replaces the defaults rather than merging.
 
 **Scope naming.** Filtering scopes read as explicit inclusion or exclusion:
-`scopeOnlyPublished()` / `scopeNotComplete()`, so the call site is unambiguous about whether
+`scopeOnlyPublished()` / `scopeNotArchived()`, so the call site is unambiguous about whether
 it filters or merely sorts. The model's default ordering is `scopeInDefaultOrder()`, sitting
 naturally beside Laravel's own `inRandomOrder()`. Other non-filtering scopes take a plain
 descriptive name.
 
 **Route model binding.** Don't define `getRouteKeyName()`. Declare the binding column in the
-route instead — `Route::get('/projects/{project:slug}', ...)` — so the column is visible at
+route instead — `Route::get('/lessons/{lesson:slug}', ...)` — so the column is visible at
 the URL that uses it. Watch the silent-fallback trap: removing `getRouteKeyName()` from a
 model whose route has no explicit field doesn't error, it quietly starts binding on `id`.
 
@@ -269,6 +276,6 @@ this is about two legitimate return values.
 ### Progressive enhancement
 
 Every jQuery behaviour has a working no-JS path, and that's a requirement rather than a nice
-to have. The milestone toggle is the reference example: real `<form>`s with submit buttons
-that `app.js` removes before taking over the `change` event. When adding interactivity, make
-the server-rendered version work first and layer jQuery on top.
+to have. The pipeline check on the home page is the reference example: a real `<form>` that
+posts normally and re-renders server-side, which `app.js` intercepts to skip the reload. When
+adding interactivity, make the server-rendered version work first and layer jQuery on top.
