@@ -1,0 +1,156 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+
+concurrency:
+  # One run per branch. Unlike the deploy workflow in eb-portfolio, cancelling
+  # an in-flight CI run is safe and desirable — it touches nothing outside the
+  # runner, so a newer push should supersede it rather than queue behind it.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  php:
+    name: PHP — lint, test, migrate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # The test suite itself runs on in-memory SQLite (see phpunit.xml), which is
+    # fast but hides anything driver-specific. This service exists so the
+    # migrations get exercised against the database the app actually runs on —
+    # SQLite silently tolerates index and foreign-key definitions that Postgres
+    # rejects, and this schema leans on both.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: laravel_vilt
+          POSTGRES_PASSWORD: secret
+          POSTGRES_DB: laravel_vilt
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          # sqlite3 for the test suite, pgsql for the migration check below.
+          extensions: mbstring, xml, curl, zip, bcmath, intl, pgsql, sqlite3
+          coverage: none
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
+
+      # Dev dependencies are required here — Pest and Pint both live in
+      # require-dev. This is the opposite of a deploy install.
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      # Non-strict on purpose: composer.json pins exact versions deliberately,
+      # and --strict would turn those advisory warnings into a failure.
+      - name: Validate composer manifest
+        run: composer validate --no-interaction
+
+      - name: Check formatting
+        run: vendor/bin/pint --test --format agent
+
+      - name: Run tests
+        run: php artisan test --compact
+
+      # Postgres-only checks below. Step-level env wins over .env because
+      # Laravel loads it with Dotenv's immutable mode, which never overwrites a
+      # variable already present in the environment.
+      - name: Run migrations and seeders against PostgreSQL
+        env:
+          DB_CONNECTION: pgsql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_DATABASE: laravel_vilt
+          DB_USERNAME: laravel_vilt
+          DB_PASSWORD: secret
+        run: php artisan migrate --force --seed
+
+      # Proves the down() methods actually work. Nothing else ever calls them,
+      # so without this they rot silently until the one day someone needs them.
+      - name: Verify migrations roll back and re-apply
+        env:
+          DB_CONNECTION: pgsql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_DATABASE: laravel_vilt
+          DB_USERNAME: laravel_vilt
+          DB_PASSWORD: secret
+        run: |
+          php artisan migrate:rollback --force
+          php artisan migrate --force
+
+  assets:
+    name: Assets — build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # Deliberately independent of the php job: it needs no Composer, no
+    # database, and no PHP at all, so running the two in parallel halves
+    # feedback time and a red X says immediately which half broke.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      # `npm ci` over `npm install`: it installs strictly from package-lock.json
+      # and fails outright if the lockfile and package.json disagree, which is
+      # exactly the guarantee wanted for pinned versions.
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build assets
+        run: npm run build
+
+      # Guards the contract between vite.config.js and the @vite([...]) call in
+      # layouts/app.blade.php. Dropping an entrypoint from the Vite config
+      # doesn't fail the build — it fails at runtime, on every page, with a
+      # "Unable to locate file in Vite manifest" exception. This catches it here
+      # instead.
+      - name: Verify every entrypoint made it into the manifest
+        run: |
+          set -euo pipefail
+
+          test -f public/build/manifest.json || {
+            echo "::error::public/build/manifest.json missing — vite build produced nothing"
+            exit 1
+          }
+
+          for entry in resources/css/app.css resources/sass/app.scss resources/js/app.js; do
+            if ! grep -q "\"$entry\"" public/build/manifest.json; then
+              echo "::error::$entry is missing from the Vite manifest"
+              exit 1
+            fi
+            echo "  ok  $entry"
+          done

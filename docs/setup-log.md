@@ -378,3 +378,87 @@ rules Pint can't enforce.
 | `composer validate` | passes (only the expected "avoid exact version constraints" advisories, which are intentional) |
 | `curl` over every route | `/` `/projects` `/projects/{slug}` `/login` `/register` → 200; `/dashboard` `/profile` → 302 to login; unknown slug → 404 |
 | live AJAX toggle | authenticated `PATCH` returned `{"is_complete":true,"progress_label":"1 of 4 complete"}` and toggled back cleanly |
+
+---
+
+## 2026-09-08 — CI pipeline, and a latent bug it exposed
+
+Added `.github/workflows/ci.yml`. Worth noting that `eb-portfolio` has **no** CI workflow —
+only `deploy.yml`, which rsyncs to the box on every push to `main` without running a single
+test first. So this isn't mirrored from there; it's new, and it's arguably a gap worth
+closing on that project too.
+
+### The bug this turned up first
+
+Before writing anything, checked whether the suite would even pass on a clean runner. It
+would not:
+
+```
+42 tests, 31 passed, 11 failed
+Illuminate\Foundation\ViteManifestNotFoundException:
+  Vite manifest not found at: public/build/manifest.json
+```
+
+Every test that renders a view goes through `layouts/app.blade.php`, which calls
+`@vite([...])`, which reads `public/build/manifest.json`. That file is **gitignored**, so it
+exists only after someone runs `npm run build`. The suite had been passing locally purely
+because assets had been built earlier in the session — on a fresh clone it fails 11 tests,
+and the error points at Vite rather than at anything the developer just changed.
+
+Fixed in `tests/Pest.php` with `->beforeEach(fn () => $this->withoutVite())` on the Feature
+suite. Laravel's own mechanism for this; it stubs the directive out so tests exercise the
+application rather than the state of the asset build. Verified both ways — 42 pass with
+`public/build` present *and* with it moved aside.
+
+That the assets genuinely compile is now the `assets` CI job's responsibility, which is the
+right place for it.
+
+### Workflow shape
+
+Two jobs, deliberately independent so they run in parallel — the `assets` job needs no PHP,
+no Composer and no database, so coupling them would only slow feedback and blur which half
+broke.
+
+**`php` — lint, test, migrate.** Composer install *with* dev dependencies (the opposite of a
+deploy install — Pest and Pint both live in `require-dev`), then `composer validate`,
+`pint --test`, `php artisan test`, and finally the Postgres steps.
+
+**`assets` — build.** `npm ci` rather than `npm install`, because it installs strictly from
+`package-lock.json` and fails outright if the lockfile and `package.json` disagree — exactly
+the guarantee wanted given every version is pinned.
+
+### Three decisions worth recording
+
+**A real Postgres service, even though the tests use SQLite.** `phpunit.xml` runs the suite on
+in-memory SQLite, which is fast but hides everything driver-specific — SQLite silently
+tolerates index and foreign-key definitions Postgres rejects, and this schema leans on both.
+The service container exists so `migrate --seed` runs against the database the app actually
+uses. Step-level `env:` overrides the `.env` values because Laravel loads dotenv in immutable
+mode, which never overwrites a variable already in the environment.
+
+**A rollback step.** `migrate:rollback --force` followed by `migrate --force` is the only
+thing that ever calls the migrations' `down()` methods. Without it they rot silently until
+the one day someone needs them. Verified locally: rollback drops `milestones` before
+`projects`, so the foreign key ordering is satisfied, and re-applying is clean.
+
+**`composer validate` without `--strict`.** Confirmed the exit codes first: plain `validate`
+exits 0 despite the exact-pin advisories, `--strict` exits 1. Since those pins are
+intentional, `--strict` would make CI permanently red for a deliberate choice.
+
+The manifest check at the end of the `assets` job guards the contract between
+`vite.config.js` and the `@vite([...])` call in the layout: dropping an entrypoint from the
+Vite config doesn't fail the build, it fails at *runtime*, on every page. Tested the negative
+case too — a bogus entrypoint name is correctly reported as missing.
+
+`cancel-in-progress: true`, unlike `eb-portfolio`'s deploy workflow, which sets it to false.
+Cancelling a CI run is safe because it touches nothing outside the runner; cancelling a
+half-finished deploy is not.
+
+### Not yet running
+
+There's no GitHub remote configured for this repo, so nothing has executed on real
+infrastructure — the workflow is verified by simulating each step locally (Pint, tests,
+`composer validate`, the full migrate/rollback/re-apply cycle on the local Postgres, and the
+manifest check including its negative case), not by a green run. First push to GitHub will be
+the real test. `workflow_dispatch` is included so it can be run manually from a branch before
+`main` ever depends on it.

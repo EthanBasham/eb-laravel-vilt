@@ -16,6 +16,14 @@ use Tests\TestCase;
 
 pest()->extend(TestCase::class)
     ->use(RefreshDatabase::class)
+    // Feature tests render Blade views, and the layout's @vite([...]) call
+    // reads public/build/manifest.json — which is gitignored, so it doesn't
+    // exist on a fresh clone or a CI runner. Without this, every view-rendering
+    // test 500s with ViteManifestNotFoundException until someone runs
+    // `npm run build` first. withoutVite() stubs the directive out, so the
+    // suite tests the application rather than the state of the asset build.
+    // That the assets actually compile is CI's `assets` job, not this one's.
+    ->beforeEach(fn () => $this->withoutVite())
     ->in('Feature');
 
 /*

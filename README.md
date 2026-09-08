@@ -127,6 +127,31 @@ php artisan route:list --except-vendor
 
 ---
 
+## CI
+
+`.github/workflows/ci.yml` runs on every push to `main`, every pull request, and on demand
+via **Actions → CI → Run workflow**. Two jobs run in parallel:
+
+| job | does |
+|---|---|
+| `php` | `composer validate`, `pint --test`, `php artisan test`, then migrate + seed against a real PostgreSQL 16 service, then a rollback/re-apply cycle |
+| `assets` | `npm ci`, `npm run build`, then asserts all three entrypoints landed in the Vite manifest |
+
+Two things it checks that the local test suite can't:
+
+- **Migrations against real PostgreSQL.** The suite runs on in-memory SQLite, which silently
+  tolerates index and foreign-key definitions Postgres rejects. The service container catches
+  that.
+- **`down()` actually works.** Nothing else ever calls the migrations' rollback path, so the
+  workflow rolls back and re-applies to keep it honest.
+
+Note the suite calls `withoutVite()` (in `tests/Pest.php`), so tests don't depend on
+`public/build` existing — that directory is gitignored, and without the stub every
+view-rendering test fails on a fresh clone. Verifying the assets genuinely compile is the
+`assets` job's responsibility instead.
+
+---
+
 ## How the pieces fit together
 
 ### Assets
