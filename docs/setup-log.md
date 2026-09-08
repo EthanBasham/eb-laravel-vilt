@@ -707,3 +707,69 @@ The OpenID round trip itself. It needs a real browser session against Wargaming'
 which can't be driven from here — the redirect out, the callback parsing and the failure
 branches are covered by tests, but the live handshake is untested. That's the first thing to
 exercise manually.
+
+---
+
+## 2026-09-08 — Wargaming theme for the dashboard, and OpenID confirmed working
+
+### OpenID works
+
+The previous entry listed the OpenID round trip as the one thing untested, because it needs a
+real browser session against Wargaming's login page. It has now been run: account
+`AirsoftPro13` (1012068276) is linked, token valid for the full two weeks, and — the part
+that matters — the **`private` block comes back populated** (credits, gold, free XP). That
+only happens when the access token is sent *and accepted*, so it confirms the whole flow, not
+just the redirect. 35,988 battles and 430 garage rows render.
+
+### Theme
+
+Restyled the `/wot` island to match developers.wargaming.net rather than inventing a dark
+skin. The palette was **sampled from their actual stylesheet** (`static/1.16.2/css/index.css`)
+instead of eyeballed:
+
+| role | value | where it came from |
+|---|---|---|
+| page background | `#0a161f` | their `body` rule |
+| panels | `rgba(7, 21, 30, 0.9)` | their panel fill — the colour this change was asked for |
+| borders | `#212c33` | their dividers and input borders |
+| sunken (inputs, table head) | `rgba(0, 0, 0, 0.2)` | their `.search_input` |
+| headings | `#fff`, uppercase, condensed | their `h1..h6` rule |
+| links / accent | `#ffaa00` → `#ffd200` on hover | their `a` and `a:hover` |
+| body text / muted | `#ccc` / `#abb0b6` / `#767a7d` | their `body` and secondary text |
+| good / bad | `#49c7a5` / `#cc4933` | their success and error colours |
+
+Two details worth recording:
+
+**`rgba(7, 21, 30, 0.9)` is translucent on purpose.** On Wargaming's site it floats over a
+full-bleed photograph, which is what makes it read as a panel rather than a flat fill. Rather
+than ship their artwork, `AppShell.vue` lays two very low-contrast radial washes over the base
+colour — enough depth that the transparency does something, at no extra request.
+
+**Their headings use "WarHelios",** a font that isn't ours to serve. The rules use the same
+fallback chain they declare (`Arial Narrow`, Arial) plus the uppercase and letter-spacing,
+since the narrow uppercase silhouette is what actually carries the look.
+
+### How it stays out of the Blade site
+
+The tokens live in the shared `@theme` block in `resources/css/app.css`, which sounds like
+leakage but isn't: **Tailwind v4 emits a theme variable only when a scanned template uses it**,
+and nothing outside `resources/js/wot/**` references them. Confirmed in the compiled CSS —
+`--color-wot-blue` is absent from the build precisely because no component ended up using it,
+while its sixteen siblings are present.
+
+Rules that a utility class can't express (the page background behind the app root, native
+`<select>` option colours, the focus-ring override) live in a **non-scoped `<style>` block in
+`AppShell.vue`**. Not scoped, because scoped styles can't reach `body`; safe anyway, because
+the file only ships in the World of Tanks Vite entry. The build confirms the isolation — a new
+0.97 kB CSS chunk is attached to `resources/js/wot/app.js` in the manifest, and to nothing
+else.
+
+Verified by rendering both halves: `/wot` pulls the theme chunk and the Vue bundle, `/`
+pulls neither.
+
+### A debugging note
+
+Grepping the served HTML for the hashed asset filenames found nothing at first, which looked
+like the theme hadn't loaded. It had — `public/hot` existed because a Vite dev server was
+running, so `@vite` was serving from `localhost:5173` and the manifest hashes weren't in the
+markup at all. Check for `public/hot` before concluding an asset didn't build.

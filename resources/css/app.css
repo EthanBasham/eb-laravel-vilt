@@ -40,6 +40,47 @@
     --color-brand-800: oklch(0.36 0.13 275);
     --color-brand-900: oklch(0.29 0.1 275);
 
+    /*
+     * World of Tanks sub-project palette, sampled from the stylesheet at
+     * developers.wargaming.net (static/1.16.2/css/index.css) so the dashboard
+     * reads as part of that world rather than as this site in a dark skin.
+     *
+     * Scoped by usage, not by build: these tokens are only referenced from
+     * resources/js/wot/**, and Tailwind v4 emits a theme variable only when a
+     * scanned template actually uses it — so none of this reaches the Blade
+     * site's CSS.
+     *
+     * `--color-wot-panel` is the rgba(7,21,30,0.9) that gives the design its
+     * character. It is deliberately translucent: on Wargaming's own site it
+     * floats over a full-bleed background image. AppShell.vue supplies a
+     * gradient for it to sit over, so the transparency still does something
+     * here rather than flattening into a solid.
+     */
+    --color-wot-bg: #0a161f;
+    --color-wot-abyss: #07151e;
+    --color-wot-panel: rgba(7, 21, 30, 0.9);
+    --color-wot-panel-solid: #0e1c26;
+    --color-wot-sunken: rgba(0, 0, 0, 0.2);
+
+    --color-wot-border: #212c33;
+    --color-wot-border-soft: #18222a;
+
+    --color-wot-heading: #ffffff;
+    --color-wot-text: #cccccc;
+    --color-wot-muted: #abb0b6;
+    --color-wot-dim: #767a7d;
+
+    /* Wargaming's link colour and its hover, used as the accent throughout. */
+    --color-wot-gold: #ffaa00;
+    --color-wot-gold-bright: #ffd200;
+
+    --color-wot-blue: #337a9d;
+    --color-wot-blue-light: #3d9eb3;
+    --color-wot-blue-deep: #1e4e66;
+
+    --color-wot-good: #49c7a5;
+    --color-wot-bad: #cc4933;
+
     /* Warm accent, used sparingly for highlights and "in progress" states. */
     --color-accent-100: oklch(0.94 0.05 75);
     --color-accent-400: oklch(0.79 0.14 75);

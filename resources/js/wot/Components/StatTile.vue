@@ -4,15 +4,23 @@ defineProps({
     value: { type: [String, Number], required: true },
     suffix: { type: String, default: '' },
     hint: { type: String, default: '' },
+    tone: { type: String, default: 'default' }, // default | good | bad | gold
 });
+
+const toneClasses = {
+    default: 'text-wot-heading',
+    good: 'text-wot-good',
+    bad: 'text-wot-bad',
+    gold: 'text-wot-gold',
+};
 </script>
 
 <template>
-    <div class="rounded-lg border border-gray-200 bg-white p-4">
-        <dt class="text-xs font-medium uppercase tracking-wide text-gray-500">{{ label }}</dt>
-        <dd class="mt-1 text-2xl font-semibold tabular-nums text-gray-900">
-            {{ value }}<span v-if="suffix" class="text-base font-normal text-gray-500">{{ suffix }}</span>
+    <div class="border border-wot-border bg-wot-panel p-4 transition-colors hover:border-wot-blue-deep">
+        <dt class="text-xs font-medium uppercase tracking-wider text-wot-dim">{{ label }}</dt>
+        <dd class="mt-1 text-2xl tabular-nums" :class="toneClasses[tone]">
+            {{ value }}<span v-if="suffix" class="text-base text-wot-dim">{{ suffix }}</span>
         </dd>
-        <p v-if="hint" class="mt-1 text-xs text-gray-500">{{ hint }}</p>
+        <p v-if="hint" class="mt-1 text-xs text-wot-dim">{{ hint }}</p>
     </div>
 </template>
