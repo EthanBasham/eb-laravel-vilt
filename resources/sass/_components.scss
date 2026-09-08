@@ -106,16 +106,3 @@
         opacity: 0;
     }
 }
-
-// A milestone row whose checkbox has been toggled via AJAX. Struck through
-// rather than hidden so the list doesn't reflow under the cursor mid-click.
-.milestone.is-complete .milestone__title {
-    text-decoration: line-through;
-    opacity: 0.55;
-}
-
-// Brief flash after a successful AJAX save, so the toggle has visible feedback
-// even though nothing else on the page changes.
-.milestone.is-saving {
-    opacity: 0.5;
-}

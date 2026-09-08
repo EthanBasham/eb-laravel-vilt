@@ -534,3 +534,9 @@ no reason to let it be hammered.
 A note was added to `CLAUDE.md` explaining why there's no domain model and warning against
 reintroducing a generic `projects` table by mirroring `eb-portfolio` a second time — this is
 exactly the kind of thing a future session would otherwise redo.
+
+**Follow-up:** the first pass missed dead CSS — `_components.scss` still carried
+`.milestone.is-complete` / `.milestone.is-saving` rules for markup that no longer exists.
+Removed. Worth noting the failure mode: Tailwind v4 purges unused *utility* classes
+automatically, but hand-written SASS is compiled verbatim, so orphaned rules in the custom
+layer ship silently and only a grep finds them.
