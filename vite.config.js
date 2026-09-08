@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import laravel from 'laravel-vite-plugin';
 import { bunny } from 'laravel-vite-plugin/fonts';
 import tailwindcss from '@tailwindcss/vite';
+import vue from '@vitejs/plugin-vue';
 
 export default defineConfig({
     plugins: [
@@ -14,6 +15,11 @@ export default defineConfig({
                 'resources/css/app.css',
                 'resources/sass/app.scss',
                 'resources/js/app.js',
+                // The World of Tanks sub-project's Inertia + Vue bundle. A
+                // separate entry so Vue never ships alongside the jQuery site:
+                // layouts/app.blade.php loads the first three, wot.blade.php
+                // loads the Tailwind entry plus this one.
+                'resources/js/wot/app.js',
             ],
             refresh: true,
             // Downloads the font files at build time and serves them from this
@@ -29,6 +35,18 @@ export default defineConfig({
         // tailwind.config.js — v4 is configured from CSS (see the @theme block
         // in resources/css/app.css).
         tailwindcss(),
+        vue({
+            template: {
+                transformAssetUrls: {
+                    // Rewrites relative asset paths in <img src> etc. from Vue
+                    // SFCs. Laravel's docs recommend disabling the base so Vite
+                    // doesn't prepend its own root to paths already resolved by
+                    // the Laravel plugin.
+                    base: null,
+                    includeAbsolute: false,
+                },
+            },
+        }),
     ],
     server: {
         // Must match APP_URL's hostname exactly. Vite's default bind is

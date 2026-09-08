@@ -7,14 +7,17 @@
         "dev": "vite"
     },
     "devDependencies": {
+        "@inertiajs/vue3": "3.7.0",
         "@tailwindcss/forms": "0.5.11",
         "@tailwindcss/vite": "4.3.3",
+        "@vitejs/plugin-vue": "6.0.8",
         "concurrently": "10.0.5",
         "jquery": "4.0.0",
         "laravel-vite-plugin": "3.2.0",
         "sass": "1.104.0",
         "tailwindcss": "4.3.3",
-        "vite": "8.2.2"
+        "vite": "8.2.2",
+        "vue": "3.5.42"
     },
     "optionalDependencies": {
         "@laravel/multiplex": "^0.4.1"

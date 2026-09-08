@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\PipelineCheckController;
 use App\Http\Controllers\ProfileController;
@@ -22,5 +23,16 @@ Route::middleware('auth')->group(function () {
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 });
+
+/*
+ * The World of Tanks sub-project — the one Inertia + Vue island in an otherwise
+ * Blade application. HandleInertiaRequests is applied here rather than globally
+ * so the rest of the site keeps rendering plain Blade with no Inertia headers or
+ * asset-version handshake.
+ */
+Route::middleware(['auth', HandleInertiaRequests::class])
+    ->prefix('wot')
+    ->name('wot.')
+    ->group(base_path('routes/wot.php'));
 
 require __DIR__.'/auth.php';

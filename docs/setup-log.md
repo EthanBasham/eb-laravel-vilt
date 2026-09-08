@@ -590,3 +590,120 @@ rather than a cosmetic one.
 header and `<title>`, not an identifier — and `eb-portfolio` follows the same split, with
 `APP_NAME="Ethan Basham"` rather than its repo slug. `composer.json`'s `name` was likewise
 left at Laravel's default `laravel/laravel`, matching `eb-portfolio`.
+
+---
+
+## 2026-09-08 — First sub-project: World of Tanks dashboard (Inertia + Vue)
+
+The first sub-project, and the moment the scaffold's central premise gets tested: the base
+site stays Blade + jQuery, and this mounts **Inertia + Vue as an island** under `/wot`.
+
+### The stack boundary
+
+Two Vite entrypoints that never load on the same page:
+
+| entry | loaded by | contains |
+|---|---|---|
+| `resources/js/app.js` | `layouts/app.blade.php` | jQuery, 80 kB |
+| `resources/js/wot/app.js` | `resources/views/wot.blade.php` | Vue + Inertia, 187 kB |
+
+`HandleInertiaRequests` is applied to the `/wot` route group in `routes/web.php` rather than
+globally, so the Blade half of the site never pays for Inertia's headers or asset-version
+handshake. `Inertia::$rootView` is `wot`, not Breeze's `app`.
+
+The upshot is that a visitor to the marketing pages downloads no Vue at all, and the
+dashboard downloads no jQuery — verified by grepping the rendered HTML for each bundle.
+
+### The API, and the thing that blocks everything
+
+`WargamingClient` wraps the public API. Two properties of it drove the design:
+
+**It answers HTTP 200 for application-level failures** and puts the real outcome in a
+`status` field. A successful HTTP response therefore proves nothing, which is why every call
+funnels through one private `send()` that unwraps the envelope and throws
+`WargamingException`. Getting this wrong would mean silently treating an error body as data.
+
+**`application_id` comes in two flavours and the difference is operational, not cosmetic:**
+
+| type | IP check | rate limit |
+|---|---|---|
+| Server | request IP must match one of up to 5 registered addresses | 20 req/s |
+| Standalone | none | 10 req/s per IP |
+
+The supplied key is a **Server** application, so the first live call failed with
+`407 INVALID_IP_ADDRESS` naming this machine's public IP. That is a Developer Room
+configuration issue, not a code one, so `WargamingException::isInvalidIpAddress()` exists to
+distinguish it and the error message spells out both fixes. `php artisan wot:ping` answers
+"do the credentials work at all" without needing a linked account or a browser.
+
+The IP was whitelisted mid-build, and everything below was then verified against live data.
+
+### OpenID, and why the callback is the sensitive part
+
+Wargaming's flow is not OAuth2 and has **no code-for-token exchange**: the API hands back a
+login URL (`nofollow=1` returns it as data rather than redirecting), and after the player
+authenticates, Wargaming redirects back with `account_id`, `nickname`, `access_token` and
+`expires_at` as plain query parameters. The token arrives in the URL.
+
+That puts all the weight on `AccountLinkController::callback()`, which checks `status` first
+and then validates every field as required — a partial response would otherwise write a row
+that looks linked but cannot authenticate. Tokens last two weeks, are stored with Laravel's
+`encrypted` cast, and are revoked at Wargaming's end on disconnect (best-effort via
+`rescue()`, so local state never depends on their uptime).
+
+A rejected token is treated as recoverable: `forgetToken()` clears the credential and leaves
+the link, because reconnecting is one click and re-entering the account id is not.
+
+### Schema
+
+| table | keys and indexes |
+|---|---|
+| `wot_accounts` | FK `user_id` **unique** + cascade; `account_id` unique; index on `access_token_expires_at` |
+| `wot_vehicles` | `tank_id` as a non-incrementing primary key; composite `(tier, nation, type)` |
+
+`user_id` is unique rather than merely indexed so a second link can't be created silently.
+`wot_vehicles` uses Wargaming's own `tank_id` as the primary key — the rows are wholly owned
+upstream, there is no local identity worth preserving, and it's the column `tanks/stats`
+joins on.
+
+The encyclopedia lives in a table rather than the cache store because it's ~1,000 rows that
+change only on game patches, and *every* per-tank stat row must join against it to become
+readable — a cache miss mid-render would mean re-fetching the whole encyclopedia. Refreshed
+by `wot:sync-vehicles`, scheduled weekly.
+
+### Two bugs worth recording
+
+**Inertia's SSR default was silently inflating the HTTP fake count.** A test asserting that
+dashboard data is cached (2 API calls across 2 page views) kept seeing 3. The third request
+wasn't Wargaming at all — `inertia.ssr.enabled` defaults to `true`, so Inertia was POSTing to
+its SSR server at `127.0.0.1:13714`, and `Http::fake()` intercepts *all* outbound HTTP, not
+just the host under test. Disabling SSR (this sub-project has no use for it — it's a personal
+dashboard behind auth) fixed the count. Worth remembering generally: `Http::assertSentCount`
+counts every faked request the framework makes, including ones you didn't write.
+
+**Pint appends imports but never sorts them.** `fully_qualified_strict_types` added
+`use App\Models\WotAccount;` to the bottom of `DashboardController`'s use block and
+`Illuminate\Http\Client\Response` to the bottom of `WargamingClient`'s, both breaking the
+`Illuminate`-first, alphabetical-within-group convention. `pint --test` passed anyway, exactly
+as `CLAUDE.md` warns — import order is unenforced here because `ordered_imports` is switched
+off. Fixed by hand; worth an explicit check after any Pint run that touches imports.
+
+### Verified against live data
+
+`wot:sync-vehicles` pulled **1,028 vehicles** across 11 pages (the endpoint caps `limit` at
+100, so the command pages until a short page comes back rather than assuming a count).
+
+`AccountDashboard` was then run against a real public account: 711 battles, 49.79% win rate
+(354/711 checks out), real vehicle names joined from the encyclopedia, and `private` correctly
+`null` because no access token was sent. Timestamps decoded sensibly too — an account created
+in 2011 whose last battle was in 2012.
+
+Test suite: **62 passed, 193 assertions**, of which 29 cover this sub-project via
+`Http::fake()` — so CI needs no API credentials.
+
+### Not yet verified
+
+The OpenID round trip itself. It needs a real browser session against Wargaming's login page,
+which can't be driven from here — the redirect out, the callback parsing and the failure
+branches are covered by tests, but the live handshake is untested. That's the first thing to
+exercise manually.

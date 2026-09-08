@@ -20,10 +20,17 @@
                 <div class="mt-8 flex flex-wrap gap-3">
                     @auth
                         <a
-                            href="{{ route('dashboard') }}"
+                            href="{{ route('wot.dashboard') }}"
                             class="inline-flex items-center rounded-md bg-brand-600 px-5 py-3 text-sm font-medium text-white hover:bg-brand-700"
                         >
-                            Go to dashboard
+                            World of Tanks dashboard
+                        </a>
+
+                        <a
+                            href="{{ route('dashboard') }}"
+                            class="inline-flex items-center rounded-md border border-gray-300 bg-white px-5 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                        >
+                            Account
                         </a>
                     @else
                         <a
@@ -58,6 +65,7 @@
                     'Tailwind CSS v4' => 'Configured from CSS — design tokens live in an @theme block, not a JS config file.',
                     'SASS' => 'A separate Vite entrypoint for anything a utility class can\'t express.',
                     'jQuery' => 'Progressive enhancement only. Everything works with JavaScript disabled.',
+                    'Vue + Inertia' => 'Scoped to the World of Tanks dashboard at /wot — the first sub-project, and the first SPA.',
                 ] as $name => $detail)
                     <div class="border-l-2 border-brand-200 pl-4">
                         <dt class="font-medium text-gray-900">{{ $name }}</dt>

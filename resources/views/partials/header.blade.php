@@ -45,6 +45,10 @@
                             Register
                         </a>
                     @else
+                        <x-nav-link :href="route('wot.dashboard')" :active="request()->routeIs('wot.*')">
+                            World of Tanks
+                        </x-nav-link>
+
                         <x-nav-link :href="route('dashboard')" :active="request()->routeIs('dashboard')">
                             Dashboard
                         </x-nav-link>

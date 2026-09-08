@@ -114,6 +114,28 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
 - Test the changed behavior and its important failure modes, but do not add tests beyond them.
 - Read the `testing-best-practices` skill before writing tests.
 
+=== inertia-laravel/core rules ===
+
+# Inertia
+
+- Inertia creates fully client-side rendered SPAs without modern SPA complexity, leveraging existing server-side patterns.
+- Components live in `resources/js/Pages` (unless specified in `vite.config.js`). Use `Inertia::render()` for server-side routing instead of Blade views.
+- ALWAYS use `search-docs` tool for version-specific Inertia documentation and updated code examples.
+
+# Inertia v3
+
+- Use all Inertia features from v1, v2, and v3. Check the documentation before making changes to ensure the correct approach.
+- New v3 features: standalone HTTP requests (`useHttp` hook), optimistic updates with automatic rollback, layout props (`useLayoutProps` hook), instant visits, simplified SSR via `@inertiajs/vite` plugin, custom exception handling for error pages.
+- Carried over from v2: deferred props, infinite scroll, merging props, polling, prefetching, once props, flash data.
+- When using deferred props, add an empty state with a pulsing or animated skeleton.
+- Axios has been removed. Use the built-in XHR client with interceptors, or install Axios separately if needed.
+- `Inertia::lazy()` / `LazyProp` has been removed. Use `Inertia::optional()` instead.
+- Prop types (`Inertia::optional()`, `Inertia::defer()`, `Inertia::merge()`) work inside nested arrays with dot-notation paths.
+- SSR works automatically in Vite dev mode with `@inertiajs/vite` - no separate Node.js server needed during development.
+- Event renames: `invalid` is now `httpException`, `exception` is now `networkError`.
+- `router.cancel()` replaced by `router.cancelAll()`.
+- The `future` configuration namespace has been removed - all v2 future options are now always enabled.
+
 === laravel/core rules ===
 
 # Do Things the Laravel Way
@@ -200,6 +222,12 @@ almost column-for-column from `eb-portfolio` — which recreated that project's
 portfolio-showcase concept here, where it doesn't belong. They were removed deliberately.
 Don't reintroduce a generic "projects" table by mirroring `eb-portfolio` again; sub-projects
 bring their own tables, named for whatever they actually model.
+
+**Sub-projects bring their own stack, mounted as islands.** The World of Tanks dashboard at
+`/wot` is Inertia + Vue with its own Vite entrypoint (`resources/js/wot/app.js`) and its own
+root view (`resources/views/wot.blade.php`); `HandleInertiaRequests` is applied to that route
+group only. The two bundles never load on the same page. Follow the same pattern for the next
+sub-project rather than making the base app Inertia-wide.
 
 **Tailwind is v4, CSS-first.** There is no `tailwind.config.js` and there should not be one;
 design tokens go in the `@theme` block in `resources/css/app.css`. Don't add a `@config`

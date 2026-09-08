@@ -238,6 +238,61 @@ docs/setup-log.md        why everything above is the way it is
 
 ---
 
+## Sub-projects
+
+### World of Tanks dashboard — `/wot`
+
+The first sub-project, and the first SPA. **Inertia + Vue, mounted as an island**: it has its
+own Vite entrypoint (`resources/js/wot/app.js`), its own root view
+(`resources/views/wot.blade.php`), and `HandleInertiaRequests` applied to that route group
+only. The Blade half of the site ships no Vue; the dashboard ships no jQuery.
+
+```
+GET    /wot                    wot.dashboard      account summary + garage table   [auth]
+GET    /wot/connect            wot.link.create    start the Wargaming OpenID flow  [auth]
+GET    /wot/connect/callback   wot.link.callback  receive the token                [auth]
+DELETE /wot/connect            wot.link.destroy   unlink and revoke                [auth]
+```
+
+**Setup.** Get an application ID from <https://developers.wargaming.net> and put it in
+`.env`:
+
+```
+WARGAMING_REALM=na
+WARGAMING_APPLICATION_ID=your-id-here
+```
+
+Then check it works and load the vehicle encyclopedia:
+
+```bash
+php artisan wot:ping            # confirms the credentials reach the API
+php artisan wot:sync-vehicles   # ~1,000 vehicles; scheduled weekly thereafter
+```
+
+**Mind the application type.** A *Server* application validates the calling IP against up to
+5 registered addresses (20 req/s) and returns `407 INVALID_IP_ADDRESS` from anywhere else — so
+a changing home IP will break it. A *Standalone* application skips the IP check (10 req/s per
+IP). `wot:ping` tells you which situation you're in, and the error message names the fix.
+
+**Realms are not interchangeable.** Accounts, account IDs and application IDs each belong to
+exactly one region. An NA key will not work against `api.worldoftanks.eu`.
+
+**How it fits together.**
+
+- `WargamingClient` wraps the API. It exists mainly because the API answers **HTTP 200 for
+  application-level errors** and puts the real outcome in a `status` field — so every call is
+  funnelled through one place that unwraps the envelope and throws.
+- `AccountDashboard` assembles the page: summary stats, plus per-vehicle rows joined against
+  the local encyclopedia copy. Caching lives here rather than in the client, because this is
+  the layer that knows how stale the data may be.
+- `wot_accounts` holds the OpenID link. The access token is stored with the `encrypted` cast
+  and revoked at Wargaming's end on disconnect.
+- `wot_vehicles` is a local copy of the encyclopedia, keyed by Wargaming's `tank_id`.
+
+Tests run entirely on `Http::fake()`, so CI needs no API credentials.
+
+---
+
 ## Conventions
 
 Mirrors `~/projects/eb-portfolio`, whose `CLAUDE.md` is the fuller reference. The short
