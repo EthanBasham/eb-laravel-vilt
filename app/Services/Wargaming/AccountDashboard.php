@@ -41,33 +41,6 @@ class AccountDashboard
     }
 
     /**
-     * Raw per-vehicle statistics keyed by tank id, straight from the cached
-     * tanks/stats response.
-     *
-     * Public because the grind tracker needs the same payload: sharing this
-     * method means opening the grinds page reuses the dashboard's cache entry
-     * rather than spending a second API call on identical data.
-     *
-     * @return array<int, array<string, mixed>>
-     */
-    public function vehicleStatsFor(WotAccount $account): array
-    {
-        $rows = Cache::remember(
-            "wot:tank-stats:{$account->account_id}",
-            (int) config('wargaming.cache.tank_stats'),
-            fn () => $this->client->tankStats($account->account_id, $account->access_token),
-        );
-
-        $stats = [];
-
-        foreach ($rows[(string) $account->account_id] ?? [] as $row) {
-            $stats[(int) $row['tank_id']] = $row['all'] ?? [];
-        }
-
-        return $stats;
-    }
-
-    /**
      * @param  list<array<string, mixed>>  $vehicles
      * @return array<string, mixed>
      */

@@ -42,12 +42,6 @@ class SyncVehicles extends Command
                         'type' => $vehicle['type'],
                         'is_premium' => (bool) ($vehicle['is_premium'] ?? false),
                         'image_url' => $vehicle['images']['small_icon'] ?? null,
-                        'is_gift' => (bool) ($vehicle['is_gift'] ?? false),
-                        // Null rather than an empty array for vehicles outside
-                        // the tech tree, so "has no research line" and "has an
-                        // empty one" stay distinguishable.
-                        'next_tanks' => $vehicle['next_tanks'] ?: null,
-                        'modules_tree' => $vehicle['modules_tree'] ?: null,
                     ],
                 );
             }

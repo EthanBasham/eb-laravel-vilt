@@ -12,7 +12,7 @@ use Database\Factories\WotVehicleFactory;
  * A vehicle from Wargaming's encyclopedia. Rows are wholly owned by the
  * upstream API and replaced by `wot:sync-vehicles`.
  */
-#[Fillable(['tank_id', 'name', 'short_name', 'tier', 'nation', 'type', 'is_premium', 'is_gift', 'image_url', 'next_tanks', 'modules_tree'])]
+#[Fillable(['tank_id', 'name', 'short_name', 'tier', 'nation', 'type', 'is_premium', 'image_url'])]
 class WotVehicle extends Model
 {
     /** @use HasFactory<WotVehicleFactory> */
@@ -34,9 +34,6 @@ class WotVehicle extends Model
             'tank_id' => 'integer',
             'tier' => 'integer',
             'is_premium' => 'boolean',
-            'is_gift' => 'boolean',
-            'next_tanks' => 'array',
-            'modules_tree' => 'array',
         ];
     }
 
@@ -45,10 +42,6 @@ class WotVehicle extends Model
     public function scopeOnlyPremium(Builder $query): Builder
     {
         return $query->where('is_premium', true);
-    }
-    public function scopeOnlyResearchable(Builder $query): Builder
-    {
-        return $query->whereNotNull('next_tanks');
     }
     public function scopeInDefaultOrder(Builder $query): Builder
     {

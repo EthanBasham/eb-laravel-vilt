@@ -1350,3 +1350,35 @@ Production data: 1,028 vehicles, 862 WN8 expected values, 120 articles, 17 event
 is already on the application's allow-list. This had been flagged as a likely blocker before
 deploying, on the grounds that the key is a Server-type application restricted to the home IP.
 Checking cost one command and saved raising a false alarm.
+
+---
+
+## 2026-09-09 — Removed the grind tracker
+
+Built, used, didn't fit how this player actually plays. Stripped rather than left switched
+off — a feature nobody opens still costs a nav slot, a scheduled query, and attention every
+time someone reads the code.
+
+Deleted outright: `WotGrind`, `GrindController`, `StoreGrindRequest`, `GrindTracker`,
+`WotGrindFactory`, `Grinds.vue`, `GrindTest`. Edited: routes, the `grinds()` relation on
+`WotAccount`, and the nav link.
+
+### Things that only existed to serve it
+
+Worth removing carefully, because they didn't look grind-specific:
+
+- **`AccountDashboard::vehicleStatsFor()`** had been made *public* specifically so
+  `GrindTracker` could share the dashboard's cached tanks/stats. With the tracker gone nothing
+  called it at all — `vehicles()` does its own cached fetch — so it was deleted rather than
+  quietly demoted back to private.
+- **`wot_vehicles.next_tanks`, `.modules_tree`, `.is_gift`** were added to resolve grind
+  targets and nothing else ever read them. Dropped, along with the extra fields the
+  encyclopedia sync was requesting. `modules_tree` alone was several megabytes of JSON across
+  ~1,000 rows, re-fetched on every sync.
+- **`WotVehicle::scopeOnlyResearchable()`** had no remaining callers.
+
+The create migrations stay in history — they ran in production — and a new migration drops
+what they made. Its `down()` restores the columns but not their contents, and says so: the
+sync's field list would have to be widened again to refill them.
+
+Suite: **123 passed, 430 assertions** (down from 133; the ten removed were the grind tests).
