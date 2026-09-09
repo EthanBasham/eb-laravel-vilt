@@ -13,6 +13,8 @@ use App\Http\Controllers\Wot\NewsController;
 
 Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
 
+Route::post('/refresh', [DashboardController::class, 'refresh'])->name('dashboard.refresh');
+
 Route::get('/news', [NewsController::class, 'index'])->name('news.index');
 Route::get('/calendar', [NewsController::class, 'calendar'])->name('calendar');
 

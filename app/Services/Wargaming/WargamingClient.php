@@ -4,6 +4,7 @@ namespace App\Services\Wargaming;
 
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 
@@ -21,6 +22,28 @@ use Illuminate\Support\Facades\Http;
  */
 class WargamingClient
 {
+    /**
+     * Fields requested from tanks/stats.
+     *
+     * The endpoint returns 33 fields per vehicle by default, which for a large
+     * garage is ~1.8 MB — most of it never read. This list must stay a superset
+     * of two consumers: what AccountDashboard renders per vehicle, and what
+     * PeriodStats differences between snapshots. Removing a field here breaks
+     * one of them silently, as a zero rather than an error.
+     */
+    private const TANK_STATS_FIELDS = 'tank_id,mark_of_mastery,'
+        .'all.battles,all.wins,all.survived_battles,all.damage_dealt,all.damage_received,'
+        .'all.frags,all.spotted,all.dropped_capture_points,all.xp,all.hits_percents,'
+        .'all.radio_assisted_damage,all.track_assisted_damage,all.stun_assisted_damage,'
+        .'all.avg_damage_blocked,all.battle_avg_xp';
+
+    /**
+     * tanks/achievements rejects nested field paths, so the whole achievements
+     * object comes back — but dropping `series` and `max_series`, which nothing
+     * here reads, still halves the payload.
+     */
+    private const TANK_ACHIEVEMENT_FIELDS = 'tank_id,achievements';
+
     public function __construct(
         private readonly ?string $applicationId = null,
         private readonly ?string $baseUrl = null,
@@ -54,6 +77,7 @@ class WargamingClient
         return $this->get('/wot/tanks/stats/', array_filter([
             'account_id' => $accountId,
             'access_token' => $accessToken,
+            'fields' => self::TANK_STATS_FIELDS,
         ]));
     }
 
@@ -71,6 +95,7 @@ class WargamingClient
         return $this->get('/wot/tanks/achievements/', array_filter([
             'account_id' => $accountId,
             'access_token' => $accessToken,
+            'fields' => self::TANK_ACHIEVEMENT_FIELDS,
         ]));
     }
 
@@ -172,13 +197,7 @@ class WargamingClient
      */
     private function send(callable $send): array
     {
-        $applicationId = $this->applicationId();
-
-        if (blank($applicationId)) {
-            throw new WargamingException(
-                'No Wargaming application ID is configured. Set WARGAMING_APPLICATION_ID in .env.',
-            );
-        }
+        $this->guardApplicationId();
 
         try {
             $response = $send(
@@ -191,6 +210,59 @@ class WargamingClient
             throw new WargamingException('Could not reach the Wargaming API: '.$e->getMessage());
         }
 
+        return $this->unwrap($response);
+    }
+
+    /**
+     * Fetches the three payloads the dashboard needs, concurrently.
+     *
+     * They are independent, so issuing them in sequence made a cold page load
+     * cost the sum of three round trips rather than the slowest one. Http::pool
+     * fires them together; the response handling is identical either way.
+     *
+     * @return array{info: array<string, mixed>, stats: array<string, mixed>, achievements: array<string, mixed>}
+     */
+    public function dashboardPayloads(int $accountId, ?string $accessToken = null): array
+    {
+        $this->guardApplicationId();
+
+        $common = array_filter([
+            'application_id' => $this->applicationId(),
+            'account_id' => $accountId,
+            'access_token' => $accessToken,
+        ]);
+
+        $responses = Http::pool(fn (Pool $pool): array => [
+            $pool->as('info')->timeout((int) config('wargaming.timeout'))->acceptJson()
+                ->get($this->baseUrl().'/wot/account/info/', $common),
+            $pool->as('stats')->timeout((int) config('wargaming.timeout'))->acceptJson()
+                ->get($this->baseUrl().'/wot/tanks/stats/', [...$common, 'fields' => self::TANK_STATS_FIELDS]),
+            $pool->as('achievements')->timeout((int) config('wargaming.timeout'))->acceptJson()
+                ->get($this->baseUrl().'/wot/tanks/achievements/', [...$common, 'fields' => self::TANK_ACHIEVEMENT_FIELDS]),
+        ]);
+
+        $unwrapped = [];
+
+        foreach (['info', 'stats', 'achievements'] as $key) {
+            $response = $responses[$key];
+
+            // A pool hands back the exception itself rather than throwing, so a
+            // connection failure has to be re-raised deliberately.
+            if ($response instanceof \Throwable) {
+                throw new WargamingException("Could not reach the Wargaming API: {$response->getMessage()}");
+            }
+
+            $unwrapped[$key] = $this->unwrap($response);
+        }
+
+        return $unwrapped;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function unwrap(Response $response): array
+    {
         if ($response->failed()) {
             throw new WargamingException("The Wargaming API returned HTTP {$response->status()}.");
         }
@@ -210,6 +282,15 @@ class WargamingClient
         }
 
         return $body['data'] ?? [];
+    }
+
+    private function guardApplicationId(): void
+    {
+        if (blank($this->applicationId())) {
+            throw new WargamingException(
+                'No Wargaming application ID is configured. Set WARGAMING_APPLICATION_ID in .env.',
+            );
+        }
     }
 
     /**

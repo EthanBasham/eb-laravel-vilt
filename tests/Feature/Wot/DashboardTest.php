@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use App\Models\User;
 use App\Models\WotAccount;
@@ -156,5 +157,51 @@ it('caches API responses rather than re-fetching per page view', function () {
     $this->actingAs($user)->get(route('wot.dashboard'));
 
     // Three endpoints, hit once each across two page views.
+    Http::assertSentCount(3);
+});
+
+/**
+ * Payloads are cached for thirty minutes, so a player who has just finished a
+ * session needs a way to see live numbers without waiting it out.
+ */
+it('refresh drops the cached payloads', function () {
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create(['account_id' => 7]);
+    Http::fake([
+        '*/account/info/*' => Http::response(accountInfoResponse(7)),
+        '*/tanks/stats/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
+        '*/tanks/achievements/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
+    ]);
+
+    $this->actingAs($user)->get(route('wot.dashboard'));
+    expect(Cache::has("wot:payloads:{$account->account_id}"))->toBeTrue();
+
+    $this->actingAs($user)->post(route('wot.dashboard.refresh'))->assertRedirect();
+
+    expect(Cache::has("wot:payloads:{$account->account_id}"))->toBeFalse();
+});
+
+it('refresh requires a linked account', function () {
+    $this->actingAs(User::factory()->create())
+        ->post(route('wot.dashboard.refresh'))
+        ->assertNotFound();
+});
+
+/**
+ * The three payloads are fetched concurrently and stored as a single entry, so
+ * a second page view should issue no requests at all.
+ */
+it('fetches all three payloads once and reuses them', function () {
+    $user = User::factory()->create();
+    WotAccount::factory()->for($user)->create(['account_id' => 7]);
+    Http::fake([
+        '*/account/info/*' => Http::response(accountInfoResponse(7)),
+        '*/tanks/stats/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
+        '*/tanks/achievements/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
+    ]);
+
+    $this->actingAs($user)->get(route('wot.dashboard'));
+    $this->actingAs($user)->get(route('wot.dashboard'));
+
     Http::assertSentCount(3);
 });

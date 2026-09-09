@@ -1382,3 +1382,54 @@ what they made. Its `down()` restores the columns but not their contents, and sa
 sync's field list would have to be widened again to refill them.
 
 Suite: **123 passed, 430 assertions** (down from 133; the ten removed were the grind tests).
+
+---
+
+## 2026-09-09 — Dashboard load time
+
+Reported as slow. Measured before changing anything, which mattered: the database was never
+the problem.
+
+| | before | after |
+|---|---|---|
+| cold (cache expired) | **9.6 s** | **1.2 s** service / 2.4 s full page |
+| warm | 114 ms | 64 ms service / 0.33 s full page |
+| DB time | 34 ms | 17 ms |
+
+Three causes, in order of size.
+
+**The API was returning 1.8 MB of data to render a few hundred numbers.** `tanks/stats`
+defaults to 33 fields per vehicle; the page reads about fifteen. Passing an explicit `fields`
+list cut the response from **1,857,292 to 140,986 bytes** and 2.66 s to 1.37 s — and the
+transfer is the smaller half of that win. The payload is `json_decode`d *and* re-serialised
+into the cache, and `CACHE_STORE=database`, so every cold load was writing ~1.8 MB into a
+Postgres row. `tanks/achievements` got the same treatment (288 KB → 121 KB) by dropping the
+`series` blocks nothing reads; it rejects nested field paths, so only the top-level trim is
+available there.
+
+That single change took the cold load from 9.6 s to 3.2 s.
+
+**Three independent calls were made in sequence**, so a cold load cost their sum rather than
+the slowest one. `Http::pool` fires them together. A pool hands back the exception object
+instead of throwing, so a connection failure has to be re-raised deliberately — otherwise it
+would surface much later as a missing array key.
+
+**Three cache entries where one would do.** They are always wanted together, so they are now a
+single `wot:payloads:{account}` entry: one database write per cold load instead of three.
+
+### The TTL, and why a Refresh button came with it
+
+The cache was 5 minutes, so the first visitor in any 5-minute window paid the full cold cost.
+Raised to 30 minutes — stats only move when a battle ends — but a longer window is only
+defensible if staleness is escapable, so the dashboard gained a **Refresh** control that drops
+the entry and re-fetches. Without that the change would have traded one annoyance for another.
+
+`config/wargaming.php` now has one `cache.dashboard` key rather than the two that described
+the old per-endpoint entries.
+
+### A note on the field list
+
+`WargamingClient::TANK_STATS_FIELDS` has to stay a superset of two consumers: what the
+dashboard renders per vehicle, and what `PeriodStats` differences between snapshots. Removing
+a field there breaks one of them **silently, as a zero rather than an error**, which is why the
+constant carries that warning.

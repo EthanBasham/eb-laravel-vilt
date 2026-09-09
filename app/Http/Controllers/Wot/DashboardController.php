@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Wot;
 
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
 use App\Models\WotAccount;
@@ -46,6 +47,22 @@ class DashboardController extends Controller
             'error' => null,
             ...$data,
         ]);
+    }
+
+    /**
+     * Drops the cached API payloads and returns to the dashboard, which then
+     * re-fetches. Useful straight after a session, when the 30-minute cache
+     * would otherwise still be showing pre-battle numbers.
+     */
+    public function refresh(Request $request, AccountDashboard $dashboard): RedirectResponse
+    {
+        $account = $request->user()->wotAccount;
+
+        abort_unless($account, 404);
+
+        $dashboard->forget($account);
+
+        return back(fallback: route('wot.dashboard'));
     }
 
     /**

@@ -64,8 +64,16 @@ return [
     */
 
     'cache' => [
-        'account_info' => env('WARGAMING_CACHE_ACCOUNT_INFO', 300),
-        'tank_stats' => env('WARGAMING_CACHE_TANK_STATS', 300),
+        /*
+         * One entry now holds all three dashboard payloads, fetched together.
+         *
+         * Thirty minutes rather than five: a cold load costs ~2.5s, almost all
+         * of it waiting on tanks/stats, so a short TTL meant regularly paying
+         * that for data that only moves when a battle ends. The Refresh control
+         * on the page busts this on demand, which is what makes the longer
+         * window safe — stale data is never something you're stuck with.
+         */
+        'dashboard' => env('WARGAMING_CACHE_DASHBOARD', 1800),
     ],
 
 ];

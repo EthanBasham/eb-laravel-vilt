@@ -30,29 +30,53 @@ class AccountDashboard
      */
     public function for(WotAccount $account): array
     {
-        $vehicles = $this->vehicles($account);
+        $payloads = $this->payloads($account);
+        $vehicles = $this->vehicles($account, $payloads);
 
         return [
-            'summary' => $this->summary($account, $vehicles),
-            'achievements' => $this->achievements($account),
+            'summary' => $this->summary($account, $payloads, $vehicles),
+            'achievements' => $this->achievements($account, $payloads),
             'vehicles' => $vehicles,
             'history' => $this->periods->for($account),
         ];
     }
 
     /**
+     * The three API payloads the page needs, fetched together and cached as one
+     * entry.
+     *
+     * One entry rather than three because they are always wanted together, and
+     * because the cache store is the database — three writes of freshly
+     * serialised JSON per cold load was itself a measurable cost, on top of
+     * three sequential round trips.
+     *
+     * @return array{info: array<string, mixed>, stats: array<string, mixed>, achievements: array<string, mixed>}
+     */
+    private function payloads(WotAccount $account): array
+    {
+        return Cache::remember(
+            "wot:payloads:{$account->account_id}",
+            (int) config('wargaming.cache.dashboard'),
+            fn () => $this->client->dashboardPayloads($account->account_id, $account->access_token),
+        );
+    }
+
+    /**
+     * Drops the cached payloads so the next render re-fetches from Wargaming.
+     */
+    public function forget(WotAccount $account): void
+    {
+        Cache::forget("wot:payloads:{$account->account_id}");
+    }
+
+    /**
+     * @param  array<string, mixed>  $payloads
      * @param  list<array<string, mixed>>  $vehicles
      * @return array<string, mixed>
      */
-    private function summary(WotAccount $account, array $vehicles): array
+    private function summary(WotAccount $account, array $payloads, array $vehicles): array
     {
-        $info = Cache::remember(
-            "wot:account-info:{$account->account_id}",
-            (int) config('wargaming.cache.account_info'),
-            fn () => $this->client->accountInfo([$account->account_id], $account->access_token),
-        );
-
-        $profile = $info[(string) $account->account_id] ?? [];
+        $profile = $payloads['info'][(string) $account->account_id] ?? [];
         $stats = $profile['statistics']['all'] ?? [];
 
         $battles = (int) ($stats['battles'] ?? 0);
@@ -115,13 +139,9 @@ class AccountDashboard
      *
      * @return array<string, mixed>
      */
-    private function achievements(WotAccount $account): array
+    private function achievements(WotAccount $account, array $payloads): array
     {
-        $rows = Cache::remember(
-            "wot:achievements:{$account->account_id}",
-            (int) config('wargaming.cache.tank_stats'),
-            fn () => $this->client->tankAchievements($account->account_id, $account->access_token),
-        );
+        $rows = $payloads['achievements'];
 
         $marks = [1 => 0, 2 => 0, 3 => 0];
         $mastery = [1 => 0, 2 => 0, 3 => 0, 4 => 0];
@@ -154,15 +174,11 @@ class AccountDashboard
      *
      * @return list<array<string, mixed>>
      */
-    private function vehicles(WotAccount $account): array
+    private function vehicles(WotAccount $account, array $payloads): array
     {
-        $rows = Cache::remember(
-            "wot:tank-stats:{$account->account_id}",
-            (int) config('wargaming.cache.tank_stats'),
-            fn () => $this->client->tankStats($account->account_id, $account->access_token),
-        );
+        $rows = $payloads['stats'];
 
-        $marks = $this->marksByTank($account);
+        $marks = $this->marksByTank($account, $payloads);
 
         /** @var Collection<int, WotVehicle> $encyclopedia */
         $encyclopedia = WotVehicle::all()->keyBy('tank_id');
@@ -235,15 +251,12 @@ class AccountDashboard
     /**
      * Marks of Excellence per tank, so the garage table can show them per row.
      *
+     * @param  array<string, mixed>  $payloads
      * @return array<int, int>
      */
-    private function marksByTank(WotAccount $account): array
+    private function marksByTank(WotAccount $account, array $payloads): array
     {
-        $rows = Cache::remember(
-            "wot:achievements:{$account->account_id}",
-            (int) config('wargaming.cache.tank_stats'),
-            fn () => $this->client->tankAchievements($account->account_id, $account->access_token),
-        );
+        $rows = $payloads['achievements'];
 
         $marks = [];
 

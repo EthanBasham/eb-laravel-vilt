@@ -114,6 +114,18 @@ const number = (value) => (value === null || value === undefined ? '—' : new I
 
 const asDate = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' }) : '—');
 
+const refreshing = ref(false);
+
+// Stats are cached for thirty minutes because a cold fetch costs a couple of
+// seconds; this drops that entry so the next render is live again.
+const refresh = () => {
+    refreshing.value = true;
+    router.post('/wot/refresh', {}, {
+        preserveScroll: true,
+        onFinish: () => (refreshing.value = false),
+    });
+};
+
 const disconnect = () => {
     if (window.confirm('Disconnect this Wargaming account?')) {
         router.delete('/wot/connect');
@@ -139,13 +151,24 @@ const disconnect = () => {
                 <p class="text-xs capitalize text-wot-dim">{{ summary.wn8_band.replace('-', ' ') }}</p>
             </div>
 
-            <button
-                type="button"
-                class="border border-wot-border px-4 py-2 text-xs font-bold uppercase tracking-wider text-wot-dim transition-colors hover:border-wot-bad hover:text-wot-bad"
-                @click="disconnect"
-            >
-                Disconnect
-            </button>
+            <div class="flex gap-2">
+                <button
+                    type="button"
+                    class="border border-wot-border px-4 py-2 text-xs font-bold uppercase tracking-wider text-wot-dim transition-colors hover:border-wot-gold hover:text-wot-gold disabled:opacity-40"
+                    :disabled="refreshing"
+                    @click="refresh"
+                >
+                    {{ refreshing ? 'Refreshing…' : 'Refresh' }}
+                </button>
+
+                <button
+                    type="button"
+                    class="border border-wot-border px-4 py-2 text-xs font-bold uppercase tracking-wider text-wot-dim transition-colors hover:border-wot-bad hover:text-wot-bad"
+                    @click="disconnect"
+                >
+                    Disconnect
+                </button>
+            </div>
         </div>
 
         <p v-if="error" class="mt-6 border-l-2 border-wot-bad bg-wot-panel px-4 py-3 text-sm text-wot-bad" role="alert">
