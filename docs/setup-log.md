@@ -1964,3 +1964,60 @@ itself a candidate, so the case is hard to reach with well-formed data — but i
 costs one pass and the alternative failure is silent double-counting.
 
 Suite: **180 passed, 917 assertions.**
+
+## 2026-09-09 — Actions bumped off the Node 20 runtime
+
+Last night's production deploy logged:
+
+> Node.js 20 is deprecated. The following actions target Node.js 20 but are
+> being forced to run on Node.js 24: actions/cache@v4, actions/checkout@v4,
+> actions/setup-node@v4, webfactory/ssh-agent@v0.9.0.
+
+The runner is already executing them on Node 24 — the warning is notice that the
+compatibility shim goes away. Bumped in both `ci.yml` and `deploy.yml`:
+
+| action | was | now |
+| --- | --- | --- |
+| `actions/checkout` | v4 | v7 |
+| `actions/cache` | v4 | v6 |
+| `actions/setup-node` | v4 | v7 |
+| `webfactory/ssh-agent` | v0.9.0 | v0.10.0 |
+
+`shivammathur/setup-php@v2` is a rolling major that already declares `node24`,
+which is why it stayed out of the warning and stays unpinned here.
+
+The lowest versions that would have silenced the warning are checkout v5, cache
+v5, setup-node v6 and ssh-agent v0.10.0. Going to the current majors instead
+avoids repeating this in a few months, and the intervening breaking changes were
+checked against these two workflows specifically:
+
+- **checkout v7** blocks checking out a fork PR under `pull_request_target` and
+  `workflow_run`. Neither workflow uses those triggers — CI is `push` /
+  `pull_request` / `workflow_dispatch`, deploy is `push` / `workflow_dispatch`.
+- **checkout v6** writes the git credential to a separate file. Nothing here
+  runs git after the checkout; the deploy authenticates with its own SSH key via
+  ssh-agent, not the `GITHUB_TOKEN`.
+- **setup-node v6** narrowed automatic caching to npm only. Both call sites
+  already pass `cache: npm`, so that is exactly what survives.
+- **cache v6** and **setup-node v7** are ESM migrations with no input changes.
+
+checkout v5+ and cache v5+ require runner ≥ 2.327.1, which only matters for
+self-hosted runners; both jobs are `ubuntu-latest`.
+
+Deploy is the workflow that actually proves this — its ssh-agent step is the one
+action here with no CI coverage, so the first push to `main` after this is the
+real check.
+
+## 2026-09-09 — Germany's flag reverts to the CDN icon
+
+Reverses the substitution described in "Germany is not the CDN icon" above.
+The generated Bundesflagge is out; `public/images/nations/germany.png` is once
+again the actual Wargaming asset, pulled fresh from the same CDN path (still
+live at the `6.16.0_bbf399` build hash months later).
+
+The prior entry identified the CDN icon's disc emblem as a swastika and
+excluded it on that basis. The user confirmed in review that it is a
+different, non-Nazi historical variant, and asked not to have content calls
+like this made unilaterally going forward. At 29x18 with heavy fabric-wave
+shading the disc is genuinely hard to read with certainty either way — noted
+here for whoever looks at this file next, not as a re-litigation of the call.
