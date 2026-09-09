@@ -107,12 +107,14 @@ const asDate = (iso) => new Date(iso).toLocaleDateString(undefined, { dateStyle:
 
                 <!-- A real external link: these open the article on
                      worldoftanks.com, which is outside this SPA. -->
+                <!-- The border stays a hover affordance only. Using it for
+                     pinned state too would make a resting card look identical
+                     to a hovered one, so the pin button carries that state. -->
                 <a
                     :href="article.url"
                     target="_blank"
                     rel="noopener noreferrer"
-                    class="flex h-full flex-col border bg-wot-panel transition-colors hover:border-wot-gold"
-                    :class="article.is_pinned ? 'border-wot-gold' : 'border-wot-border'"
+                    class="flex h-full flex-col border border-wot-border bg-wot-panel transition-colors hover:border-wot-gold"
                 >
                     <img
                         v-if="article.image_url"

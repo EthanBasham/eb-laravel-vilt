@@ -1137,3 +1137,14 @@ feedback.
 The flash messages kept elsewhere are the ones where nothing else says what happened:
 connecting an account reports *which* nickname was linked, and the grind actions confirm a
 target that isn't otherwise restated.
+
+### Follow-up: pinned state belongs on the button, not the card
+
+The pinned card originally took a gold border. That border is also the hover affordance, so a
+resting pinned card looked identical to a hovered unpinned one — the same visual saying two
+different things, which makes the hover cue useless precisely where there are pinned articles
+to scan past.
+
+The border is now hover-only, and the pin button alone carries pinned state (gold when pinned,
+plus `aria-pressed`). A general rule worth keeping: don't overload a hover treatment with
+persistent state.
