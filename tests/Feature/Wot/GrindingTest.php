@@ -443,7 +443,14 @@ it('reports full progress when nothing is active', function () {
     );
 });
 
-/** A three-step line already seeded as a target, for the purchase board. */
+/**
+ * A three-tier line with the tier VIII in the garage.
+ *
+ * The purchase board is built from the tech tree rather than from targets, so
+ * the steps here matter to the other tabs, not this one. What this line owns is
+ * decided by what has been played — the tier VIII stands in for "the vehicle
+ * being ground in", which is what its position-zero step used to mean.
+ */
 function purchaseLine(User $user): array
 {
     [$eight, $nine, $ten] = techLine();
@@ -454,6 +461,8 @@ function purchaseLine(User $user): array
         WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => $tank,
             'tier' => $tier, 'position' => $position]);
     }
+
+    played($account, $eight->tank_id);
 
     return [$account, $target, $ten];
 }
@@ -545,9 +554,14 @@ it('drops a line once its last vehicle is bought', function () {
     $this->actingAs($user)->patch(route('wot.grinding.purchase', 100), ['is_purchased' => true]);
 
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
-        ->has('purchase.rows', 0)
+        // The line stays on the board — it is a record of what you own, and it
+        // is the filter's job to hide it, not the server's.
+        ->has('purchase.rows', 1)
         // Buying the top of a line settles it: you cannot research past a
         // vehicle you do not own, so the tiers below were bought too.
+        ->where('purchase.rows.0.cells.8.is_purchased', true)
+        ->where('purchase.rows.0.cells.9.is_purchased', true)
+        ->where('purchase.rows.0.credits_remaining', 0)
         ->where('totals.credits_required', 0),
     );
 });
@@ -571,27 +585,6 @@ it('takes a discounted price over the shop price and gives it back', function ()
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
         ->where('purchase.rows.0.cells.10.price', 6_100_000)
         ->where('purchase.rows.0.cells.10.is_discounted', false),
-    );
-});
-
-/**
- * The sheet stopped at tier X. Tier XI is reached from a tier X's next_tanks
- * without becoming a grind step, so no XP figure moves.
- */
-it('adds the tier XI above a target without touching the research path', function () {
-    $user = User::factory()->create();
-    [$account, $target, $ten] = purchaseLine($user);
-
-    $eleven = WotVehicle::factory()->create(['tank_id' => 110, 'name' => 'Top XI', 'tier' => 11,
-        'price_credit' => 7_400_000, 'next_tanks' => null]);
-    $ten->update(['next_tanks' => [$eleven->tank_id => 325_000]]);
-
-    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
-        ->where('purchase.tiers', [8, 9, 10, 11])
-        ->where('purchase.rows.0.cells.11.name', 'Top XI')
-        ->where('purchase.rows.0.credits_remaining', 16_900_000)
-        // The grind path is untouched: still three steps, same XP.
-        ->where('targets.0.steps', fn ($steps) => count($steps) === 3),
     );
 });
 
@@ -678,25 +671,29 @@ it('fills in the tiers a line has already researched past', function () {
             'tier' => $tier, 'position' => $position]);
     }
 
+    played($account, 70);
+
     // Same nation and tier, so rows come back in name order — and the name a
     // row sorts by is its tier X's short form: Lng X, Shrt X.
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
-        // Tier VII is owned on both lines, so it is settled and starts filtered
-        // off; tier VIII is still owed on the strength of the long line alone.
+        // Tier VII is in the garage, so it is settled and starts filtered off;
+        // tier VIII is still owed and holds its column open.
         ->where('purchase.tiers', [7, 8, 9, 10])
         ->where('purchase.bought_tiers', [7])
         ->where('purchase.rows.0.name', 'Lng X')
-        ->where('purchase.rows.0.cells.8.is_purchased', false)
         ->where('purchase.rows.1.name', 'Shrt X')
-        // Never a step on this line; filled from the tree and read as bought.
+        // Both lines run through the same tier VIII, and ownership is a fact
+        // about the tank rather than about the line, so they agree on it.
+        ->where('purchase.rows.0.cells.8.tank_id', 80)
         ->where('purchase.rows.1.cells.8.tank_id', 80)
-        ->where('purchase.rows.1.cells.8.is_purchased', true)
-        // The two lines genuinely share their lower tiers, so the first row on
-        // screen keeps them and this one carries them read-only.
+        ->where('purchase.rows.0.cells.8.is_purchased', false)
+        ->where('purchase.rows.1.cells.8.is_purchased', false)
+        // The first row on screen keeps it; the other carries it read-only.
         ->where('purchase.rows.0.cells.8.is_shared', false)
         ->where('purchase.rows.1.cells.8.is_shared', true)
         ->where('purchase.rows.1.cells.8.shared_with', 'Lng X')
-        // Filled-in tiers are already paid for and add nothing to the bill.
+        // Both lines branch off the same tier IX as well, so this row owes only
+        // its own tier X — everything below is on the first line's bill.
         ->where('purchase.rows.1.credits_remaining', 6_100_000),
     );
 });
@@ -710,47 +707,26 @@ function played(WotAccount $account, int $tankId): void
     ]);
 }
 
-it('lists a buyable tank that has no tracked line', function () {
-    [$eight, $nine, $ten] = techLine();
-    $user = User::factory()->create();
-    $account = WotAccount::factory()->for($user)->create();
-    played($account, $nine->tank_id);
-
-    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
-        ->has('purchase.rows', 1)
-        ->where('purchase.rows.0.name', 'Tgt X')
-        // Keyed by vehicle, not by target — there is no target.
-        ->where('purchase.rows.0.key', 'v100')
-        // The tiers below it were researched through, so they read as bought
-        // and start filtered off — but they are still columns.
-        ->where('purchase.tiers', [8, 9, 10])
-        ->where('purchase.bought_tiers', [8, 9])
-        ->where('purchase.rows.0.cells.9.is_purchased', true)
-        ->where('purchase.rows.0.cells.10.is_purchased', false)
-        ->where('purchase.rows.0.credits_remaining', 6_100_000),
-    );
-});
-
 /**
- * Rows arrive here from two directions and used to be named after whichever
- * vehicle they were entered at, so the same branch could appear as its IX in
- * one place and its X in another. This one is entered at the IX — that is what
- * is researchable, and what keys the row — but a branch is known by its tier X.
+ * A line is known by its tier X in game and in every community tool, so that is
+ * the name the row carries — including when the line runs on to a tier XI and
+ * the row is headed by that instead.
  */
-it('names a purchase row after its tier X, not the tier it was entered at', function () {
+it('names a purchase row after its tier X, not the vehicle that heads it', function () {
     [$eight, $nine, $ten] = techLine();
     $user = User::factory()->create();
-    $account = WotAccount::factory()->for($user)->create();
-    played($account, $eight->tank_id);
+    WotAccount::factory()->for($user)->create();
+
+    WotVehicle::factory()->create(['tank_id' => 110, 'name' => 'Top Eleven', 'short_name' => 'Top XI',
+        'tier' => 11, 'price_credit' => 10_000_000, 'next_tanks' => null]);
+    $ten->update(['next_tanks' => [110 => 300_000]]);
 
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
         ->has('purchase.rows', 1)
-        // Keyed and topped by the IX, which is the vehicle actually buyable.
-        ->where('purchase.rows.0.key', 'v90')
-        ->where('purchase.rows.0.cells.9.tank_id', 90)
-        // The X is only present as the successor above it, and still names it —
-        // by its short form, which is deliberately not its long one here.
-        ->where('purchase.rows.0.cells.10.tank_id', 100)
+        // Headed by the XI, which is where the line now ends...
+        ->where('purchase.rows.0.key', 'l110')
+        ->where('purchase.rows.0.cells.11.tank_id', 110)
+        // ...and still named for its tier X, by the short form.
         ->where('purchase.rows.0.name', 'Tgt X'),
     );
 });
@@ -789,6 +765,10 @@ function branchedLines(User $user): array
                 'tier' => (int) floor($tank / 10), 'position' => $position]);
         }
     }
+
+    // Both lines start from a tier VII already in the garage, so the shared
+    // tier VIII above it is the first thing either of them still has to buy.
+    played($account, 70);
 
     return [$account];
 }
@@ -863,44 +843,31 @@ it('claims a shared vehicle for the row that appears first', function () {
 });
 
 /**
- * Bought-out lines leave the board before anything is claimed. If one claimed a
- * vehicle on the way out, the surviving row would show it read-only, pointing
- * at a line that is not there — and nobody would be paying for it.
+ * A settled line still shows every tier it shares with a line that is not
+ * settled — and it owns none of them. Ownership goes to a row that still has to
+ * pay: if the settled line took the shared VIII by sorting first, neither row
+ * would carry its price and the money would drop off the board.
  */
-it('never lets a bought-out line claim a shared vehicle', function () {
+it('never lets an owned line claim a shared vehicle from one that still owes', function () {
     $user = User::factory()->create();
     branchedLines($user);
 
     $this->actingAs($user)->patch(route('wot.grinding.purchase', 100), ['is_purchased' => true]);
 
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
-        ->has('purchase.rows', 1)
-        ->where('purchase.rows.0.name', 'B X')
-        // Line A settled and left; B now owns the shared VIII and pays for it.
-        ->where('purchase.rows.0.cells.8.is_shared', false)
-        ->where('purchase.rows.0.credits_remaining', 11_900_000)
+        // Both lines are on the board now; line A is simply settled.
+        ->has('purchase.rows', 2)
+        ->where('purchase.rows.0.name', 'A X')
+        ->where('purchase.rows.0.credits_remaining', 0)
+        // B still owes the shared VII and VIII, so B holds them.
+        ->where('purchase.rows.1.name', 'B X')
+        ->where('purchase.rows.1.cells.8.is_shared', false)
+        ->where('purchase.rows.1.credits_remaining', 11_900_000)
+        // A carries them read-only, pointing at the row that pays.
+        ->where('purchase.rows.0.cells.8.is_shared', true)
+        ->where('purchase.rows.0.cells.8.shared_with', 'B X')
         ->where('totals.credits_required', 11_900_000),
     );
-});
-
-it('leaves out a tank whose predecessor has never been played', function () {
-    techLine();
-    $user = User::factory()->create();
-    WotAccount::factory()->for($user)->create();
-
-    $this->actingAs($user)->get(route('wot.grinding'))
-        ->assertInertia(fn ($page) => $page->has('purchase.rows', 0));
-});
-
-it('leaves out a tank already in the garage', function () {
-    [$eight, $nine, $ten] = techLine();
-    $user = User::factory()->create();
-    $account = WotAccount::factory()->for($user)->create();
-    played($account, $nine->tank_id);
-    played($account, $ten->tank_id);
-
-    $this->actingAs($user)->get(route('wot.grinding'))
-        ->assertInertia(fn ($page) => $page->has('purchase.rows', 0));
 });
 
 it('leaves out premiums, which sit outside the research tree', function () {
@@ -919,80 +886,117 @@ it('leaves out premiums, which sit outside the research tree', function () {
     );
 });
 
-it('does not list a tracked target twice', function () {
-    $user = User::factory()->create();
-    [$account] = purchaseLine($user);
-    played($account, 90);
-
-    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
-        ->has('purchase.rows', 1)
-        // The tracked line wins: it carries the steps, so it keeps its key.
-        ->where('purchase.rows.0.key', fn ($key) => str_starts_with($key, 't')),
-    );
-});
-
-it('honours the tier floor for untracked buyables', function () {
+/**
+ * The floor decides what counts as a line, which matters because the tree is
+ * littered with low-tier vehicles that unlock nothing and are branch tops only
+ * in the technical sense.
+ */
+it('honours the tier floor when deciding what is a line', function () {
     config()->set('wargaming.purchase_min_tier', 11);
 
-    [$eight, $nine, $ten] = techLine();
+    techLine();
     $user = User::factory()->create();
-    $account = WotAccount::factory()->for($user)->create();
-    played($account, $nine->tank_id);
+    WotAccount::factory()->for($user)->create();
 
     $this->actingAs($user)->get(route('wot.grinding'))
         ->assertInertia(fn ($page) => $page->has('purchase.rows', 0));
 });
 
-/** A tracked line is shown in full even when it starts below the floor. */
-it('shows a tracked line that starts below the untracked floor', function () {
-    config()->set('wargaming.purchase_min_tier', 10);
-
+/**
+ * The board is the tech tree, not a projection of what you are grinding. Every
+ * line gets a row whether you have tracked it, started it, or never touched it
+ * — reducing that to what you care about is the filters' job.
+ */
+it('gives every line in the tree a row, tracked or not', function () {
+    techLine();
     $user = User::factory()->create();
-    purchaseLine($user);
+    WotAccount::factory()->for($user)->create();
+
+    // A second, unrelated line nobody has tracked or played.
+    WotVehicle::factory()->create(['tank_id' => 200, 'short_name' => 'Other X', 'tier' => 10,
+        'price_credit' => 6_100_000, 'next_tanks' => null]);
+    WotVehicle::factory()->create(['tank_id' => 190, 'short_name' => 'Other IX', 'tier' => 9,
+        'price_credit' => 3_400_000, 'next_tanks' => [200 => 225_000]]);
 
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
-        ->has('purchase.rows', 1)
-        ->where('purchase.rows.0.cells.8.tank_id', 80)
-        ->where('purchase.rows.0.credits_remaining', 9_500_000),
+        ->has('purchase.rows', 2)
+        // Nothing played, so nothing is owned and the full tree is the bill.
+        ->where('totals.credits_required', 21_400_000),
     );
 });
 
 /**
- * A tier IX sitting mid-path on a tracked line is already on the board. It was
- * also researchable-now in its own right, and so appeared a second time as its
- * own row -- with its price counted twice in the total.
+ * Collector's vehicles are bought outright rather than researched, so nothing
+ * in the tree unlocks them and they lead nowhere: the 113, both AMX 30s, the
+ * Jagdpanther II and the T-62A all sit with neither a predecessor nor a
+ * successor. That makes them a one-cell row with no path behind it, which is
+ * not a line and not something to plan a grind around.
+ *
+ * Detected structurally because the encyclopedia publishes no flag for it —
+ * is_premium is false for every one of them.
  */
-it('does not give a mid-path vehicle a row of its own', function () {
+it('leaves out a vehicle nothing researches into', function () {
+    techLine();
     $user = User::factory()->create();
-    [$account] = purchaseLine($user);
+    WotAccount::factory()->for($user)->create();
 
-    // The line's tier VIII is in the garage, which makes its tier IX a
-    // researchable-now candidate as well as a step on the tracked line.
-    played($account, 80);
+    // Reachable by nothing, leading nowhere — and not flagged premium.
+    WotVehicle::factory()->create(['tank_id' => 300, 'short_name' => 'Collector X', 'tier' => 10,
+        'is_premium' => false, 'price_credit' => 6_100_000, 'next_tanks' => null]);
 
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        // Only the real line; the orphan is not one.
         ->has('purchase.rows', 1)
-        ->where('purchase.rows.0.key', fn ($key) => str_starts_with($key, 't'))
-        // Present as a cell, and counted once.
-        ->where('purchase.rows.0.cells.9.tank_id', 90)
-        ->where('totals.credits_required', 9_500_000),
+        ->where('purchase.rows.0.name', 'Tgt X')
+        ->where('totals.credits_required', 11_900_000),
     );
 });
 
-it('does not give a tier XI successor a row of its own', function () {
+/**
+ * A line you have finished still belongs on the board — it is a record of the
+ * tree, and hiding it is the Owned filter's decision rather than the server's.
+ */
+it('shows a line you own outright, owing nothing', function () {
+    [$eight, $nine, $ten] = techLine();
     $user = User::factory()->create();
-    [$account, $target, $ten] = purchaseLine($user);
-
-    $eleven = WotVehicle::factory()->create(['tank_id' => 110, 'name' => 'Top XI', 'tier' => 11,
-        'price_credit' => 7_400_000, 'next_tanks' => null]);
-    $ten->update(['next_tanks' => [$eleven->tank_id => 325_000]]);
-
-    // Owning the tier X would make the tier XI researchable now; it is already
-    // the last cell of the tracked line, so it must not also become a row.
+    $account = WotAccount::factory()->for($user)->create();
     played($account, $ten->tank_id);
 
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
         ->has('purchase.rows', 1)
-        ->where('purchase.rows.0.cells.11.tank_id', 110),
+        // Owning the top means the tiers under it were owned to reach it.
+        ->where('purchase.rows.0.cells.8.is_purchased', true)
+        ->where('purchase.rows.0.cells.9.is_purchased', true)
+        ->where('purchase.rows.0.cells.10.is_purchased', true)
+        ->where('purchase.rows.0.credits_remaining', 0)
+        ->where('purchase.bought_tiers', [8, 9, 10])
+        ->where('totals.credits_required', 0),
+    );
+});
+
+/**
+ * Targets drive the other tabs. They used to decide what this one showed too,
+ * which is why a line you owned but never tracked had no row at all.
+ */
+it('builds the purchase board without reference to grind targets', function () {
+    [$eight, $nine, $ten] = techLine();
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->has('purchase.rows', 1)
+        ->where('purchase.rows.0.credits_remaining', 11_900_000),
+    );
+
+    // Tracking it changes the other tabs, and must change nothing here.
+    $target = WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => $ten->tank_id]);
+    foreach ([[80, 8, 0], [90, 9, 1], [100, 10, 2]] as [$tank, $tier, $position]) {
+        WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => $tank,
+            'tier' => $tier, 'position' => $position]);
+    }
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->has('purchase.rows', 1)
+        ->where('purchase.rows.0.credits_remaining', 11_900_000),
     );
 });

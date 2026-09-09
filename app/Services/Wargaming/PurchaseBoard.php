@@ -4,8 +4,6 @@ namespace App\Services\Wargaming;
 
 use Illuminate\Support\Collection;
 use App\Models\WotAccount;
-use App\Models\WotGrindStep;
-use App\Models\WotGrindTarget;
 use App\Models\WotTankPurchase;
 use App\Models\WotVehicle;
 
@@ -52,10 +50,11 @@ class PurchaseBoard
     public function __construct(private readonly TechTree $tree) {}
 
     /**
-     * @param  Collection<int, WotGrindTarget>  $targets
+     * The whole tech tree as one row per line.
+     *
      * @return array<string, mixed>
      */
-    public function for(WotAccount $account, Collection $targets): array
+    public function for(WotAccount $account): array
     {
         $purchases = $account->tankPurchases()->get()->keyBy('tank_id');
 
@@ -64,30 +63,13 @@ class PurchaseBoard
         // by construction.
         $played = $account->vehicleSnapshots()->distinct()->pluck('tank_id')->flip();
 
-        // Untracked buyables stop here; below it a vehicle is pocket change
-        // rather than something a budget is planned around.
+        // Below this a line is pocket change rather than something a budget is
+        // planned around, and the tree's low tiers are littered with dead ends
+        // that unlock nothing and are not lines in any useful sense.
         $minTier = (int) config('wargaming.purchase_min_tier');
 
-        $tracked = $targets
-            ->map(fn (WotGrindTarget $t): array => $this->targetRow($t, $purchases, $played))
-            ->values();
-
-        // Every vehicle a tracked line already shows, at any tier — not just the
-        // targets themselves. A tier IX sitting mid-path is on the board once
-        // already; giving it a second row of its own is the same tank twice.
-        $covered = $tracked
-            ->flatMap(fn (array $r): array => array_column($r['cells'], 'tank_id'))
-            ->flip();
-
         $rows = $this->claimShared(
-            $tracked
-                ->concat($this->candidateRows($covered, $minTier, $purchases, $played))
-                // A line you have finished buying is not a shopping list. This
-                // goes before anything is claimed, so a row nobody can see
-                // never takes a vehicle away from a row they can — the claim
-                // would name a row that is not on the board, and nothing would
-                // pay for the tank.
-                ->reject(fn (array $row): bool => $row['is_bought_out'])
+            $this->lineRows($minTier, $purchases, $played)
                 // Same tech-tree nation order as every other vehicle list here.
                 // Sorted before claiming, so the row that owns a shared vehicle
                 // is the one you meet first reading down the board.
@@ -114,82 +96,55 @@ class PurchaseBoard
     }
 
     /**
-     * A tracked line: its steps, plus the tiers it was truncated above.
+     * One row per line in the tech tree.
      *
-     * @param  Collection<int, WotTankPurchase>  $purchases
-     * @param  Collection<int, int>  $played
-     * @return array<string, mixed>
-     */
-    private function targetRow(
-        WotGrindTarget $target,
-        Collection $purchases,
-        Collection $played,
-    ): array {
-        $steps = $target->steps->sortBy('position')->values();
-        $first = $steps->first();
-
-        // Everything under the vehicle being played was researched through to
-        // get there, so it is owned whether or not it is still in the garage.
-        $below = $first ? $this->tree->ancestorsOf($first->tank_id, self::FLOOR_TIER) : [];
-
-        $cells = collect($below)
-            ->map(fn (WotVehicle $v): ?array => $this->cell($v, $purchases->get($v->tank_id), true))
-            ->concat($steps->map(fn (WotGrindStep $s, int $i): ?array => $this->cell(
-                $this->tree->vehicles()->get($s->tank_id),
-                $purchases->get($s->tank_id),
-                // Position zero is the vehicle the line is being ground in; a
-                // path is truncated to start where the player already is.
-                $played->has($s->tank_id) || $i === 0,
-            )));
-
-        return $this->row("t{$target->id}", $target->tank_id, $cells, $purchases, $played);
-    }
-
-    /**
-     * Vehicles one research from something played, with no tracked line.
+     * A line is a branch top — a vehicle nothing else researches from — with
+     * its whole lineage behind it. That is the board: the tree itself, not a
+     * projection of what you happen to be grinding. Which of it you look at is
+     * the filters' job.
      *
-     * @param  Collection<int, int>  $covered  tank ids a tracked line already shows
+     * The tier floor keeps out the low-tier dead ends. 159 vehicles unlock
+     * nothing, but 86 of them are tier II–VII oddities that are not lines in
+     * any useful sense; the rest are the tier X and XI the tree actually ends
+     * at.
+     *
+     * Ownership is read per vehicle rather than assumed by position: a cell is
+     * owned if it has been played. Everything below something owned is filled
+     * in by the rule in row(), which is what makes a line you finished read as
+     * finished and a line you have never touched cost full price.
+     *
      * @param  Collection<int, WotTankPurchase>  $purchases
      * @param  Collection<int, int>  $played
      * @return Collection<int, array<string, mixed>>
      */
-    private function candidateRows(
-        Collection $covered,
-        int $minTier,
-        Collection $purchases,
-        Collection $played,
-    ): Collection {
-        $pool = $this->tree->vehicles()
+    private function lineRows(int $minTier, Collection $purchases, Collection $played): Collection
+    {
+        return $this->tree->vehicles()
             ->reject(fn (WotVehicle $v): bool => $v->is_premium
                 || $v->tier < $minTier
                 || $v->tier > self::TOP_TIER
-                || $played->has($v->tank_id)
-                || $covered->has($v->tank_id))
-            // Researchable now: whatever unlocks it is already in the garage.
-            ->filter(function (WotVehicle $v) use ($played): bool {
-                $predecessor = $this->tree->predecessorOf($v->tank_id);
-
-                return $predecessor !== null && $played->has($predecessor->tank_id);
-            });
-
-        // Two candidates on one branch would each render the other's line. Only
-        // the topmost keeps a row; the rest become cells in it. Safe from
-        // cycles because a lineage strictly descends in tier.
-        $subsumed = $pool
-            ->flatMap(fn (WotVehicle $v): array => array_map(
-                fn (WotVehicle $a): int => $a->tank_id,
-                $this->tree->ancestorsOf($v->tank_id, self::FLOOR_TIER),
-            ))
-            ->flip();
-
-        return $pool
-            ->reject(fn (WotVehicle $v): bool => $subsumed->has($v->tank_id))
+                || $this->successorOf($v) !== null
+                // Nothing researches into a collector's vehicle, so it has no
+                // line to head — the 113, both AMX 30s, the Jagdpanther II and
+                // the T-62A all sit in the tree with neither a predecessor nor
+                // a successor. They are bought outright rather than researched,
+                // which is a different question from what to grind towards, and
+                // as rows they were a single cell with no path behind them.
+                //
+                // Checked on the predecessor rather than on a flag because the
+                // encyclopedia does not publish one: is_premium is false for
+                // all of them, and is_gift was dropped as unused.
+                || $this->tree->predecessorOf($v->tank_id) === null)
             ->map(function (WotVehicle $v) use ($purchases, $played): array {
                 $cells = collect($this->tree->ancestorsOf($v->tank_id, self::FLOOR_TIER))
-                    ->map(fn (WotVehicle $a): ?array => $this->cell($a, $purchases->get($a->tank_id), true))
-                    ->push($this->cell($v, $purchases->get($v->tank_id), false));
+                    ->push($v)
+                    ->map(fn (WotVehicle $c): ?array => $this->cell(
+                        $c,
+                        $purchases->get($c->tank_id),
+                        $played->has($c->tank_id),
+                    ));
 
-                return $this->row("v{$v->tank_id}", $v->tank_id, $cells, $purchases, $played);
+                return $this->row("l{$v->tank_id}", $v->tank_id, $cells, $purchases, $played);
             })
             ->values();
     }
@@ -209,14 +164,37 @@ class PurchaseBoard
     ): array {
         $top = $this->tree->vehicles()->get($topTankId);
 
-        // The vehicle above the line's top — the tier XI the spreadsheet never
-        // had a column for. Resolved here rather than by extending the research
-        // path, so no XP total shifts underneath the other views.
-        if ($next = $this->successorOf($top)) {
-            $cells = $cells->push($this->cell($next, $purchases->get($next->tank_id), $played->has($next->tank_id)));
-        }
-
         $cells = $cells->filter()->values();
+
+        /*
+         * Anything below a vehicle you own was researched through to reach it,
+         * so it was owned too — the same reason the backfilled ancestors above
+         * default to owned.
+         *
+         * It needs saying at the row level because "played" means in the garage
+         * with battles: sell a tank after moving up the line and every trace of
+         * having owned it goes with it. That is what left a researched-past
+         * tier IX reading as still to buy under a tier X you own.
+         *
+         * An explicit purchase record still wins, so un-ticking one to say you
+         * sold it and want it back keeps working. Only cells with nothing
+         * stored about them are inferred.
+         */
+        $owned = false;
+        $cells = $cells
+            ->reverse()
+            ->map(function (array $cell) use (&$owned, $purchases): array {
+                if ($owned && ! $purchases->has($cell['tank_id'])) {
+                    $cell['is_purchased'] = true;
+                    $cell['is_unlocked'] = true;
+                }
+
+                $owned = $owned || $cell['is_purchased'];
+
+                return $cell;
+            })
+            ->reverse()
+            ->values();
 
         /*
          * Rows reach this board from two directions — a tracked target, whose
@@ -248,7 +226,6 @@ class PurchaseBoard
             // credits_remaining is not set here: it depends on which cells this
             // row actually pays for, which is not known until rows are sorted
             // and shared vehicles claimed. claimShared() adds it.
-            'is_bought_out' => (bool) ($cells->last()['is_purchased'] ?? false),
         ];
     }
 
@@ -367,16 +344,41 @@ class PurchaseBoard
     {
         $owner = [];
 
-        return $rows->map(function (array $row) use (&$owner): array {
-            foreach ($row['cells'] as $tier => $cell) {
-                if (isset($owner[$cell['tank_id']])) {
-                    $row['cells'][$tier]['is_shared'] = true;
-                    $row['cells'][$tier]['shared_with'] = $owner[$cell['tank_id']];
-
-                    continue;
+        /*
+         * Two passes, because a vehicle has to be owned by a row that actually
+         * pays for it.
+         *
+         * A fully-owned line shows the same low tiers as a line still working
+         * up to them, and it sorts wherever its name puts it. If it claimed one
+         * of those cells by being first, it would contribute nothing (it owns
+         * the tank) while the row that still owes would carry it read-only and
+         * contribute nothing either — and the price would drop off the board
+         * silently. So rows that still owe a vehicle get first refusal on it.
+         */
+        foreach ($rows as $row) {
+            foreach ($row['cells'] as $cell) {
+                if (! $cell['is_purchased'] && ! isset($owner[$cell['tank_id']])) {
+                    $owner[$cell['tank_id']] = ['key' => $row['key'], 'name' => $row['name']];
                 }
+            }
+        }
 
-                $owner[$cell['tank_id']] = $row['name'];
+        // Whatever nobody owes — every copy already bought — falls to the first
+        // row that shows it, so the duplicates still read as duplicates.
+        foreach ($rows as $row) {
+            foreach ($row['cells'] as $cell) {
+                if (! isset($owner[$cell['tank_id']])) {
+                    $owner[$cell['tank_id']] = ['key' => $row['key'], 'name' => $row['name']];
+                }
+            }
+        }
+
+        return $rows->map(function (array $row) use ($owner): array {
+            foreach ($row['cells'] as $tier => $cell) {
+                if ($owner[$cell['tank_id']]['key'] !== $row['key']) {
+                    $row['cells'][$tier]['is_shared'] = true;
+                    $row['cells'][$tier]['shared_with'] = $owner[$cell['tank_id']]['name'];
+                }
             }
 
             // Owned vehicles are not an outlay, and neither is one another row

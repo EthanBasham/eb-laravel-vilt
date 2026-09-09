@@ -48,7 +48,7 @@ class GrindBoard
 
         // Credits are the purchase board's business alone, so the headline card
         // and the Tanks to Purchase tab can never quote different figures.
-        $purchase = $this->purchases->for($account, $targets);
+        $purchase = $this->purchases->for($account);
 
         return [
             'active' => $this->active($activeSteps, $targets, $vehicles),
