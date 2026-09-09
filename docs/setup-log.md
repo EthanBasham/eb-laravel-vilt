@@ -957,3 +957,41 @@ an `ORDER BY`), so a live API probe reported an expired token that was in fact f
 
 Removed, and the real account verified intact. Factories belong in tests; tinker against a real
 database should be read-only.
+
+---
+
+## 2026-09-09 — Scheduler running, snapshot history accruing
+
+The grind rates and every period column depend on `wot:snapshot` actually running. Installed
+the standard Laravel cron entry for the `ebasham` user:
+
+```cron
+* * * * * cd /home/ebasham/projects/eb-laravel-vilt && /usr/bin/php8.3 artisan schedule:run >> /dev/null 2>> .../storage/logs/scheduler.log
+```
+
+**Cron rather than `schedule:work`.** The foreground worker dies with its terminal, and this
+history is the one thing in the project that cannot be recreated after the fact — a day the
+scheduler wasn't running is a permanent hole in the record. cron survives terminal closes and
+WSL restarts (`cron.service` is `enabled`, as is `postgresql`).
+
+**Absolute PHP path and an explicit `cd`.** cron runs with a minimal environment and no
+project working directory. Verified the exact command under `env -i` — a stripped environment
+that mimics cron far better than an interactive shell does — before trusting it.
+
+**stdout to `/dev/null`, stderr to a log.** `schedule:run` prints "No scheduled commands are
+ready to run." every minute; logging that would be roughly 26 MB a year of noise. Errors
+(Postgres down, a rejected token) still leave a trace instead of vanishing, which matters
+because a silently broken scheduler looks identical to a quiet one until someone opens the
+dashboard weeks later and finds empty columns.
+
+Confirmed cron actually executed it — `journalctl -u cron` shows the command running as
+`ebasham`, and `scheduler.log` is 0 bytes.
+
+### What happens when the token expires
+
+The access token has 13 days left. When it lapses, the snapshot run throws, `forgetToken()`
+clears the credential, and the *next* run succeeds without one — `account/info` and
+`tanks/stats` both work unauthenticated, they simply omit the `private` block. So the history
+keeps accruing through an expired token; only credits/gold/free-XP go missing until the
+account is reconnected. That degradation was not designed deliberately, but it is the right
+behaviour and is worth keeping.
