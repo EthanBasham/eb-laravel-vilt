@@ -137,9 +137,9 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
                     <tbody class="divide-y divide-wot-border-soft">
                         <tr v-for="row in active" :key="row.id" class="hover:bg-wot-sunken">
                             <td class="px-4 py-2">
+                                <NationFlag :nation="row.nation" class="me-2" />
                                 <span class="text-wot-heading">{{ row.name }}</span>
                                 <span class="ms-2 text-xs text-wot-dim">T{{ row.tier }}</span>
-                                <NationFlag :nation="row.nation" class="ms-1.5" />
                             </td>
                             <td class="px-4 py-2 text-wot-muted">{{ row.target_name }}</td>
                             <!-- The one number no API can supply. -->
@@ -200,9 +200,9 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
                             <tr class="cursor-pointer hover:bg-wot-sunken" :class="t.is_complete ? 'opacity-50' : ''" @click="toggle(t.id)">
                                 <td class="px-4 py-2">
                                     <span aria-hidden="true" class="me-1 inline-block w-3 text-wot-dim">{{ expanded.includes(t.id) ? '▾' : '▸' }}</span>
+                                    <NationFlag :nation="t.nation" class="me-2" />
                                     <span class="text-wot-heading">{{ t.name }}</span>
                                     <span class="ms-2 text-xs text-wot-dim">T{{ t.tier }}</span>
-                                    <NationFlag :nation="t.nation" class="ms-1.5" />
                                 </td>
 
                                 <template v-if="view === 'xp'">

@@ -348,12 +348,12 @@ const disconnect = () => {
                     <tbody class="divide-y divide-wot-border-soft">
                         <tr v-for="vehicle in sorted" :key="vehicle.tank_id" class="transition-colors hover:bg-wot-sunken">
                             <td class="px-4 py-2">
+                                <NationFlag :nation="vehicle.nation" class="me-2" />
                                 <span class="font-medium text-wot-heading">{{ vehicle.name }}</span>
                                 <span v-if="vehicle.is_premium" class="ms-2 border border-wot-gold px-1.5 py-0.5 text-xs font-bold uppercase text-wot-gold">
                                     Premium
                                 </span>
-                                <NationFlag :nation="vehicle.nation" class="ms-2" />
-                                <span class="ms-1.5 text-xs text-wot-dim">{{ vehicle.type }}</span>
+                                <span class="ms-2 text-xs text-wot-dim">{{ vehicle.type }}</span>
                             </td>
                             <td class="px-4 py-2 text-center tabular-nums text-wot-muted">{{ vehicle.tier }}</td>
                             <td class="px-4 py-2 text-right tabular-nums text-wot-muted">{{ number(vehicle.battles) }}</td>

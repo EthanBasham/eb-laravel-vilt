@@ -1737,6 +1737,9 @@ nothing prohibited, so those ship as-is.
 - `NationFlag.vue` renders the `<img>`, falling back to the slug as text for any
   nation a future patch adds before its flag exists.
 - Replaced the slug in Grinding's Active and target tables and the dashboard
-  garage row. The dashboard's nation `<select>` can't hold an image, so it shows
+  garage row. The flag leads the name column rather than trailing it: at a fixed
+  21px it forms a scannable left gutter, which a trailing flag can't do since it
+  floats to wherever each name happens to end. In the expandable target rows it
+  sits after the caret, which stays leftmost as the row's own control. The dashboard's nation `<select>` can't hold an image, so it shows
   display names instead — and now orders its options by the same tech-tree
   order rather than alphabetically by slug.
