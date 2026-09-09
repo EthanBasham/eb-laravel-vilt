@@ -380,3 +380,64 @@ it('sorts an unknown nation last rather than first', function () {
         ->and(WotVehicle::rankOf('atlantis'))->toBe(11)
         ->and(WotVehicle::rankOf(null))->toBe(11);
 });
+
+it('totals the active grinding columns', function () {
+    [$eight, $nine, $ten] = techLine();
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create();
+    $target = WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => $ten->tank_id]);
+
+    WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => 80, 'tier' => 8,
+        'position' => 0, 'research_xp' => 149_400, 'module_xp_remaining' => 30_000,
+        'banked_xp' => 40_000, 'free_xp_planned' => 10_000, 'is_active' => true]);
+    WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => 90, 'tier' => 9,
+        'position' => 1, 'research_xp' => 225_000, 'module_xp_remaining' => 20_000,
+        'banked_xp' => 5_000, 'is_active' => true]);
+    // Not active — must stay out of every column.
+    WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => 100, 'tier' => 10,
+        'position' => 2, 'banked_xp' => 999_999, 'module_xp_remaining' => 999_999]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('totals.active.steps', 2)
+        ->where('totals.active.banked_xp', 45_000)
+        ->where('totals.active.module_xp_remaining', 50_000)
+        ->where('totals.active.research_cost', 374_400)
+        ->where('totals.active.xp_required', 424_400)
+        // (149,400 + 30,000 - 50,000) + (225,000 + 20,000 - 5,000)
+        ->where('totals.active.xp_remaining', 369_400)
+        // 55,000 covered of 424,400 required.
+        ->where('totals.active.progress', 13),
+    );
+});
+
+/**
+ * Averaging the per-row percentages would let a tiny grind pull as hard on the
+ * figure as a tier 10 one. Here row one is 100% and row two 0%; an average says
+ * 50%, the weighted figure says 1%.
+ */
+it('weights total progress by XP rather than averaging the rows', function () {
+    [$eight, $nine, $ten] = techLine();
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create();
+    $target = WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => $ten->tank_id]);
+
+    WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => 80, 'tier' => 8,
+        'position' => 0, 'research_xp' => 1_000, 'banked_xp' => 1_000, 'is_active' => true]);
+    WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => 90, 'tier' => 9,
+        'position' => 1, 'research_xp' => 99_000, 'banked_xp' => 0, 'is_active' => true]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('totals.active.progress', 1),
+    );
+});
+
+it('reports full progress when nothing is active', function () {
+    $user = User::factory()->create();
+    WotAccount::factory()->for($user)->create();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('totals.active.steps', 0)
+        ->where('totals.active.xp_required', 0)
+        ->where('totals.active.progress', 100),
+    );
+});

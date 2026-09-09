@@ -1743,3 +1743,29 @@ nothing prohibited, so those ship as-is.
   sits after the caret, which stays leftmost as the row's own control. The dashboard's nation `<select>` can't hold an image, so it shows
   display names instead — and now orders its options by the same tech-tree
   order rather than alphabetically by slug.
+
+## Total row on Active Grinding
+
+The Active Grinding table now carries a `<tfoot>` summing XP banked, To max, To
+next tank and Remaining, plus an aggregate progress bar. Hidden when there is
+one row or none — a total identical to the only row above it is noise.
+
+Two decisions worth recording:
+
+**Nested under `totals`, not a sibling prop.** Three places issue partial
+reloads on this page (`EditableNumber`, `ModulePicker`, and the active checkbox
+in the target rows), all with `only: ['active', 'targets', 'totals']`. A new
+top-level `active_totals` key would have gone stale after every edit until
+someone remembered to add it to all three lists. As `totals.active` it refreshes
+with what already ships.
+
+**Progress is weighted, not averaged.** Recomputed from the summed required and
+covered XP rather than averaging the per-row percentages, so a finished 4,000 XP
+module grind can't pull the figure as hard as a 400,000 XP tier 10. Test covers
+the divergent case: rows at 100% and 0% read 1%, not 50%.
+
+`GrindBoard::active()` had the filter-and-sort inline; that moved to
+`activeSteps()` so the table and its total row sum the same collection by
+construction rather than by two matching predicates.
+
+Suite: **161 passed, 680 assertions.**

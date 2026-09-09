@@ -42,14 +42,16 @@ class GrindBoard
 
         $settings = WotGrindSetting::firstOrNew(['wot_account_id' => $account->id]);
 
+        $activeSteps = $this->activeSteps($targets, $vehicles);
+
         return [
-            'active' => $this->active($targets, $vehicles),
+            'active' => $this->active($activeSteps, $targets, $vehicles),
             'targets' => $targets->map(fn (WotGrindTarget $t): array => $this->target($t, $vehicles))->values()->all(),
             'settings' => [
                 'credits_available' => (int) $settings->credits_available,
                 'garage_slots_vacant' => (int) $settings->garage_slots_vacant,
             ],
-            'totals' => $this->totals($targets),
+            'totals' => $this->totals($targets, $activeSteps),
         ];
     }
 
@@ -63,17 +65,9 @@ class GrindBoard
      * @param  Collection<int, WotVehicle>  $vehicles
      * @return list<array<string, mixed>>
      */
-    private function active(Collection $targets, Collection $vehicles): array
+    private function active(Collection $activeSteps, Collection $targets, Collection $vehicles): array
     {
-        return $targets->flatMap->steps
-            ->filter(fn (WotGrindStep $s): bool => $s->is_active)
-            // Tech-tree nation order, then tier and name within a nation —
-            // the way the garage itself is scanned.
-            ->sortBy(fn (WotGrindStep $s): array => [
-                WotVehicle::rankOf($vehicles->get($s->tank_id)?->nation),
-                -$s->tier,
-                $vehicles->get($s->tank_id)?->name ?? '',
-            ])
+        return $activeSteps
             ->map(function (WotGrindStep $step) use ($targets, $vehicles): array {
                 $target = $targets->firstWhere('id', $step->wot_grind_target_id);
 
@@ -93,6 +87,28 @@ class GrindBoard
                     'modules' => $step->moduleOptions()->all(),
                 ];
             })->values()->all();
+    }
+
+    /**
+     * The active steps, in display order — shared by the table and its totals
+     * row so the two can never disagree about which rows are being summed.
+     *
+     * @param  Collection<int, WotGrindTarget>  $targets
+     * @param  Collection<int, WotVehicle>  $vehicles
+     * @return Collection<int, WotGrindStep>
+     */
+    private function activeSteps(Collection $targets, Collection $vehicles): Collection
+    {
+        return $targets->flatMap->steps
+            ->filter(fn (WotGrindStep $s): bool => $s->is_active)
+            // Tech-tree nation order, then tier and name within a nation —
+            // the way the garage itself is scanned.
+            ->sortBy(fn (WotGrindStep $s): array => [
+                WotVehicle::rankOf($vehicles->get($s->tank_id)?->nation),
+                -$s->tier,
+                $vehicles->get($s->tank_id)?->name ?? '',
+            ])
+            ->values();
     }
 
     /**
@@ -140,13 +156,19 @@ class GrindBoard
 
     /**
      * @param  Collection<int, WotGrindTarget>  $targets
+     * @param  Collection<int, WotGrindStep>  $activeSteps
      * @return array<string, mixed>
      */
-    private function totals(Collection $targets): array
+    private function totals(Collection $targets, Collection $activeSteps): array
     {
         $open = $targets->where('is_complete', false);
 
         return [
+            // Nested rather than a sibling prop: every partial reload on this
+            // page already asks for 'totals', so the Active Grinding total row
+            // cannot go stale after an edit without someone remembering to add
+            // a new key to three separate only: lists.
+            'active' => $this->activeTotals($activeSteps),
             'targets' => $targets->count(),
             'open' => $open->count(),
             'xp_required' => (int) $open->sum(fn (WotGrindTarget $t): int => $t->steps->sum(fn (WotGrindStep $s): int => $s->xpRequired())),
@@ -155,6 +177,34 @@ class GrindBoard
             'credits_required' => (int) $open->sum(fn (WotGrindTarget $t): int => $t->creditsRequired()),
             'blueprint_fragments' => (int) $targets->flatMap->steps->sum('blueprint_fragments'),
             'banked_xp' => (int) $targets->flatMap->steps->sum('banked_xp'),
+        ];
+    }
+
+    /**
+     * Column sums for the Active Grinding table's total row.
+     *
+     * Progress is recomputed from the summed required/remaining rather than
+     * averaged across rows: averaging would let a 4,000 XP module grind pull
+     * as hard on the figure as a 400,000 XP tier 10.
+     *
+     * @param  Collection<int, WotGrindStep>  $activeSteps
+     * @return array<string, mixed>
+     */
+    private function activeTotals(Collection $activeSteps): array
+    {
+        $required = (int) $activeSteps->sum(fn (WotGrindStep $s): int => $s->xpRequired());
+        $covered = (int) $activeSteps->sum(
+            fn (WotGrindStep $s): int => (int) $s->banked_xp + (int) $s->free_xp_planned
+        );
+
+        return [
+            'steps' => $activeSteps->count(),
+            'banked_xp' => (int) $activeSteps->sum('banked_xp'),
+            'module_xp_remaining' => (int) $activeSteps->sum('module_xp_remaining'),
+            'research_cost' => (int) $activeSteps->sum(fn (WotGrindStep $s): int => $s->researchCost()),
+            'xp_required' => $required,
+            'xp_remaining' => (int) $activeSteps->sum(fn (WotGrindStep $s): int => $s->xpRemaining()),
+            'progress' => $required > 0 ? round(min(100, $covered / $required * 100), 1) : 100.0,
         ];
     }
 }

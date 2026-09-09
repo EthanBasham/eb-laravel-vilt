@@ -161,6 +161,25 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
                             </td>
                         </tr>
                     </tbody>
+
+                    <tfoot v-if="active.length > 1" class="border-t-2 border-wot-border bg-wot-sunken">
+                        <tr>
+                            <th scope="row" class="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Total</th>
+                            <td class="px-4 py-3 text-xs text-wot-dim">{{ totals.active.steps }} tanks</td>
+                            <td class="px-4 py-3 text-right tabular-nums text-wot-good">{{ n(totals.active.banked_xp) }}</td>
+                            <td class="px-4 py-3 text-right tabular-nums text-wot-muted">{{ n(totals.active.module_xp_remaining) }}</td>
+                            <td class="px-4 py-3 text-right tabular-nums text-wot-muted">{{ n(totals.active.research_cost) }}</td>
+                            <td class="px-4 py-3 text-right tabular-nums font-bold text-wot-heading">{{ n(totals.active.xp_remaining) }}</td>
+                            <td class="px-4 py-3 text-right">
+                                <div class="flex items-center justify-end gap-2">
+                                    <span class="h-1.5 w-16 bg-wot-panel">
+                                        <span class="block h-full bg-wot-gold" :style="{ width: `${totals.active.progress}%` }" />
+                                    </span>
+                                    <span class="w-12 text-right tabular-nums text-wot-muted">{{ totals.active.progress }}%</span>
+                                </div>
+                            </td>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
         </section>
