@@ -1227,3 +1227,51 @@ Error flashes all stay. A failure is never self-evident from the interface.
 
 Tests assert the absence rather than merely omitting the assertion, so the intent survives
 someone later "restoring" what looks like missing feedback.
+
+---
+
+## 2026-09-09 — First push, and the two bugs only CI could find
+
+Pushed to `https://github.com/EthanBasham/eb-laravel-vilt.git` over HTTPS (the `gh` CLI is
+authenticated with `repo` and `workflow` scopes; SSH is not set up for GitHub on this machine
+— `ssh -T git@github.com` returns `Permission denied (publickey)`). Verified the remote was
+empty with `git ls-remote` before pushing, so no history had to be reconciled.
+
+The first run failed twice, and both failures were the kind that **cannot** be found on the
+machine that wrote the code.
+
+### 1. `tests/Unit` didn't exist in a fresh checkout
+
+```
+Test directory ".../tests/Unit" not found.
+```
+
+`phpunit.xml` declares a Unit testsuite pointing at `tests/Unit`, but the directory had been
+empty since the example test was deleted with the Projects/Milestones domain — and **git does
+not track empty directories.** So it existed here and in no clone anywhere. A `.gitkeep` fixes
+it, carrying an explanation so nobody deletes it as clutter.
+
+Verified with `git worktree add --detach` from HEAD, which gives a genuinely clean checkout
+without touching the working copy — a better check than trusting `git status`.
+
+### 2. The suite depended on a personal credential
+
+Fourteen tests failed on CI and passed locally. Every one of them fakes the Wargaming API.
+
+`config/wargaming.php` reads `WARGAMING_APPLICATION_ID` from the environment, and
+`WargamingClient` throws "No Wargaming application ID is configured" before issuing a request.
+Locally `.env` holds the real key, so the client got past that guard and `Http::fake()`
+intercepted. On CI, `.env` is a copy of `.env.example` where the key is deliberately blank —
+so the guard fired first and the fake never ran.
+
+**The suite had been green only because of a credential on one machine.** Pinned a dummy value
+in `phpunit.xml` instead, which is the correct layer: a test should behave identically for
+everyone, and none of these should ever reach the real API.
+
+Confirmed the mechanism rather than assuming it — a scratch test dumping `config()`, `getenv()`
+and `$_ENV` showed PHPUnit's `<env>` beating even a populated `.env`, which is what makes the
+suite deterministic.
+
+The general lesson, and the reason the CI work earlier was worth doing: a test suite that has
+only ever run on its author's machine is untested itself. Both of these were invisible until
+the code ran somewhere it had never run.

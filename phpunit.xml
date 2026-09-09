@@ -32,5 +32,14 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <!--
+            Pinned so the suite never depends on a developer's real credentials.
+            Without these, tests that Http::fake() the Wargaming API passed on a
+            machine with a populated .env and failed anywhere else: the client's
+            "no application ID configured" guard throws before the fake can
+            intercept. force so a shell variable can't reintroduce the drift.
+        -->
+        <env name="WARGAMING_APPLICATION_ID" value="testing-application-id" force="true"/>
+        <env name="WARGAMING_REALM" value="na" force="true"/>
     </php>
 </phpunit>
