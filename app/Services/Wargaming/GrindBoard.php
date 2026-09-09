@@ -25,8 +25,16 @@ class GrindBoard
     {
         $targets = WotGrindTarget::with(['steps', 'vehicle'])
             ->where('wot_account_id', $account->id)
-            ->inDefaultOrder()
-            ->get();
+            ->get()
+            // Completed targets stay at the bottom — they are no longer part of
+            // the working list — and everything above them is in nation order.
+            ->sortBy(fn (WotGrindTarget $t): array => [
+                $t->is_complete ? 1 : 0,
+                WotVehicle::rankOf($t->vehicle?->nation),
+                -($t->vehicle?->tier ?? 0),
+                $t->vehicle?->name ?? '',
+            ])
+            ->values();
 
         $vehicles = WotVehicle::whereIn('tank_id', $targets->flatMap->steps->pluck('tank_id')->unique())
             ->get()
@@ -59,7 +67,13 @@ class GrindBoard
     {
         return $targets->flatMap->steps
             ->filter(fn (WotGrindStep $s): bool => $s->is_active)
-            ->sortByDesc(fn (WotGrindStep $s): float => $s->progress)
+            // Tech-tree nation order, then tier and name within a nation —
+            // the way the garage itself is scanned.
+            ->sortBy(fn (WotGrindStep $s): array => [
+                WotVehicle::rankOf($vehicles->get($s->tank_id)?->nation),
+                -$s->tier,
+                $vehicles->get($s->tank_id)?->name ?? '',
+            ])
             ->map(function (WotGrindStep $step) use ($targets, $vehicles): array {
                 $target = $targets->firstWhere('id', $step->wot_grind_target_id);
 

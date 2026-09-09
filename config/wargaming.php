@@ -43,6 +43,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Nation order
+    |--------------------------------------------------------------------------
+    |
+    | The order nations appear in the game's own tech tree, which is neither
+    | alphabetical nor by vehicle count — so every vehicle list in the app sorts
+    | by this to match what a player is used to scanning.
+    |
+    | Sorting happens in PHP rather than SQL: Postgres has array_position but
+    | SQLite (which the test suite runs on) does not, and a CASE ladder in every
+    | query would be worse than one comparator.
+    |
+    */
+
+    'nation_order' => [
+        'usa', 'germany', 'ussr', 'uk', 'france',
+        'czech', 'japan', 'china', 'poland', 'sweden', 'italy',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | HTTP behaviour
     |--------------------------------------------------------------------------
     */

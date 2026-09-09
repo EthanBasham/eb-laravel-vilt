@@ -34,8 +34,9 @@ class GrindController extends Controller
                 ->whereNotIn('tank_id', $account->grindTargets()->pluck('tank_id'))
                 ->where('is_premium', false)
                 ->whereIn('tier', [8, 9, 10])
-                ->orderByDesc('tier')->orderBy('name')
                 ->get(['tank_id', 'name', 'tier', 'nation'])
+                // Same tech-tree nation order as every other vehicle list here.
+                ->sortBy(fn (WotVehicle $v): array => [$v->nationRank(), -$v->tier, $v->name])
                 ->map(fn (WotVehicle $v): array => [
                     'tank_id' => $v->tank_id,
                     'label' => "{$v->name} (T{$v->tier}, {$v->nation})",

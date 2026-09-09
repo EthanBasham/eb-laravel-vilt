@@ -39,6 +39,25 @@ class WotVehicle extends Model
         ];
     }
 
+    /**
+     * Where this vehicle's nation sits in the game's tech-tree order.
+     *
+     * Anything unrecognised sorts to the end rather than to the front, so a
+     * nation added by a future patch appears after the known ones instead of
+     * silently displacing them.
+     */
+    public function nationRank(): int
+    {
+        return self::rankOf($this->nation);
+    }
+
+    public static function rankOf(?string $nation): int
+    {
+        $order = array_flip((array) config('wargaming.nation_order'));
+
+        return $order[$nation] ?? count($order);
+    }
+
     // Scopes
 
     public function scopeOnlyPremium(Builder $query): Builder

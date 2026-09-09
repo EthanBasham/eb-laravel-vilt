@@ -334,3 +334,49 @@ it('falls back to the stored figure when a vehicle has no module rows', function
     expect($step->outstandingModuleXp())->toBe(42_000)
         ->and($step->moduleOptions())->toBeEmpty();
 });
+
+/**
+ * The game's own tech-tree order, which is neither alphabetical nor by size —
+ * so it has to be asserted, not assumed.
+ */
+it('sorts vehicle lists by the tech-tree nation order', function () {
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create();
+
+    // Deliberately created back-to-front.
+    foreach ([['italy', 1], ['usa', 2], ['poland', 3], ['germany', 4], ['ussr', 5]] as [$nation, $id]) {
+        WotVehicle::factory()->create(['tank_id' => $id, 'name' => "Tank {$id}", 'tier' => 10, 'nation' => $nation]);
+        WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => $id]);
+    }
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('targets.0.nation', 'usa')
+        ->where('targets.1.nation', 'germany')
+        ->where('targets.2.nation', 'ussr')
+        ->where('targets.3.nation', 'poland')
+        ->where('targets.4.nation', 'italy'),
+    );
+});
+
+it('sinks completed targets below the nation order', function () {
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create();
+    WotVehicle::factory()->create(['tank_id' => 1, 'nation' => 'usa', 'tier' => 10]);
+    WotVehicle::factory()->create(['tank_id' => 2, 'nation' => 'italy', 'tier' => 10]);
+    // USA would normally lead, but a finished target is out of the working list.
+    WotGrindTarget::factory()->for($account, 'account')->completed()->create(['tank_id' => 1]);
+    WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => 2]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('targets.0.nation', 'italy')
+        ->where('targets.1.nation', 'usa'),
+    );
+});
+
+it('sorts an unknown nation last rather than first', function () {
+    expect(WotVehicle::rankOf('usa'))->toBe(0)
+        ->and(WotVehicle::rankOf('italy'))->toBe(10)
+        // A nation added by a future patch must not displace the known ones.
+        ->and(WotVehicle::rankOf('atlantis'))->toBe(11)
+        ->and(WotVehicle::rankOf(null))->toBe(11);
+});

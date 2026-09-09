@@ -1660,3 +1660,30 @@ Where the encyclopedia has no modules for a vehicle the old manual field still s
 vehicle it hasn't described doesn't silently read as fully upgraded.
 
 Suite: **155 passed, 610 assertions.**
+
+---
+
+## 2026-09-09 — Vehicle lists follow the tech-tree nation order
+
+USA, Germany, USSR, UK, France, Czech, Japan, China, Poland, Sweden, Italy — the game's own
+order, which is neither alphabetical nor by vehicle count, so it has to be stated rather than
+derived. All eleven slugs matched the encyclopedia's exactly.
+
+Applied to every vehicle list on the board: Active Grinding, the target table behind all four
+remaining tabs, and the add-target dropdown. Within a nation the sort is tier descending then
+name, which is how a garage is scanned.
+
+**Sorted in PHP, not SQL.** Postgres has `array_position` and SQLite — which the test suite
+runs on — does not, so a query-level sort would have meant either a CASE ladder repeated in
+every query or a suite that tests something different from production. The lists are at most a
+couple of hundred rows.
+
+The order lives in `config/wargaming.php` rather than inside a comparator, and an unrecognised
+nation ranks *last*: a nation added by a future patch should appear after the known ones, not
+silently displace them. There's a test for that, because it is the kind of default that is
+easy to get backwards and never notice.
+
+Completed targets still sink below everything — they are no longer part of the working list —
+with nation order applied above them.
+
+Suite: **158 passed, 640 assertions.**
