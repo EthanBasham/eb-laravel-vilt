@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Wot;
 
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response as HttpResponse;
 use Illuminate\Validation\Rule;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Wot\UpdateGrindStepRequest;
+use App\Http\Requests\Wot\UpdatePurchaseFiltersRequest;
 use App\Http\Requests\Wot\UpdateTankPurchaseRequest;
 use App\Models\WotGrindSetting;
 use App\Models\WotGrindStep;
@@ -196,6 +198,41 @@ class GrindController extends Controller
         WotGrindSetting::updateOrCreate(['wot_account_id' => $account->id], $validated);
 
         return back(fallback: route('wot.grinding'));
+    }
+
+    /**
+     * Remembers where the Tanks to Purchase filter row was left.
+     *
+     * Merged into whatever is stored rather than replacing it, so a client that
+     * sends one changed filter does not silently reset the other three.
+     *
+     * Deliberately a separate endpoint from updateSettings(): that one takes
+     * two required figures typed into a form and pressed Save, this one fires
+     * on its own as you click filters, and folding them together would mean
+     * every filter click had to resend the planning figures to survive their
+     * `required` rules.
+     *
+     * 204 rather than the `back()` every other action here returns, because the
+     * caller is a standalone `useHttp` request rather than an Inertia visit:
+     * the board on screen already shows the filtered state, so redirecting
+     * would rebuild the whole thing to produce props nobody reads.
+     */
+    public function updateFilters(UpdatePurchaseFiltersRequest $request): HttpResponse
+    {
+        $account = $request->user()->wotAccount;
+
+        abort_unless($account, 404);
+
+        $settings = WotGrindSetting::firstOrNew(['wot_account_id' => $account->id]);
+
+        $settings->purchase_filters = [
+            ...(array) $settings->purchase_filters,
+            ...$request->validated(),
+        ];
+
+        $settings->save();
+
+        return response()->noContent();
     }
 
     /**

@@ -1036,3 +1036,86 @@ it('builds the purchase board without reference to grind targets', function () {
         ->where('purchase.rows.0.credits_remaining', 11_900_000),
     );
 });
+
+it('remembers where the purchase filters were left', function () {
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create();
+
+    $this->actingAs($user)->patch(route('wot.grinding.filters'), [
+        'hidden_nations' => ['usa', 'japan'],
+        'hidden_tiers' => [1, 2, 3],
+        'hide_owned' => false,
+        'show_sale' => true,
+    ])->assertNoContent();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('settings.purchase_filters.hidden_nations', ['usa', 'japan'])
+        ->where('settings.purchase_filters.hidden_tiers', [1, 2, 3])
+        ->where('settings.purchase_filters.hide_owned', false)
+        ->where('settings.purchase_filters.show_sale', true),
+    );
+});
+
+/**
+ * The client debounces one filter at a time, so a payload carrying a single key
+ * must not read as "the other three were cleared".
+ */
+it('merges a partial filter payload into what is stored', function () {
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create();
+
+    $this->actingAs($user)->patch(route('wot.grinding.filters'), [
+        'hidden_nations' => ['ussr'], 'show_sale' => true,
+    ]);
+    $this->actingAs($user)->patch(route('wot.grinding.filters'), ['hidden_tiers' => [4]]);
+
+    // toEqual, not toBe: the stored key order follows whichever request wrote
+    // each key, and nothing reads these positionally.
+    expect(WotGrindSetting::where('wot_account_id', $account->id)->first()->purchase_filters)
+        ->toEqual(['hidden_nations' => ['ussr'], 'show_sale' => true, 'hidden_tiers' => [4]]);
+});
+
+/**
+ * Null is load-bearing: it is what tells the board to seed the tier filter from
+ * the tiers already bought out, rather than from a saved selection.
+ */
+it('reports no stored filters until some are saved', function () {
+    $user = User::factory()->create();
+    WotAccount::factory()->for($user)->create();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(
+        fn ($page) => $page->where('settings.purchase_filters', null),
+    );
+});
+
+it('rejects a filter value the board could never produce', function (array $payload) {
+    $user = User::factory()->create();
+    WotAccount::factory()->for($user)->create();
+
+    $this->actingAs($user)->patch(route('wot.grinding.filters'), $payload)->assertSessionHasErrors();
+})->with([
+    'unknown nation' => [['hidden_nations' => ['atlantis']]],
+    'tier above the tree' => [['hidden_tiers' => [12]]],
+    'tier below the tree' => [['hidden_tiers' => [0]]],
+    'nations as a scalar' => [['hidden_nations' => 'usa']],
+]);
+
+it('saves an empty filter set as showing everything', function () {
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create();
+
+    $this->actingAs($user)->patch(route('wot.grinding.filters'), [
+        'hidden_nations' => [], 'hidden_tiers' => [],
+    ])->assertNoContent();
+
+    // Distinct from never having saved, which is null and seeds from
+    // bought_tiers instead.
+    expect(WotGrindSetting::where('wot_account_id', $account->id)->first()->purchase_filters)
+        ->toBe(['hidden_nations' => [], 'hidden_tiers' => []]);
+});
+
+it('will not store filters for a user with no linked account', function () {
+    $this->actingAs(User::factory()->create())
+        ->patch(route('wot.grinding.filters'), ['hide_owned' => true])
+        ->assertNotFound();
+});

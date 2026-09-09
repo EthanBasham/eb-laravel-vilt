@@ -21,6 +21,7 @@ Route::patch('/grinding/targets/{target}/complete', [GrindController::class, 'co
 Route::patch('/grinding/steps/{step}', [GrindController::class, 'updateStep'])->name('grinding.step');
 Route::patch('/grinding/steps/{step}/modules', [GrindController::class, 'updateModule'])->name('grinding.module');
 Route::patch('/grinding/settings', [GrindController::class, 'updateSettings'])->name('grinding.settings');
+Route::patch('/grinding/filters', [GrindController::class, 'updateFilters'])->name('grinding.filters');
 // Bound by tank_id rather than by model: a purchase row is created on first
 // use, so there is nothing to bind to until then.
 Route::patch('/grinding/purchases/{tankId}', [GrindController::class, 'updatePurchase'])->name('grinding.purchase');

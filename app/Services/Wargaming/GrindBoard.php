@@ -57,6 +57,12 @@ class GrindBoard
             'settings' => [
                 'credits_available' => (int) $settings->credits_available,
                 'garage_slots_vacant' => (int) $settings->garage_slots_vacant,
+                /*
+                 * Passed through as stored, null included — the client tells
+                 * "never saved" from "saved as empty" by it, and only the
+                 * former seeds the tier filter from bought_tiers.
+                 */
+                'purchase_filters' => $settings->purchase_filters,
             ],
             'totals' => $this->totals($targets, $activeSteps, $purchase['credits_required']),
         ];

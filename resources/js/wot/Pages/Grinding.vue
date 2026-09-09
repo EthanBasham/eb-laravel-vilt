@@ -1,7 +1,7 @@
 <script setup>
-import { Head, router, useForm, usePage } from '@inertiajs/vue3';
+import { Head, router, useForm, useHttp, usePage } from '@inertiajs/vue3';
 import { IconLock, IconLockOpen, IconShoppingCart } from '@tabler/icons-vue';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import AppShell from '../Components/AppShell.vue';
 import EditableNumber from '../Components/EditableNumber.vue';
 import ModulePicker from '../Components/ModulePicker.vue';
@@ -154,8 +154,15 @@ const priceTone = (cell) => (cell.is_unlocked
  * and stays on: buying a tank can retire a nation or collapse a tier column, and
  * a selected-set would then have to guess whether a column that reappears later
  * was meant to be on. Deselections survive that; stale entries are harmless.
+ *
+ * Where the row was left is stored per account, so it survives a reload and
+ * follows the user between browsers. Null means it never has been — read once,
+ * at setup, and never watched: a save writes this column, so re-seeding from it
+ * would feed every filter click back into the refs that produced it.
  */
-const hiddenNations = ref([]);
+const saved = props.settings.purchase_filters;
+
+const hiddenNations = ref([...(saved?.hidden_nations ?? [])]);
 
 /*
  * Seeded once, at setup, from the tiers the server reports as settled — never
@@ -168,9 +175,14 @@ const hiddenNations = ref([]);
  * a real visit and never again while you click. A watcher here would re-seed on
  * every response and do exactly the disappearing act described above.
  *
+ * A stored selection supersedes that seed outright rather than being unioned
+ * with it, so a bought-out column you deliberately turned back on stays on. The
+ * cost is that the seed only ever runs on the very first visit: a tier bought
+ * out after that is a column of zeroes until you hide it yourself.
+ *
  * Copied rather than aliased, so toggling a filter never writes to the prop.
  */
-const hiddenTiers = ref([...(props.purchase.bought_tiers ?? [])]);
+const hiddenTiers = ref([...(saved?.hidden_tiers ?? props.purchase.bought_tiers ?? [])]);
 
 /*
  * Lines with nothing left to buy, hidden by default.
@@ -182,7 +194,7 @@ const hiddenTiers = ref([...(props.purchase.bought_tiers ?? [])]);
  * which is the part that was missing before: the server used to drop them and
  * there was nothing to click.
  */
-const hideOwned = ref(true);
+const hideOwned = ref(saved?.hide_owned ?? true);
 
 /*
  * Wargaming's standard sale structure, as a discount per tier.
@@ -195,7 +207,42 @@ const hideOwned = ref(true);
  * along with the rest.
  */
 const SALE = { 2: 0.5, 3: 0.5, 4: 0.5, 5: 0.5, 6: 0.3, 7: 0.3, 8: 0.5, 9: 0.5, 10: 0.5 };
-const showSale = ref(false);
+const showSale = ref(saved?.show_sale ?? false);
+
+/*
+ * Remember the filter row, per account.
+ *
+ * useHttp rather than router.patch: nothing on the page changes as a result of
+ * the save — the board already shows the filtered state — so this wants a
+ * standalone request that returns 204 and touches no props, not a visit that
+ * rebuilds the board to hand back data the client already has.
+ *
+ * Debounced because picking a nation means clicking several flags, and each
+ * click is a separate ref write. Half a second is long enough to collect a run
+ * of them and short enough that closing the tab straight after a click still
+ * saves it.
+ *
+ * Fire-and-forget by design. A filter is a preference, not a record: if the
+ * request fails the board on screen is still filtered the way you asked, and
+ * interrupting that to report it would be worse than losing the position.
+ */
+const filterState = () => ({
+    hidden_nations: hiddenNations.value,
+    hidden_tiers: hiddenTiers.value,
+    hide_owned: hideOwned.value,
+    show_sale: showSale.value,
+});
+
+const filters = useHttp(filterState());
+
+let saveFilters;
+
+watch([hiddenNations, hiddenTiers, hideOwned, showSale], () => {
+    Object.assign(filters, filterState());
+
+    clearTimeout(saveFilters);
+    saveFilters = setTimeout(() => filters.patch('/wot/grinding/filters'), 500);
+});
 
 const salePrice = (cell) => (showSale.value
     ? Math.round(cell.price * (1 - (SALE[cell.tier] ?? 0)))
