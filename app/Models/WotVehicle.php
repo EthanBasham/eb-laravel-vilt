@@ -53,7 +53,7 @@ class WotVehicle extends Model
 
     public static function rankOf(?string $nation): int
     {
-        $order = array_flip((array) config('wargaming.nation_order'));
+        $order = array_flip(array_keys((array) config('wargaming.nations')));
 
         return $order[$nation] ?? count($order);
     }

@@ -1,7 +1,8 @@
 <script setup>
-import { Head, router } from '@inertiajs/vue3';
+import { Head, router, usePage } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 import AppShell from '../Components/AppShell.vue';
+import NationFlag from '../Components/NationFlag.vue';
 import NewsPanel from '../Components/NewsPanel.vue';
 import PeriodTable from '../Components/PeriodTable.vue';
 import StatTile from '../Components/StatTile.vue';
@@ -34,7 +35,21 @@ const sortAsc = ref(false);
 const unique = (key) => [...new Set(props.vehicles.map((v) => v[key]))].sort();
 
 const tiers = computed(() => [...new Set(props.vehicles.map((v) => v.tier))].sort((a, b) => a - b));
-const nations = computed(() => unique('nation'));
+// Shared from config('wargaming.nations'), already in tech-tree order.
+const page = usePage();
+const nationName = (slug) => page.props.nations?.[slug] ?? slug;
+
+// The filter follows the same tech-tree order as every other vehicle list,
+// with anything the config doesn't know about appended.
+const nations = computed(() => {
+    const order = Object.keys(page.props.nations ?? {});
+    const present = new Set(props.vehicles.map((v) => v.nation));
+
+    return [
+        ...order.filter((n) => present.has(n)),
+        ...[...present].filter((n) => !order.includes(n)).sort(),
+    ];
+});
 const types = computed(() => unique('type'));
 
 const filtered = computed(() => {
@@ -276,7 +291,7 @@ const disconnect = () => {
                     <label for="nation" class="block text-xs font-medium uppercase tracking-wider text-wot-dim">Nation</label>
                     <select id="nation" v-model="nation" class="mt-1 border px-2 py-1.5 text-sm">
                         <option value="">All</option>
-                        <option v-for="n in nations" :key="n" :value="n">{{ n }}</option>
+                        <option v-for="n in nations" :key="n" :value="n">{{ nationName(n) }}</option>
                     </select>
                 </div>
 
@@ -337,7 +352,8 @@ const disconnect = () => {
                                 <span v-if="vehicle.is_premium" class="ms-2 border border-wot-gold px-1.5 py-0.5 text-xs font-bold uppercase text-wot-gold">
                                     Premium
                                 </span>
-                                <span class="ms-2 text-xs text-wot-dim">{{ vehicle.nation }} · {{ vehicle.type }}</span>
+                                <NationFlag :nation="vehicle.nation" class="ms-2" />
+                                <span class="ms-1.5 text-xs text-wot-dim">{{ vehicle.type }}</span>
                             </td>
                             <td class="px-4 py-2 text-center tabular-nums text-wot-muted">{{ vehicle.tier }}</td>
                             <td class="px-4 py-2 text-right tabular-nums text-wot-muted">{{ number(vehicle.battles) }}</td>

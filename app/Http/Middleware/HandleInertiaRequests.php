@@ -46,6 +46,10 @@ class HandleInertiaRequests extends Middleware
                     'is_token_valid' => $user->wotAccount->is_token_valid,
                 ] : null,
             ],
+            // Slug => display name, in tech-tree order. Static, but shared here
+            // so config stays the single source of truth for the flag filenames
+            // under public/images/nations and their alt text.
+            'nations' => (array) config('wargaming.nations'),
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'error' => fn () => $request->session()->get('error'),

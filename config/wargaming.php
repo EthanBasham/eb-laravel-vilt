@@ -54,11 +54,24 @@ return [
     | SQLite (which the test suite runs on) does not, and a CASE ladder in every
     | query would be worse than one comparator.
     |
+    | The keys double as the filenames under public/images/nations, and the
+    | values are the API's own display names (encyclopedia/info.vehicle_nations),
+    | used as alt text on the flags.
+    |
     */
 
-    'nation_order' => [
-        'usa', 'germany', 'ussr', 'uk', 'france',
-        'czech', 'japan', 'china', 'poland', 'sweden', 'italy',
+    'nations' => [
+        'usa' => 'U.S.A.',
+        'germany' => 'Germany',
+        'ussr' => 'U.S.S.R.',
+        'uk' => 'U.K.',
+        'france' => 'France',
+        'czech' => 'Czechoslovakia',
+        'japan' => 'Japan',
+        'china' => 'China',
+        'poland' => 'Poland',
+        'sweden' => 'Sweden',
+        'italy' => 'Italy',
     ],
 
     /*

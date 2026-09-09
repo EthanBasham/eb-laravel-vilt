@@ -1687,3 +1687,56 @@ Completed targets still sink below everything — they are no longer part of the
 with nation order applied above them.
 
 Suite: **158 passed, 640 assertions.**
+
+## Nation flags replace nation slugs
+
+Vehicle lists showed the API's raw nation slug (`ussr`, `czech`). Replaced with
+the small in-game flag icons, matching how the game and tomato.gg's filters
+present nations.
+
+The API does not serve them. `encyclopedia/info.vehicle_nations` returns display
+names only (`{"usa": "U.S.A.", "czech": "Czechoslovakia", ...}`) with no image
+URLs. The icons live on Wargaming's static CDN instead:
+
+    https://na-wotp.wgcdn.co/static/6.16.0_bbf399/wotp_static/img/core/frontend/
+      scss/common/components/widgets/content-tank/img/{nation}.png
+
+All eleven return 200 — 29x18 palette PNGs, ~1.4 KB each. **Self-hosted under
+`public/images/nations/` rather than hot-linked:** that path carries a build
+hash (`6.16.0_bbf399`) that will 404 on Wargaming's next static deploy. 44 KB
+total, and `.gitignore` only excludes `/public/build`, `/public/hot` and
+`/public/storage`, so the directory is tracked.
+
+### Germany is not the CDN icon
+
+Wargaming's German icon is the Nazi-era war flag — red field, white disc, black
+swastika. Confirmed by decoding the PNG and rendering it upscaled, after the
+palette's black + dark-red mix made it ambiguous at native size. It is not
+committed here; a public repo is a different distribution context from an
+in-game asset, and the symbol is illegal to display in several jurisdictions.
+
+`public/images/nations/germany.png` is a generated modern Bundesflagge
+(black-red-gold). To keep it from looking pasted-in next to ten waving-fabric
+icons, the shading was lifted from `poland.png` — also two horizontal bands —
+by normalising each pixel's luminance against its own band's mean and applying
+that multiplier to the tricolour, with a small additive lift so folds stay
+visible in the black band. The generator is not kept in the repo; the asset is.
+
+USSR and the Kingdom-of-Italy naval ensign are period flags too, but carry
+nothing prohibited, so those ship as-is.
+
+### Wiring
+
+- `config/wargaming.php`: `nation_order` (a list) became `nations`, an ordered
+  slug => display-name map. Keys are the tech-tree order *and* the flag
+  filenames; values are the API's own names, used as `alt` text.
+  `WotVehicle::rankOf()` now flips `array_keys()` of it.
+- `HandleInertiaRequests` shares the map as a `nations` prop. It is static, but
+  sharing beats duplicating the list in JS — config stays the single source of
+  truth for filenames and alt text both.
+- `NationFlag.vue` renders the `<img>`, falling back to the slug as text for any
+  nation a future patch adds before its flag exists.
+- Replaced the slug in Grinding's Active and target tables and the dashboard
+  garage row. The dashboard's nation `<select>` can't hold an image, so it shows
+  display names instead — and now orders its options by the same tech-tree
+  order rather than alphabetically by slug.

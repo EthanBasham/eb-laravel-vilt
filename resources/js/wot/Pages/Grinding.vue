@@ -4,6 +4,7 @@ import { computed, ref } from 'vue';
 import AppShell from '../Components/AppShell.vue';
 import EditableNumber from '../Components/EditableNumber.vue';
 import ModulePicker from '../Components/ModulePicker.vue';
+import NationFlag from '../Components/NationFlag.vue';
 
 const props = defineProps({
     active: { type: Array, default: () => [] },
@@ -137,7 +138,8 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
                         <tr v-for="row in active" :key="row.id" class="hover:bg-wot-sunken">
                             <td class="px-4 py-2">
                                 <span class="text-wot-heading">{{ row.name }}</span>
-                                <span class="ms-2 text-xs text-wot-dim">T{{ row.tier }} · {{ row.nation }}</span>
+                                <span class="ms-2 text-xs text-wot-dim">T{{ row.tier }}</span>
+                                <NationFlag :nation="row.nation" class="ms-1.5" />
                             </td>
                             <td class="px-4 py-2 text-wot-muted">{{ row.target_name }}</td>
                             <!-- The one number no API can supply. -->
@@ -199,7 +201,8 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
                                 <td class="px-4 py-2">
                                     <span aria-hidden="true" class="me-1 inline-block w-3 text-wot-dim">{{ expanded.includes(t.id) ? '▾' : '▸' }}</span>
                                     <span class="text-wot-heading">{{ t.name }}</span>
-                                    <span class="ms-2 text-xs text-wot-dim">T{{ t.tier }} · {{ t.nation }}</span>
+                                    <span class="ms-2 text-xs text-wot-dim">T{{ t.tier }}</span>
+                                    <NationFlag :nation="t.nation" class="ms-1.5" />
                                 </td>
 
                                 <template v-if="view === 'xp'">
