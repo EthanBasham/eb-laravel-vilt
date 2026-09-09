@@ -758,3 +758,43 @@ it('shows a tracked line that starts below the untracked floor', function () {
         ->where('purchase.rows.0.credits_remaining', 9_500_000),
     );
 });
+
+/**
+ * A tier IX sitting mid-path on a tracked line is already on the board. It was
+ * also researchable-now in its own right, and so appeared a second time as its
+ * own row -- with its price counted twice in the total.
+ */
+it('does not give a mid-path vehicle a row of its own', function () {
+    $user = User::factory()->create();
+    [$account] = purchaseLine($user);
+
+    // The line's tier VIII is in the garage, which makes its tier IX a
+    // researchable-now candidate as well as a step on the tracked line.
+    played($account, 80);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->has('purchase.rows', 1)
+        ->where('purchase.rows.0.key', fn ($key) => str_starts_with($key, 't'))
+        // Present as a cell, and counted once.
+        ->where('purchase.rows.0.cells.9.tank_id', 90)
+        ->where('totals.credits_required', 9_500_000),
+    );
+});
+
+it('does not give a tier XI successor a row of its own', function () {
+    $user = User::factory()->create();
+    [$account, $target, $ten] = purchaseLine($user);
+
+    $eleven = WotVehicle::factory()->create(['tank_id' => 110, 'name' => 'Top XI', 'tier' => 11,
+        'price_credit' => 7_400_000, 'next_tanks' => null]);
+    $ten->update(['next_tanks' => [$eleven->tank_id => 325_000]]);
+
+    // Owning the tier X would make the tier XI researchable now; it is already
+    // the last cell of the tracked line, so it must not also become a row.
+    played($account, $ten->tank_id);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->has('purchase.rows', 1)
+        ->where('purchase.rows.0.cells.11.tank_id', 110),
+    );
+});

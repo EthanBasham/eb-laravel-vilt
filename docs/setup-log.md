@@ -1935,3 +1935,32 @@ the count is unchanged at 55, so nothing is hidden at rest.
 The headline "Credits needed" card deliberately does *not* follow the filters —
 it is a page-level summary rendered on all five tabs, and a tab-local filter
 should not silently rewrite it.
+
+### Duplicate rows on the purchase board
+
+Reported via Type 68 and Type 71 appearing as separate rows. (The tiers are one
+lower than they looked: the encyclopedia has Type 68 at IX, Type 71 at X, and
+STK-2 as the tier XI above them.)
+
+The candidate filter excluded tracked *targets* — `$targets->pluck('tank_id')` —
+but not the vehicles along their paths. Type 68 is a mid-path step on the
+tracked Type 71 line and is also researchable-now in its own right, so it earned
+a second row. 11 vehicles were affected, in pairs that each rendered the other's
+line: the Object 430 Version II row carried K-91 as its tier X successor while
+the K-91 row carried the Object 430 Version II as its tier IX step.
+
+The credits were being double-counted with them. The board's total was
+499,000,000; it is 447,080,000 once each vehicle is charged once. Rows: 55 → 49.
+
+The fix collects every `tank_id` appearing in any *cell* of a tracked row, not
+just the target ids, and excludes those from the candidate pool. Tracked rows
+are therefore built first now.
+
+A second guard drops any candidate that is an ancestor of another candidate, so
+only the topmost of a branch keeps a row. Cycle-safe because a lineage strictly
+descends in tier. This is defensive rather than load-bearing: a candidate
+requires its immediate predecessor to be played, and a played vehicle is not
+itself a candidate, so the case is hard to reach with well-formed data — but it
+costs one pass and the alternative failure is silent double-counting.
+
+Suite: **180 passed, 917 assertions.**

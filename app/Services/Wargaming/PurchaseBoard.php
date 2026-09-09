@@ -49,9 +49,19 @@ class PurchaseBoard
         // the columns reach down to is whichever of the two is lower.
         $floor = min($minTier, (int) ($targets->flatMap->steps->min('tier') ?? $minTier));
 
-        $rows = $targets
+        $tracked = $targets
             ->map(fn (WotGrindTarget $t): array => $this->targetRow($t, $floor, $purchases, $played))
-            ->concat($this->candidateRows($targets, $floor, $minTier, $purchases, $played))
+            ->values();
+
+        // Every vehicle a tracked line already shows, at any tier — not just the
+        // targets themselves. A tier IX sitting mid-path is on the board once
+        // already; giving it a second row of its own is the same tank twice.
+        $covered = $tracked
+            ->flatMap(fn (array $r): array => array_column($r['cells'], 'tank_id'))
+            ->flip();
+
+        $rows = $tracked
+            ->concat($this->candidateRows($covered, $floor, $minTier, $purchases, $played))
             // A line you have finished buying is not a shopping list.
             ->reject(fn (array $row): bool => $row['is_bought_out'])
             // Same tech-tree nation order as every other vehicle list here.
@@ -110,32 +120,43 @@ class PurchaseBoard
     /**
      * Vehicles one research from something played, with no tracked line.
      *
-     * @param  Collection<int, WotGrindTarget>  $targets
+     * @param  Collection<int, int>  $covered  tank ids a tracked line already shows
      * @param  Collection<int, WotTankPurchase>  $purchases
      * @param  Collection<int, int>  $played
      * @return Collection<int, array<string, mixed>>
      */
     private function candidateRows(
-        Collection $targets,
+        Collection $covered,
         int $floor,
         int $minTier,
         Collection $purchases,
         Collection $played,
     ): Collection {
-        $tracked = $targets->pluck('tank_id')->flip();
-
-        return $this->tree->vehicles()
+        $pool = $this->tree->vehicles()
             ->reject(fn (WotVehicle $v): bool => $v->is_premium
                 || $v->tier < $minTier
                 || $v->tier > self::TOP_TIER
                 || $played->has($v->tank_id)
-                || $tracked->has($v->tank_id))
+                || $covered->has($v->tank_id))
             // Researchable now: whatever unlocks it is already in the garage.
             ->filter(function (WotVehicle $v) use ($played): bool {
                 $predecessor = $this->tree->predecessorOf($v->tank_id);
 
                 return $predecessor !== null && $played->has($predecessor->tank_id);
-            })
+            });
+
+        // Two candidates on one branch would each render the other's line. Only
+        // the topmost keeps a row; the rest become cells in it. Safe from
+        // cycles because a lineage strictly descends in tier.
+        $subsumed = $pool
+            ->flatMap(fn (WotVehicle $v): array => array_map(
+                fn (WotVehicle $a): int => $a->tank_id,
+                $this->tree->ancestorsOf($v->tank_id, $floor),
+            ))
+            ->flip();
+
+        return $pool
+            ->reject(fn (WotVehicle $v): bool => $subsumed->has($v->tank_id))
             ->map(function (WotVehicle $v) use ($floor, $purchases, $played): array {
                 $cells = collect($this->tree->ancestorsOf($v->tank_id, $floor))
                     ->map(fn (WotVehicle $a): ?array => $this->cell($a, $purchases->get($a->tank_id), true))
