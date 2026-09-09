@@ -11,7 +11,29 @@ const props = defineProps({
     // edits vehicles instead, which are keyed by tank rather than by step.
     url: { type: String, default: '' },
     only: { type: Array, default: () => ['active', 'targets', 'totals'] },
-    tone: { type: String, default: '' },
+    /*
+     * Resting border, background and text colours, as utility classes.
+     *
+     * They live here rather than in the base class because two utilities
+     * setting the same property on one element are decided by their order in
+     * the generated stylesheet, not by their order in the attribute — so a
+     * caller could not reliably override a hardcoded one.
+     *
+     * The default restates the shell's own form-control colours rather than
+     * leaving them to be inherited. AppShell sets those in @layer base, which
+     * a utility now overrides, so a field that named no tone would otherwise
+     * come out transparent instead of sunken.
+     */
+    tone: { type: String, default: 'border-wot-border bg-wot-sunken' },
+    /*
+     * Optional optimistic update, as (pageProps, nextValue) => partialProps.
+     *
+     * Supplied by the parent rather than built here: applying one of these
+     * means knowing the shape of the props the field feeds, and this component
+     * is used against both the step rows and the purchase board. Keeping that
+     * knowledge at the call site is what lets it stay usable against either.
+     */
+    optimistic: { type: Function, default: null },
 });
 
 const raw = ref(String(props.modelValue ?? 0));
@@ -55,12 +77,18 @@ const commit = () => {
     saving.value = true;
     const url = props.url || `/wot/grinding/steps/${props.stepId}`;
 
-    router.patch(url, { [props.field]: next }, {
+    const options = {
         preserveScroll: true,
         // Only the board comes back; nothing else on the page moved.
         only: props.only,
         onFinish: () => (saving.value = false),
-    });
+    };
+
+    if (props.optimistic) {
+        options.optimistic = (pageProps) => props.optimistic(pageProps, next);
+    }
+
+    router.patch(url, { [props.field]: next }, options);
 };
 </script>
 
@@ -70,13 +98,24 @@ const commit = () => {
         noise on a dense table, and arrow keys silently nudging a figure is a
         poor fit for numbers that are transcribed from the game rather than
         adjusted. inputmode keeps the numeric keypad on touch devices.
+
+        text-sm is not redundant with the surrounding table. @tailwindcss/forms
+        puts font-size: 1rem on text inputs in the base layer, so these did not
+        inherit the table's 14px and rendered a size larger than every figure
+        beside them. The utility overrides it, and brings the line-height down
+        with it — which is what makes the group shorter, since the buttons take
+        their height from this field.
+
+        w-20 is measured rather than guessed: Instrument Sans at 14px puts a
+        seven-figure price ("6,100,000") at 67.6px of text, 77.6px once px-1 and
+        the border are counted, so 80px holds every realistic price.
     -->
     <input
         :value="display"
         type="text"
         inputmode="numeric"
         autocomplete="off"
-        class="w-24 border border-transparent bg-transparent px-1 py-0.5 tabular-nums transition-colors hover:border-wot-border focus:border-wot-gold"
+        class="w-20 border px-1 py-0.5 text-sm tabular-nums transition-colors focus:border-wot-gold"
         :class="[align, tone, saving ? 'opacity-50' : '']"
         :disabled="saving"
         @input="onInput"

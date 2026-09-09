@@ -2155,3 +2155,100 @@ already-pinned rows) is exactly what those still want.
 
 `DashboardTest.php` had two tests asserting the old hoist-on-Latest behavior; updated to
 assert plain newest-first with `is_pinned` still reported per row.
+
+
+## 2026-09-09 — Tanks to Purchase: input groups, optimistic updates, and a cascade-layer trap
+
+UI pass over the purchase board, plus two real bugs found on the way.
+
+### The cell is now one input group
+
+`[lock toggle] [price] [x] [buy]`, joined with `gap-px` and `items-stretch`, so
+the buttons take their height from the field rather than from their own padding
+and the group has one flat top and bottom edge. The buttons are icon-only to keep
+the cell narrow, which leaves `title` and `aria-label` as the only things naming
+the action — dropping either would leave a screen reader announcing "button".
+
+The lock is a single toggle rather than two controls: open padlock to research,
+closed padlock to undo. Both icons name the *action*, not the current state.
+
+`w-20` and `text-sm` were measured rather than guessed. `@tailwindcss/forms` puts
+`font-size: 1rem` on text inputs in the base layer, so these never inherited the
+table's 14px and rendered a size larger than every figure beside them. At 14px,
+Instrument Sans puts "6,100,000" at 67.6px of text, 77.6px with `px-1` and the
+border — so 80px holds any realistic price. The validation ceiling (100,000,000,
+97.2px) does not fit, and did not fit at the old `w-24`/16px either.
+
+### Optimistic updates
+
+Every figure on the tab derives from the `purchase` prop client-side, so flipping
+one cell locally redraws the icons, that cell's cost, and the row, tier and grand
+totals without waiting for the round trip. Inertia 3.7's `optimistic` option;
+rollback on failure is automatic.
+
+Two things are deliberately **not** reproduced client-side, and should stay that
+way: the headline credits card reads `totals`, and `PurchaseBoard` settles a whole
+line when its last vehicle is bought — including tiers never ticked off. That is a
+server rule, and a second copy of it here would have to be kept in step. A
+bought-out row therefore lingers for the length of the request instead.
+
+`EditableNumber` takes the callback as a prop rather than building one, because
+applying it means knowing the shape of the props the field feeds and the component
+serves both the step rows and the purchase board. The five step fields deliberately
+do **not** pass one: their totals are computed server-side, so an optimistic patch
+would update only the number already visible in the input.
+
+### Bug: un-buying dropped two steps instead of one
+
+Clicking the `0` to mark a vehicle as not bought flashed the correct state and then
+reverted to unresearched. `PurchaseBoard::cell()` resolves
+`$purchased = $purchase?->is_purchased ?? $ownedByDefault` and derives `is_unlocked`
+from *that*, so a vehicle that reads as bought because it sits in the garage has no
+stored flag behind it. Writing `is_purchased = false` left `is_unlocked` at its
+default of false.
+
+Fixed in `GrindController::updatePurchase`, beside the invariant it mirrors: buying
+already implied researching, and now un-buying preserves it. An explicit
+`is_unlocked` in the same request still wins, so a deliberate re-lock is unaffected.
+The test was written first and watched fail on exactly that assertion.
+
+### Trap: an unlayered SFC style outranks every Tailwind utility
+
+Colouring the researched cell had no visible effect at all, twice over, and the
+cause is worth knowing about before it costs someone another hour.
+
+`AppShell.vue` carries a deliberately unscoped `<style>` block, and it held:
+
+```css
+.wot input[type='text'], .wot input[type='search'], .wot select {
+    background-color: ...; border-color: ...; color: ...;
+}
+```
+
+**Cascade layers outrank specificity.** Unlayered rules beat everything inside
+`@layer`, and Tailwind puts every utility in `@layer utilities` — so that rule
+silently won against any `bg-*`, `border-*` or `text-*` a component set on its own
+field, no matter how specific. `focus:border-wot-gold` had never painted either.
+No amount of selector weight fixes this; only layering does.
+
+Moved into `@layer base`, which is where a default belongs and is the only thing
+that lets a component override one. `app.css` declares
+`@layer theme, base, components, utilities`, so `base` sits before `utilities`.
+
+The knock-on: utilities now actually win, so anything naming no colour would have
+come out transparent — that was `EditableNumber`'s original intent, never realised
+on these pages. Its default `tone` now restates the shell's colours explicitly so
+nothing else moved.
+
+### Two verification lessons from this session, recorded because both produced wrong claims
+
+**`public/build` is not what the browser reads during development.** With
+`composer run dev` running, `public/hot` exists and the page loads from Vite on
+:5173. Several "verified in the built CSS" checks this session inspected a file the
+browser never opened. Check `http://localhost:5173/resources/css/app.css` instead —
+it comes back as a JS module with the CSS as an escaped string on one line, so
+`grep -c` on it counts nothing useful; decode it first.
+
+**Reading a class off the source does not mean it renders.** The claim that the
+price text "was already green" came from reading `:tone` rather than from what
+painted, and the AppShell rule above meant it never had been.

@@ -1,6 +1,6 @@
 <script setup>
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
-import { IconLock, IconShoppingCart } from '@tabler/icons-vue';
+import { IconLock, IconLockOpen, IconShoppingCart } from '@tabler/icons-vue';
 import { computed, ref } from 'vue';
 import AppShell from '../Components/AppShell.vue';
 import EditableNumber from '../Components/EditableNumber.vue';
@@ -61,10 +61,90 @@ const n = (v) => new Intl.NumberFormat().format(v ?? 0);
 // here would read as a different quantity entirely.
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI'];
 
+/**
+ * Apply a pending change to one cell, in the shape the board renders.
+ *
+ * The wire names and the cell's own fields are not quite the same: the request
+ * carries `price_credit`, the override, while the cell carries the resolved
+ * `price` and whether it undercuts the shop. Buying also researches, mirroring
+ * the same rule the controller enforces, so the optimistic cell matches what
+ * comes back rather than flickering when it does.
+ */
+const applyToCell = (cell, payload) => {
+    if ('price_credit' in payload) {
+        return {
+            ...cell,
+            price: payload.price_credit ?? cell.api_price ?? 0,
+            // Both halves of PurchaseBoard's rule: an override is only a
+            // discount if it actually differs from the shop price. Dropping the
+            // second half would flash the reset button on for a value the
+            // server is about to call undiscounted.
+            is_discounted: payload.price_credit !== null && payload.price_credit !== cell.api_price,
+        };
+    }
+
+    return {
+        ...cell,
+        ...payload,
+        is_unlocked: payload.is_purchased ? true : (payload.is_unlocked ?? cell.is_unlocked),
+    };
+};
+
+/**
+ * The `purchase` prop with one vehicle's cell changed, ready to hand to
+ * Inertia's `optimistic` option.
+ *
+ * @param {object} pageProps  current page props
+ * @param {number} tankId     the vehicle whose cell is changing
+ * @param {object} payload    the same body being sent to the server
+ */
+const patchPurchase = (pageProps, tankId, payload) => ({
+    purchase: {
+        ...pageProps.purchase,
+        rows: pageProps.purchase.rows.map((row) => {
+            const tier = Object.keys(row.cells).find((t) => row.cells[t]?.tank_id === tankId);
+
+            return tier === undefined ? row : {
+                ...row,
+                cells: { ...row.cells, [tier]: applyToCell(row.cells[tier], payload) },
+            };
+        }),
+    },
+});
+
+/*
+ * Optimistic, because every figure on this tab is derived from `purchase` in
+ * the template — the icons, the cell's own cost, and the row, tier and grand
+ * totals all recompute from it. Flipping the one cell locally therefore
+ * redraws the board immediately instead of after the round trip, and Inertia
+ * puts it back on its own if the request fails.
+ *
+ * Two things are deliberately left to the server. The headline credits card
+ * reads `totals`, and a line is settled whole when its last vehicle is bought
+ * — including tiers never ticked off, which is PurchaseBoard's rule rather
+ * than the client's. Reproducing it here would mean keeping two copies of it
+ * in step, so a bought-out row instead lingers for the length of the request.
+ */
 const setPurchase = (tankId, payload) => router.patch(`/wot/grinding/purchases/${tankId}`, payload, {
     preserveScroll: true,
     only: ['purchase', 'totals'],
+    optimistic: (pageProps) => patchPurchase(pageProps, tankId, payload),
 });
+
+// Same treatment for a typed price. The field shows what you typed either way,
+// but the row, tier and grand totals are derived from `purchase`, so without
+// this they sit on the old figure until the round trip lands.
+const optimisticPrice = (tankId) => (pageProps, next) => patchPurchase(pageProps, tankId, { price_credit: next });
+
+/*
+ * A researched vehicle borrows the buy button's border and text, so the cell
+ * reads as one control that is ready to spend rather than as a green button
+ * beside an ordinary field. The background stays the shell's own in both
+ * states — only the border and text carry the signal.
+ */
+const priceTone = (cell) => (cell.is_unlocked
+    ? 'border-wot-good/50 bg-wot-sunken text-wot-good hover:border-wot-good'
+    : 'border-wot-border bg-wot-sunken text-wot-text');
 
 /*
  * Purchase filters.
@@ -338,42 +418,84 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
                                             0
                                         </button>
 
-                                        <div v-else class="flex flex-col items-end gap-1">
-                                            <div class="flex items-center justify-end">
-                                                <EditableNumber
-                                                    :field="'price_credit'"
-                                                    :model-value="row.cells[tier].price"
-                                                    :url="`/wot/grinding/purchases/${row.cells[tier].tank_id}`"
-                                                    :only="['purchase', 'totals']"
-                                                    :tone="row.cells[tier].is_unlocked ? 'text-wot-good' : 'text-wot-text'"
-                                                />
-                                                <!-- Only offered once a price has been
-                                                     overridden; there is nothing to
-                                                     reset back to otherwise. -->
-                                                <button
-                                                    v-if="row.cells[tier].is_discounted"
-                                                    type="button"
-                                                    class="ms-1 text-xs text-wot-dim hover:text-wot-bad"
-                                                    :title="`Reset to the ${n(row.cells[tier].api_price)} shop price`"
-                                                    @click="setPurchase(row.cells[tier].tank_id, { price_credit: null })"
-                                                >
-                                                    &times;
-                                                </button>
-                                            </div>
+                                        <div v-else class="flex items-stretch justify-end gap-px">
+                                            <!-- One input group: research state on the
+                                                 left, price in the middle, buying on the
+                                                 right, so the cell reads in the order the
+                                                 two steps happen.
 
+                                                 gap-px leaves exactly one pixel between
+                                                 segments, enough to read them as separate
+                                                 controls without spending the width a
+                                                 real gap costs in a five-column table.
+
+                                                 items-stretch sizes the buttons from the
+                                                 input rather than from their own padding,
+                                                 so the group has one flat top and bottom
+                                                 edge; the buttons' vertical padding stops
+                                                 deciding their height, which is why they
+                                                 need justify-center to hold the icon in
+                                                 the middle of the taller box.
+
+                                                 Icons only, to keep the cell narrow —
+                                                 which leaves title and aria-label as the
+                                                 only things naming the action, the
+                                                 tooltip for a pointer and the label for a
+                                                 screen reader that would otherwise
+                                                 announce nothing but "button". -->
                                             <button
                                                 type="button"
-                                                class="inline-flex items-center gap-1 border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors"
-                                                :class="row.cells[tier].is_unlocked
-                                                    ? 'border-wot-good/50 text-wot-good hover:bg-wot-good/15'
-                                                    : 'border-wot-border text-wot-dim hover:text-wot-text'"
-                                                :title="row.cells[tier].name"
-                                                @click="row.cells[tier].is_unlocked
-                                                    ? setPurchase(row.cells[tier].tank_id, { is_purchased: true })
-                                                    : setPurchase(row.cells[tier].tank_id, { is_unlocked: true })"
+                                                class="inline-flex shrink-0 items-center justify-center border border-wot-border p-1 text-wot-dim transition-colors"
+                                                :class="row.cells[tier].is_unlocked ? 'hover:text-wot-bad' : 'hover:text-wot-text'"
+                                                :title="row.cells[tier].is_unlocked
+                                                    ? `${row.cells[tier].name} — researched. Mark as not researched.`
+                                                    : `${row.cells[tier].name} — not researched. Mark as unlocked.`"
+                                                :aria-label="row.cells[tier].is_unlocked
+                                                    ? `Mark ${row.cells[tier].name} as not researched`
+                                                    : `Mark ${row.cells[tier].name} as unlocked`"
+                                                @click="setPurchase(row.cells[tier].tank_id, { is_unlocked: !row.cells[tier].is_unlocked })"
                                             >
-                                                <component :is="row.cells[tier].is_unlocked ? IconShoppingCart : IconLock" :size="12" stroke-width="2.25" />
-                                                {{ row.cells[tier].is_unlocked ? 'Buy' : 'Unlock' }}
+                                                <component :is="row.cells[tier].is_unlocked ? IconLock : IconLockOpen" :size="14" stroke-width="2.25" />
+                                            </button>
+
+                                            <EditableNumber
+                                                :field="'price_credit'"
+                                                :model-value="row.cells[tier].price"
+                                                :url="`/wot/grinding/purchases/${row.cells[tier].tank_id}`"
+                                                :only="['purchase', 'totals']"
+                                                :optimistic="optimisticPrice(row.cells[tier].tank_id)"
+                                                :tone="priceTone(row.cells[tier])"
+                                            />
+
+                                            <!-- Only offered once a price has been
+                                                 overridden; there is nothing to reset
+                                                 back to otherwise. Bordered like the
+                                                 other segments now that it sits inside
+                                                 the group rather than floating beside
+                                                 the number. -->
+                                            <button
+                                                v-if="row.cells[tier].is_discounted"
+                                                type="button"
+                                                class="inline-flex shrink-0 items-center justify-center border border-wot-border p-1 text-xs leading-none text-wot-dim transition-colors hover:text-wot-bad"
+                                                :title="`Reset to the ${n(row.cells[tier].api_price)} shop price`"
+                                                @click="setPurchase(row.cells[tier].tank_id, { price_credit: null })"
+                                            >
+                                                &times;
+                                            </button>
+
+                                            <!-- Researched vehicles only: buying one that
+                                                 is not researched yet is not a move the
+                                                 game offers, and the server would force
+                                                 is_unlocked back on anyway. -->
+                                            <button
+                                                v-if="row.cells[tier].is_unlocked"
+                                                type="button"
+                                                class="inline-flex shrink-0 items-center justify-center border border-wot-good/50 p-1 text-wot-good transition-colors hover:bg-wot-good/15"
+                                                :title="`${row.cells[tier].name} — researched. Mark as bought.`"
+                                                :aria-label="`Mark ${row.cells[tier].name} as bought`"
+                                                @click="setPurchase(row.cells[tier].tank_id, { is_purchased: true })"
+                                            >
+                                                <IconShoppingCart :size="14" stroke-width="2.25" />
                                             </button>
                                         </div>
                                 </template>
