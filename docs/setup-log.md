@@ -1901,3 +1901,31 @@ Live board: 55 rows, 17 tracked and 38 untracked, tiers VIII–XI, built in
 below the floor, and every remaining tier VII cell is owned.
 
 Suite: **178 passed, 893 assertions.**
+
+### Purchase filters, and per-tier totals
+
+A filter row between the tabs and the table: nation as flag buttons (rows), tier
+as Roman numerals (columns). Both multi-select, everything on by default.
+
+**Held as what is hidden, not what is selected.** Buying a tank can retire a
+nation from the board or collapse a tier column, and the set of options is
+therefore not stable across a request. A selected-set would have to guess
+whether an option that reappears was meant to be on; an inverted set makes
+"everything on" the resting state, keeps explicit deselections across reloads,
+and leaves stale entries harmless. `All` clears a row's exclusions, and only
+appears when there is something to clear.
+
+Filtering is client-side. Every figure is already in the payload, the page does
+no round trip for it, and the totals are derived from the same cells the table
+renders — so they cannot disagree with what is on screen.
+
+**Hiding a tier removes it from the totals**, rather than only from view. A
+filter that changed what you can see but not what you owe would be a worse
+answer to "what would this cost me". Per-tier totals were added to the footer at
+the same time: with nothing hidden they sum to the figure the server computed
+independently (12,730,000 + 49,870,000 + 244,000,000 + 192,400,000 =
+499,000,000), which is the check that the client arithmetic matches PurchaseBoard.
+
+The headline "Credits needed" card deliberately does *not* follow the filters —
+it is a page-level summary rendered on all five tabs, and a tab-local filter
+should not silently rewrite it.

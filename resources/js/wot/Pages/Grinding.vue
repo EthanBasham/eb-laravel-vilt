@@ -1,5 +1,5 @@
 <script setup>
-import { Head, router, useForm } from '@inertiajs/vue3';
+import { Head, router, useForm, usePage } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 import AppShell from '../Components/AppShell.vue';
 import EditableNumber from '../Components/EditableNumber.vue';
@@ -64,6 +64,43 @@ const setPurchase = (tankId, payload) => router.patch(`/wot/grinding/purchases/$
     preserveScroll: true,
     only: ['purchase', 'totals'],
 });
+
+/*
+ * Purchase filters.
+ *
+ * Held as what is *hidden* rather than what is selected, so everything starts on
+ * and stays on: buying a tank can retire a nation or collapse a tier column, and
+ * a selected-set would then have to guess whether a column that reappears later
+ * was meant to be on. Deselections survive that; stale entries are harmless.
+ */
+const hiddenNations = ref([]);
+const hiddenTiers = ref([]);
+
+const page = usePage();
+
+const drop = (list, value) => (list.includes(value)
+    ? list.filter((x) => x !== value)
+    : [...list, value]);
+
+const toggleNation = (nation) => (hiddenNations.value = drop(hiddenNations.value, nation));
+const toggleTier = (tier) => (hiddenTiers.value = drop(hiddenTiers.value, tier));
+
+// In tech-tree order, like every other vehicle list here.
+const purchaseNations = computed(() => {
+    const present = new Set(props.purchase.rows.map((r) => r.nation));
+
+    return Object.keys(page.props.nations ?? {}).filter((nation) => present.has(nation));
+});
+
+const shownTiers = computed(() => props.purchase.tiers.filter((t) => !hiddenTiers.value.includes(t)));
+const shownRows = computed(() => props.purchase.rows.filter((r) => !hiddenNations.value.includes(r.nation)));
+
+// Only cells in a visible column count. Hiding a tier takes its price off the
+// bill — otherwise the filter would change what you see but not what you owe.
+const cellCost = (cell) => (cell && !cell.is_purchased ? cell.price : 0);
+const rowRemaining = (row) => shownTiers.value.reduce((sum, t) => sum + cellCost(row.cells[t]), 0);
+const tierTotal = (tier) => shownRows.value.reduce((sum, r) => sum + cellCost(r.cells[tier]), 0);
+const grandTotal = computed(() => shownRows.value.reduce((sum, r) => sum + rowRemaining(r), 0));
 const short = (v) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : n(v));
 
 // Credits shortfall is the number that decides whether a plan is realistic.
@@ -207,98 +244,154 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
                 Nothing left to buy. Every tracked line has been bought out.
             </p>
 
-            <div v-else class="overflow-x-auto border border-wot-border bg-wot-panel">
-                <table class="min-w-full divide-y divide-wot-border text-sm">
-                    <thead class="bg-wot-sunken">
-                        <tr>
-                            <th scope="col" class="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Line</th>
-                            <th v-for="tier in purchase.tiers" :key="tier" scope="col"
-                                class="px-3 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">
-                                Tier {{ ROMAN[tier] }}
-                            </th>
-                            <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Remaining</th>
-                        </tr>
-                    </thead>
+            <template v-else>
+                <div class="mb-3 space-y-2 border border-wot-border bg-wot-panel p-3">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                        <span id="nation-filter" class="w-12 shrink-0 text-xs font-bold uppercase tracking-wider text-wot-dim">Nation</span>
+                        <button
+                            v-for="nation in purchaseNations"
+                            :key="nation"
+                            type="button"
+                            class="border p-1 leading-none transition-colors"
+                            :class="hiddenNations.includes(nation)
+                                ? 'border-wot-border opacity-30 hover:opacity-70'
+                                : 'border-wot-gold'"
+                            :aria-pressed="!hiddenNations.includes(nation)"
+                            @click="toggleNation(nation)"
+                        >
+                            <NationFlag :nation="nation" />
+                        </button>
+                        <button v-if="hiddenNations.length" type="button"
+                                class="ms-1 text-xs uppercase tracking-wider text-wot-dim hover:text-wot-text"
+                                @click="hiddenNations = []">
+                            All
+                        </button>
+                    </div>
 
-                    <tbody class="divide-y divide-wot-border-soft">
-                        <tr v-for="row in purchase.rows" :key="row.key" class="hover:bg-wot-sunken">
-                            <td class="whitespace-nowrap px-4 py-2">
-                                <NationFlag :nation="row.nation" class="me-2" />
-                                <span class="text-wot-heading">{{ row.name }}</span>
-                            </td>
+                    <div class="flex flex-wrap items-center gap-1.5">
+                        <span class="w-12 shrink-0 text-xs font-bold uppercase tracking-wider text-wot-dim">Tier</span>
+                        <button
+                            v-for="tier in purchase.tiers"
+                            :key="tier"
+                            type="button"
+                            class="min-w-9 border px-2 py-0.5 text-xs font-bold tracking-wider transition-colors"
+                            :class="hiddenTiers.includes(tier)
+                                ? 'border-wot-border text-wot-dim hover:text-wot-text'
+                                : 'border-wot-gold text-wot-gold'"
+                            :aria-pressed="!hiddenTiers.includes(tier)"
+                            :aria-label="`Tier ${ROMAN[tier]}`"
+                            @click="toggleTier(tier)"
+                        >
+                            {{ ROMAN[tier] }}
+                        </button>
+                        <button v-if="hiddenTiers.length" type="button"
+                                class="ms-1 text-xs uppercase tracking-wider text-wot-dim hover:text-wot-text"
+                                @click="hiddenTiers = []">
+                            All
+                        </button>
+                    </div>
+                </div>
 
-                            <td v-for="tier in purchase.tiers" :key="tier" class="px-3 py-2 text-right align-top">
-                                <template v-if="row.cells[tier]">
-                                    <!-- Owned: nothing left to pay, so the cell
-                                         reads zero rather than restating a price
-                                         that is no longer owed. -->
-                                    <button
-                                        v-if="row.cells[tier].is_purchased"
-                                        type="button"
-                                        class="tabular-nums text-wot-dim hover:text-wot-muted"
-                                        :title="`${row.cells[tier].name} — bought. Mark as not bought.`"
-                                        @click="setPurchase(row.cells[tier].tank_id, { is_purchased: false })"
-                                    >
-                                        0
-                                    </button>
+                <p v-if="!shownRows.length" class="border border-dashed border-wot-border p-8 text-center text-sm text-wot-dim">
+                    No lines match the selected nations.
+                </p>
 
-                                    <div v-else class="flex flex-col items-end gap-1">
-                                        <div class="flex items-center justify-end">
-                                            <EditableNumber
-                                                :field="'price_credit'"
-                                                :model-value="row.cells[tier].price"
-                                                :url="`/wot/grinding/purchases/${row.cells[tier].tank_id}`"
-                                                :only="['purchase', 'totals']"
-                                                :tone="row.cells[tier].is_unlocked ? 'text-wot-good' : 'text-wot-text'"
-                                            />
-                                            <!-- Only offered once a price has been
-                                                 overridden; there is nothing to
-                                                 reset back to otherwise. -->
+                <div v-else class="overflow-x-auto border border-wot-border bg-wot-panel">
+                    <table class="min-w-full divide-y divide-wot-border text-sm">
+                        <thead class="bg-wot-sunken">
+                            <tr>
+                                <th scope="col" class="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Line</th>
+                                <th v-for="tier in shownTiers" :key="tier" scope="col"
+                                    class="px-3 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">
+                                    Tier {{ ROMAN[tier] }}
+                                </th>
+                                <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Remaining</th>
+                            </tr>
+                        </thead>
+
+                        <tbody class="divide-y divide-wot-border-soft">
+                            <tr v-for="row in shownRows" :key="row.key" class="hover:bg-wot-sunken">
+                                <td class="whitespace-nowrap px-4 py-2">
+                                    <NationFlag :nation="row.nation" class="me-2" />
+                                    <span class="text-wot-heading">{{ row.name }}</span>
+                                </td>
+
+                                <td v-for="tier in shownTiers" :key="tier" class="px-3 py-2 text-right align-top">
+                                    <template v-if="row.cells[tier]">
+                                        <!-- Owned: nothing left to pay, so the cell
+                                             reads zero rather than restating a price
+                                             that is no longer owed. -->
+                                        <button
+                                            v-if="row.cells[tier].is_purchased"
+                                            type="button"
+                                            class="tabular-nums text-wot-dim hover:text-wot-muted"
+                                            :title="`${row.cells[tier].name} — bought. Mark as not bought.`"
+                                            @click="setPurchase(row.cells[tier].tank_id, { is_purchased: false })"
+                                        >
+                                            0
+                                        </button>
+
+                                        <div v-else class="flex flex-col items-end gap-1">
+                                            <div class="flex items-center justify-end">
+                                                <EditableNumber
+                                                    :field="'price_credit'"
+                                                    :model-value="row.cells[tier].price"
+                                                    :url="`/wot/grinding/purchases/${row.cells[tier].tank_id}`"
+                                                    :only="['purchase', 'totals']"
+                                                    :tone="row.cells[tier].is_unlocked ? 'text-wot-good' : 'text-wot-text'"
+                                                />
+                                                <!-- Only offered once a price has been
+                                                     overridden; there is nothing to
+                                                     reset back to otherwise. -->
+                                                <button
+                                                    v-if="row.cells[tier].is_discounted"
+                                                    type="button"
+                                                    class="ms-1 text-xs text-wot-dim hover:text-wot-bad"
+                                                    :title="`Reset to the ${n(row.cells[tier].api_price)} shop price`"
+                                                    @click="setPurchase(row.cells[tier].tank_id, { price_credit: null })"
+                                                >
+                                                    &times;
+                                                </button>
+                                            </div>
+
                                             <button
-                                                v-if="row.cells[tier].is_discounted"
                                                 type="button"
-                                                class="ms-1 text-xs text-wot-dim hover:text-wot-bad"
-                                                :title="`Reset to the ${n(row.cells[tier].api_price)} shop price`"
-                                                @click="setPurchase(row.cells[tier].tank_id, { price_credit: null })"
+                                                class="border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors"
+                                                :class="row.cells[tier].is_unlocked
+                                                    ? 'border-wot-good/50 text-wot-good hover:bg-wot-good/15'
+                                                    : 'border-wot-border text-wot-dim hover:text-wot-text'"
+                                                :title="row.cells[tier].name"
+                                                @click="row.cells[tier].is_unlocked
+                                                    ? setPurchase(row.cells[tier].tank_id, { is_purchased: true })
+                                                    : setPurchase(row.cells[tier].tank_id, { is_unlocked: true })"
                                             >
-                                                &times;
+                                                {{ row.cells[tier].is_unlocked ? 'Buy' : 'Unlock' }}
                                             </button>
                                         </div>
-
-                                        <button
-                                            type="button"
-                                            class="border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors"
-                                            :class="row.cells[tier].is_unlocked
-                                                ? 'border-wot-good/50 text-wot-good hover:bg-wot-good/15'
-                                                : 'border-wot-border text-wot-dim hover:text-wot-text'"
-                                            :title="row.cells[tier].name"
-                                            @click="row.cells[tier].is_unlocked
-                                                ? setPurchase(row.cells[tier].tank_id, { is_purchased: true })
-                                                : setPurchase(row.cells[tier].tank_id, { is_unlocked: true })"
-                                        >
-                                            {{ row.cells[tier].is_unlocked ? 'Buy' : 'Unlock' }}
-                                        </button>
-                                    </div>
                                 </template>
                             </td>
 
-                            <td class="px-4 py-2 text-right tabular-nums font-bold text-wot-heading">{{ n(row.credits_remaining) }}</td>
+                            <td class="px-4 py-2 text-right tabular-nums font-bold text-wot-heading">{{ n(rowRemaining(row)) }}</td>
                         </tr>
                     </tbody>
 
-                    <tfoot v-if="purchase.rows.length > 1" class="border-t-2 border-wot-border bg-wot-sunken">
+                    <tfoot v-if="shownRows.length > 1" class="border-t-2 border-wot-border bg-wot-sunken">
                         <tr>
                             <th scope="row" class="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Total</th>
-                            <td v-for="tier in purchase.tiers" :key="tier" class="px-3 py-3" />
-                            <td class="px-4 py-3 text-right tabular-nums font-bold text-wot-heading">{{ n(purchase.credits_required) }}</td>
+                            <td v-for="tier in shownTiers" :key="tier" class="px-3 py-3 text-right tabular-nums text-wot-muted">
+                                {{ n(tierTotal(tier)) }}
+                            </td>
+                            <td class="px-4 py-3 text-right tabular-nums font-bold text-wot-heading">{{ n(grandTotal) }}</td>
                         </tr>
                     </tfoot>
                 </table>
             </div>
 
+            </template>
+
             <p class="mt-3 text-xs text-wot-dim">
                 Prices come from the encyclopedia and can be typed over when a seasonal discount applies.
-                A line disappears once its last vehicle is bought.
+                A line disappears once its last vehicle is bought. Hiding a tier takes it out of the totals.
             </p>
         </section>
 
