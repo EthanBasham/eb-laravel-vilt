@@ -122,21 +122,22 @@ class NewsController extends Controller
     /**
      * Pin an article to the top of this user's feed.
      *
-     * Idempotent: pinning something already pinned refreshes its position
-     * rather than failing on the unique constraint.
+     * Idempotent: pinning something already pinned refreshes pinned_at rather
+     * than failing on the unique constraint. That timestamp no longer drives
+     * ordering — see WotArticle::scopePinnedFirstFor() — but is kept current
+     * for the "pinned" state itself.
      */
     public function pin(Request $request, WotArticle $article): RedirectResponse
     {
         // syncWithoutDetaching already refreshes pinned_at on a row that exists
         // — its attachNew() calls updateExistingPivot for ids already present —
-        // so re-pinning moves the article back to the top without a second
-        // call. An earlier version had one; it was redundant.
+        // so a second call isn't needed here.
         $request->user()->pinnedArticles()->syncWithoutDetaching([
             $article->id => ['pinned_at' => now()],
         ]);
 
-        // No flash message: the card gains its pinned styling and jumps to the
-        // top of the list, which says it more directly than a banner would.
+        // No flash message: the card gains its pinned styling and jumps into
+        // the pinned group, which says it more directly than a banner would.
         return back(fallback: route('wot.news.index'));
     }
 

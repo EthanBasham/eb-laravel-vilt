@@ -71,12 +71,14 @@ class WotArticle extends Model
 
     /**
      * Newest first, but with this user's pinned articles hoisted above
-     * everything and their most recent pin at the very top.
+     * everything else as a group. Pinning only groups; it does not reorder
+     * within the group, so a pinned article still sits by `published_at`
+     * among the other pins.
      *
-     * A left join rather than a `whereHas`, because the pin timestamp has to be
-     * available to ORDER BY — and this way one query still serves the paginator.
-     * `wot_articles.*` is selected explicitly since the join puts an `id` on
-     * both sides.
+     * A left join rather than a `whereHas`, because pinned-ness has to be
+     * available to ORDER BY — and this way one query still serves the
+     * paginator. `wot_articles.*` is selected explicitly since the join puts
+     * an `id` on both sides.
      */
     public function scopePinnedFirstFor(Builder $query, ?User $user): Builder
     {
@@ -98,7 +100,6 @@ class WotArticle extends Model
             // Postgres sorts false before true, so "is null" ascending puts the
             // pinned rows first without needing a CASE expression.
             ->orderByRaw('wot_article_pins.pinned_at is null')
-            ->orderByDesc('wot_article_pins.pinned_at')
             ->orderByDesc('wot_articles.published_at')
             // Deterministic tiebreaker; see inDefaultOrder().
             ->orderByDesc('wot_articles.id');

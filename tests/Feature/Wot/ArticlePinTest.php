@@ -26,18 +26,20 @@ it('pins an article and hoists it above newer ones', function () {
     );
 });
 
-it('orders several pins with the most recently pinned first', function () {
+it('orders several pins by published date, not by when they were pinned', function () {
     $user = User::factory()->create();
-    $first = WotArticle::factory()->create(['title' => 'Pinned first']);
-    $second = WotArticle::factory()->create(['title' => 'Pinned second']);
+    $newer = WotArticle::factory()->create(['title' => 'Newer', 'published_at' => now()]);
+    $older = WotArticle::factory()->create(['title' => 'Older', 'published_at' => now()->subWeek()]);
 
-    $this->actingAs($user)->post(route('wot.news.pin', $first));
+    // Pin the older article second, after the newer one — pin order must not
+    // override publish order within the pinned group.
+    $this->actingAs($user)->post(route('wot.news.pin', $newer));
     $this->travel(1)->minutes();
-    $this->actingAs($user)->post(route('wot.news.pin', $second));
+    $this->actingAs($user)->post(route('wot.news.pin', $older));
 
     $this->actingAs($user)->get(route('wot.news.index'))->assertInertia(fn ($page) => $page
-        ->where('articles.data.0.title', 'Pinned second')
-        ->where('articles.data.1.title', 'Pinned first'),
+        ->where('articles.data.0.title', 'Newer')
+        ->where('articles.data.1.title', 'Older'),
     );
 });
 
@@ -52,10 +54,9 @@ it('unpins', function () {
 });
 
 /**
- * Pinning twice must not violate the unique constraint, and must refresh the
- * position rather than silently leaving it where it was.
+ * Pinning twice must not violate the unique constraint.
  */
-it('re-pinning is idempotent and moves the article back to the top', function () {
+it('re-pinning is idempotent', function () {
     $user = User::factory()->create();
     $first = WotArticle::factory()->create(['title' => 'First']);
     $second = WotArticle::factory()->create(['title' => 'Second']);
@@ -67,10 +68,6 @@ it('re-pinning is idempotent and moves the article back to the top', function ()
     $this->actingAs($user)->post(route('wot.news.pin', $first))->assertRedirect();
 
     expect($user->pinnedArticles()->count())->toBe(2);
-
-    $this->actingAs($user)->get(route('wot.news.index'))->assertInertia(fn ($page) => $page
-        ->where('articles.data.0.title', 'First'),
-    );
 });
 
 /**

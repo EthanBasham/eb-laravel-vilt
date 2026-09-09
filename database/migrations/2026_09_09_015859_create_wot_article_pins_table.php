@@ -23,7 +23,9 @@ return new class extends Migration
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->foreignId('wot_article_id')->constrained()->cascadeOnDelete();
 
-            // Ordering among pins: most recently pinned sits at the very top.
+            // When this row was pinned. Not used for ordering pinned articles
+            // against each other — see WotArticle::scopePinnedFirstFor() — but
+            // still read for "pinned" state and to refresh on re-pin.
             $table->timestamp('pinned_at');
 
             $table->timestamps();
@@ -31,7 +33,8 @@ return new class extends Migration
             // Pinning twice is idempotent, not a second row.
             $table->unique(['user_id', 'wot_article_id']);
 
-            // The listing joins on user_id and orders by pinned_at.
+            // The listing joins on user_id; pinned_at itself is no longer part
+            // of the sort, but the composite index still serves the join.
             $table->index(['user_id', 'pinned_at']);
         });
     }
