@@ -42,8 +42,11 @@ it('extracts exact session times from an event calendar', function () {
         ->and($events[0]['title'])->toBe('AMD OLS#7 Phase 1 Day 1')
         ->and($events[0]['source'])->toBe(WotEvent::SOURCE_CALENDAR)
         ->and($events[0]['event_type'])->toBe('stream')
-        ->and($events[0]['starts_at']->toDateTimeString())->toBe('2026-09-08 16:00:00')
-        ->and($events[0]['ends_at']->toDateTimeString())->toBe('2026-09-08 22:59:00')
+        // Asserted in UTC, the timezone the source markup states. The values
+        // are stored in app time, so a bare toDateTimeString() here would be
+        // asserting config('app.timezone') rather than the parser.
+        ->and($events[0]['starts_at']->utc()->toDateTimeString())->toBe('2026-09-08 16:00:00')
+        ->and($events[0]['ends_at']->utc()->toDateTimeString())->toBe('2026-09-08 22:59:00')
         ->and($events[0]['metadata']['tokens'])->toBe('5')
         ->and($events[0]['metadata']['rewards'])->toContain('5 Tokens');
 });
@@ -59,7 +62,7 @@ it('handles the run-together attributes the live site emits', function () {
 
     $events = app(EventExtractor::class)->extract(newsFixture('calendar-article.html'), 'Fallback');
 
-    expect($events[1]['starts_at']->toDateTimeString())->toBe('2026-09-10 16:00:00');
+    expect($events[1]['starts_at']->utc()->toDateTimeString())->toBe('2026-09-10 16:00:00');
 });
 
 it('falls back to a coarse window when there is no calendar', function () {
@@ -68,8 +71,30 @@ it('falls back to a coarse window when there is no calendar', function () {
     expect($events)->toHaveCount(1)
         ->and($events[0]['source'])->toBe(WotEvent::SOURCE_WINDOW)
         ->and($events[0]['title'])->toBe('Boosteroid September')
-        ->and($events[0]['starts_at']->toDateTimeString())->toBe('2026-09-07 09:00:00')
-        ->and($events[0]['ends_at']->toDateTimeString())->toBe('2026-10-19 09:00:00');
+        ->and($events[0]['starts_at']->utc()->toDateTimeString())->toBe('2026-09-07 09:00:00')
+        ->and($events[0]['ends_at']->utc()->toDateTimeString())->toBe('2026-10-19 09:00:00');
+});
+
+/**
+ * Both news sources are UTC — an RSS pubDate carries "+0000" and the calendar
+ * markup says so outright — but the datetime columns are `timestamp`, which
+ * holds a bare wall clock. Eloquent writes a Carbon in whatever timezone that
+ * instance carries and reads the string back as app time, so an unconverted
+ * value would be stored UTC and read as Central, putting every article and
+ * event hours off. This guards the conversion that closes that gap.
+ */
+it('normalises feed and calendar times to the application timezone', function () {
+    config(['app.timezone' => 'America/Chicago']);
+
+    $items = app(FeedParser::class)->parse(newsFixture('news.rss'));
+    $events = app(EventExtractor::class)->extract(newsFixture('calendar-article.html'), 'Fallback');
+
+    expect($items[0]['published_at']->timezoneName)->toBe('America/Chicago')
+        ->and($events[0]['starts_at']->timezoneName)->toBe('America/Chicago')
+        ->and($events[0]['ends_at']->timezoneName)->toBe('America/Chicago')
+        // Re-expressed, not shifted: the instant is the one the source stated.
+        ->and($events[0]['starts_at']->toDateTimeString())->toBe('2026-09-08 11:00:00')
+        ->and($events[0]['starts_at']->utc()->toDateTimeString())->toBe('2026-09-08 16:00:00');
 });
 
 /**

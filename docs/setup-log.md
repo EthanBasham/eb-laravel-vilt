@@ -2021,3 +2021,106 @@ different, non-Nazi historical variant, and asked not to have content calls
 like this made unilaterally going forward. At 29x18 with heavy fabric-wave
 shading the disc is genuinely hard to read with certainty either way — noted
 here for whoever looks at this file next, not as a re-litigation of the call.
+
+
+## 2026-09-09 — APP_TIMEZONE moved to America/Chicago, and news syncs three times a day
+
+Two requested changes that turned out to be entangled.
+
+### The schedule
+
+`wot:sync-news` moved from `twiceDaily(6, 18)` to 07:00 / 12:00 / 17:00. Written as a
+cron expression with an explicit `->timezone('America/Chicago')` rather than inheriting
+`app.timezone`: these are wall-clock times chosen to suit a working day, so they should
+stay put if the app timezone moves again. `schedule:list` renders it as
+`0 12-22/5 * * *` — the UTC translation, and the check that it means what it should.
+
+None of the three sit near 02:00, which matters for a non-UTC schedule: spring-forward
+would skip a 02:00 task and fall-back would run it twice.
+
+### The timezone, and why it was not a one-line change
+
+`config/app.php` had `'timezone' => 'UTC'` **hardcoded, with no `env()` call**, so setting
+`APP_TIMEZONE` in `.env` would have been a silent no-op. That was the first surprise.
+
+The second was worse. These datetime columns are `timestamp` — no zone — so a row holds a
+bare wall clock and nothing records which zone wrote it. Eloquent's two halves then
+disagree, and the asymmetry is visible in the framework source:
+
+| | what it does | source |
+|---|---|---|
+| write | `asDateTime($value)->format()`; for a Carbon it hits `Date::instance($value)`, returned **untouched**, so it formats in whatever zone that instance already carries | `HasAttributes::fromDateTime`, line 1625 |
+| read | `Date::createFromFormat($format, $value)` with **no `$tz` argument**, so PHP applies `date_default_timezone_get()` — i.e. `app.timezone` | `HasAttributes::asDateTime`, string branch |
+
+In most Laravel apps this never surfaces: values come from `now()`, are written in app time
+and read as app time, and stay consistent — which is exactly why the change looked routine.
+This app is the exception. Its timestamps come from Wargaming in UTC, and both producers pin
+UTC regardless of `app.timezone`:
+
+- `FeedParser::date()` — an RSS `pubDate` carries `+0000`, so `Carbon::parse()` keeps that
+  offset instead of adopting app time.
+- `EventExtractor` — `createFromTimestampUTC()` and `createFromFormat(..., 'UTC')`.
+
+So flipping `APP_TIMEZONE` alone would have moved only the read side. The same stored bytes,
+under both settings:
+
+```
+app.timezone=UTC              write=2026-09-09 09:00:00  read=...T09:00:00+00:00  -> browser shows 4:00 AM
+app.timezone=America/Chicago  write=2026-09-09 09:00:00  read=...T09:00:00-05:00  -> browser shows 9:00 AM
+```
+
+Nothing about the row changed — only its interpretation. Every article and event would have
+read five hours late, new rows included.
+
+### What was actually done
+
+1. `config/app.php` → `env('APP_TIMEZONE', 'UTC')`, with the asymmetry documented at the
+   config value where someone changing it will read it.
+2. `APP_TIMEZONE=America/Chicago` in `.env` and `.env.example`, and in production's
+   `shared/.env`.
+3. `FeedParser` and `EventExtractor` now `->setTimezone(config('app.timezone'))` before
+   returning. The instant is unchanged; only its expression moves.
+4. A migration, `convert_timestamps_from_utc_to_app_timezone`, rebasing existing rows.
+
+The migration discovers its targets from `information_schema` rather than listing them — 43
+zone-less timestamp columns across 17 tables, which is more than the news tables because every
+`created_at` in the database was written by a UTC `now()`. It converts in Postgres via
+`AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago'` so the offset used is the one actually in
+force on each row's own date; the articles span 2023–2026 and straddle several CST/CDT
+boundaries, so a flat five-hour subtraction would have been wrong for roughly half of them.
+It no-ops on non-pgsql so the SQLite test database, which is created empty each run and has no
+legacy data, is unaffected.
+
+### Tests
+
+Three existing assertions compared `starts_at->toDateTimeString()` against a UTC wall clock
+and failed — correctly, and by exactly the offset. They now assert `->utc()->toDateTimeString()`,
+which pins the instant the source stated rather than whatever `app.timezone` happens to be.
+A new test covers the normalisation itself. **15 passed, 42 assertions.**
+
+### What the frontend was already doing
+
+Worth recording, because it nearly made the whole change unnecessary: every date in
+`resources/js/wot/` renders through `toLocaleString(undefined, ...)`, where `undefined` means
+the *viewer's* timezone. With storage in UTC and a correct `...Z` on the wire, Central times
+were already being displayed. The change is still coherent — server-side times, logs and
+`now()` are now Central too — but the dashboard looked the same before and after, and that is
+the expected outcome rather than a sign it did not work.
+
+## 2026-09-09 — Tabler icons added to the WoT sub-project
+
+Evaluated Font Awesome alternatives at the user's request (Lucide, Heroicons, Tabler, Phosphor
+— all MIT, all free with no Pro paywall, unlike Font Awesome's free tier). User picked Tabler
+for its size (~5,900 icons) and coverage of dashboard-y glyphs.
+
+Installed `@tabler/icons-vue@3.46.0` — per-icon Vue 3 components, tree-shaken by Vite so only
+icons actually imported ship in the bundle. Scoped to the `resources/js/wot/` island only; the
+base app stays icon-library-free per the "no framework in the base app" rule — a future Blade
+sub-project wanting icons should evaluate inline SVG or a webfont build rather than assuming
+this package is available outside `wot/`.
+
+Test case: `Grinding.vue`'s Tanks-to-Purchase Unlock/Buy button now renders `IconLock` /
+`IconShoppingCart` (from `@tabler/icons-vue`) next to the existing label, switched by the same
+`is_unlocked` condition that already drove the label text and border color. Presentational
+only — no props, backend, or test assertions changed; `GrindingTest.php` still passes
+(49 passed, 390 assertions) since it never asserted on button markup.

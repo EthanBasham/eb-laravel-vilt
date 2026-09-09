@@ -60,12 +60,19 @@ return [
     |--------------------------------------------------------------------------
     |
     | Here you may specify the default timezone for your application, which
-    | will be used by the PHP date and date-time functions. The timezone
-    | is set to "UTC" by default as it is suitable for most use cases.
+    | will be used by the PHP date and date-time functions.
+    |
+    | This drives both halves of Eloquent's datetime handling, which are not
+    | symmetrical: a write formats a Carbon in whatever timezone that instance
+    | already carries, while a read parses the stored string as though it were
+    | in this timezone. The datetime columns here are `timestamp` (no zone), so
+    | they hold a bare wall clock and cannot correct a mismatch. Anything
+    | persisted must therefore be converted to this timezone first — see
+    | FeedParser and EventExtractor, whose sources are UTC.
     |
     */
 
-    'timezone' => 'UTC',
+    'timezone' => env('APP_TIMEZONE', 'UTC'),
 
     /*
     |--------------------------------------------------------------------------

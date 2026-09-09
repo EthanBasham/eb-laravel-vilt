@@ -27,5 +27,16 @@ Schedule::command('wot:sync-expected-values')->weeklyOn(1, '03:30');
 
 // News feeds are cheap to poll; article bodies are one request each against
 // someone else's server, so the command caps how many it fetches per run and
-// picks up the rest next time. Twice a day is ample for a news site.
-Schedule::command('wot:sync-news')->twiceDaily(6, 18)->withoutOverlapping();
+// picks up the rest next time. Three passes a day spread across working hours,
+// so an article published mid-morning is on the site the same day.
+//
+// The timezone is pinned explicitly rather than inherited from app.timezone:
+// these are wall-clock times someone chose to suit a working day, so they
+// should stay put if the app's own timezone ever moves. The DST caveat that
+// comes with a non-UTC schedule applies — on the spring-forward day a 02:00
+// task would be skipped and on fall-back it would repeat, which is why none of
+// these three sit near 02:00.
+Schedule::command('wot:sync-news')
+    ->cron('0 7,12,17 * * *')
+    ->timezone('America/Chicago')
+    ->withoutOverlapping();

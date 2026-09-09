@@ -301,6 +301,46 @@ This doesn't replace guard clauses — `abort_unless(...)` and friends still bel
 of the method. The distinction is that a guard rejects a case that shouldn't proceed, while
 this is about two legitimate return values.
 
+### Time and timezones
+
+**`APP_TIMEZONE=America/Chicago`**, set in `.env` on both local and production. `config/app.php`
+reads it via `env('APP_TIMEZONE', 'UTC')` — it was a hardcoded `'UTC'` until 2026-09-09, so an
+`APP_TIMEZONE` key in `.env` did nothing at all. If timezone changes ever appear not to take,
+check that the `env()` call is still there before looking anywhere else.
+
+**Anything persisted must be converted to app time first.** The datetime columns are `timestamp`
+— no zone — so a row stores a bare wall clock with no record of which zone produced it. Eloquent's
+two halves then disagree: a **write** formats a Carbon in whatever timezone that instance already
+carries (`HasAttributes::fromDateTime` → `asDateTime`, which returns a Carbon untouched), while a
+**read** parses the stored string with no `$tz` argument, so PHP applies `app.timezone`. Write
+preserves the source zone; read assumes app time.
+
+For most Laravel apps this never surfaces, because values come from `now()` and are already in app
+time. This app is the exception — its timestamps come from Wargaming, in UTC:
+
+- `FeedParser::date()` — an RSS `pubDate` carries its own `+0000`, so `Carbon::parse()` keeps that
+  offset rather than adopting app time.
+- `EventExtractor` — `createFromTimestampUTC()` and `createFromFormat(..., 'UTC')` are explicitly
+  UTC.
+
+Both now `->setTimezone(config('app.timezone'))` before returning. Drop that from a new source and
+nothing errors — the rows just read five hours late.
+
+**Assert instants in tests, not wall clocks.** `expect($event['starts_at']->utc()->toDateTimeString())`,
+not `->toDateTimeString()`. The bare form asserts `config('app.timezone')` as much as it asserts the
+parser, and moves the day the app timezone moves.
+
+**The frontend already localises.** Every date in `resources/js/wot/` renders through
+`toLocaleString(undefined, …)` / `toLocaleDateString(undefined, …)`, where `undefined` means the
+*viewer's* locale and timezone. The server's job is to serialise a correct instant; the browser
+places it. Don't add server-side timezone formatting for display.
+
+**Schedule times are pinned separately.** `routes/console.php` sets `->timezone('America/Chicago')`
+explicitly on `wot:sync-news` rather than inheriting `app.timezone`, so those wall-clock times stay
+put if the app timezone ever moves again. A non-UTC schedule carries the usual DST caveat: a task at
+02:00 would be skipped on spring-forward and repeated on fall-back, so keep scheduled times away
+from 02:00.
+
 ### Progressive enhancement
 
 Every jQuery behaviour has a working no-JS path, and that's a requirement rather than a nice

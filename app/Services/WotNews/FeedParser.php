@@ -75,6 +75,16 @@ class FeedParser
     {
         // A malformed or missing pubDate shouldn't lose the article; it just
         // sorts as "now" until the next sync corrects it.
-        return rescue(fn (): Carbon => Carbon::parse($value), fn (): Carbon => Carbon::now(), report: false);
+        //
+        // The conversion is not cosmetic. A feed pubDate carries its own offset
+        // ("+0000"), so Carbon keeps that offset and Eloquent would persist a
+        // UTC wall clock into a column the read side interprets as app time.
+        // Normalising here keeps the stored value in the one timezone
+        // everything is read back in. The instant is unchanged either way.
+        return rescue(
+            fn (): Carbon => Carbon::parse($value)->setTimezone(config('app.timezone')),
+            fn (): Carbon => Carbon::now(),
+            report: false,
+        );
     }
 }

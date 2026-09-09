@@ -153,8 +153,8 @@ class EventExtractor
 
         return [[
             'title' => $title,
-            'starts_at' => Carbon::createFromTimestampUTC(min($stamps)),
-            'ends_at' => Carbon::createFromTimestampUTC(max($stamps)),
+            'starts_at' => Carbon::createFromTimestampUTC(min($stamps))->setTimezone(config('app.timezone')),
+            'ends_at' => Carbon::createFromTimestampUTC(max($stamps))->setTimezone(config('app.timezone')),
             'event_type' => null,
             'source' => WotEvent::SOURCE_WINDOW,
             'metadata' => null,
@@ -187,8 +187,11 @@ class EventExtractor
             return null;
         }
 
+        // Parsed as UTC because the source markup says so, then moved to app
+        // time for storage — see the note on config('app.timezone').
         return rescue(
-            fn (): Carbon => Carbon::createFromFormat('Y-m-d H:i:s', $date.' '.($time ?: '00:00:00'), 'UTC'),
+            fn (): Carbon => Carbon::createFromFormat('Y-m-d H:i:s', $date.' '.($time ?: '00:00:00'), 'UTC')
+                ->setTimezone(config('app.timezone')),
             null,
             report: false,
         );
