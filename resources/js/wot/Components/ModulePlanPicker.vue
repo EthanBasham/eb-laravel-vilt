@@ -113,19 +113,31 @@ const n = (v) => new Intl.NumberFormat().format(v ?? 0);
 
             <ul role="list" class="space-y-0.5">
                 <li v-for="module in cell.modules" :key="module.module_id">
+                    <!-- Researched already, so there is nothing left to buy
+                         with Free XP. Shown struck through rather than dropped,
+                         so the list does not silently shrink as a line is
+                         finished — and so it is obvious why it cannot be
+                         ticked. -->
                     <label
-                        class="flex cursor-pointer items-center gap-2 px-1 py-1 text-sm transition-colors hover:bg-wot-sunken"
-                        :class="busy === module.module_id ? 'opacity-50' : ''"
+                        class="flex items-center gap-2 px-1 py-1 text-sm transition-colors"
+                        :class="[
+                            module.is_researched ? 'cursor-default opacity-60' : 'cursor-pointer hover:bg-wot-sunken',
+                            busy === module.module_id ? 'opacity-50' : '',
+                        ]"
+                        :title="module.is_researched ? `${module.name} — already researched` : null"
                     >
                         <input
                             type="checkbox"
                             class="border"
                             :checked="module.is_planned"
-                            :disabled="busy !== null"
+                            :disabled="busy !== null || module.is_researched"
                             @change="toggle(module)"
                         >
                         <span class="w-14 shrink-0 text-xs uppercase tracking-wider text-wot-dim">{{ module.slot }}</span>
-                        <span class="min-w-0 flex-1 truncate" :class="module.is_planned ? 'text-wot-gold' : 'text-wot-text'">
+                        <span
+                            class="min-w-0 flex-1 truncate"
+                            :class="module.is_researched ? 'text-wot-dim line-through' : (module.is_planned ? 'text-wot-gold' : 'text-wot-text')"
+                        >
                             {{ module.name }}
                         </span>
                         <span class="shrink-0 tabular-nums" :class="module.is_planned ? 'text-wot-gold' : 'text-wot-muted'">

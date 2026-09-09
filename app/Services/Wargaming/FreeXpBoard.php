@@ -25,6 +25,7 @@ class FreeXpBoard
     public function __construct(
         private readonly TechTreeLines $lines,
         private readonly ModuleTree $moduleTree,
+        private readonly AccountProgress $progress,
     ) {}
 
     /**
@@ -74,14 +75,20 @@ class FreeXpBoard
         $modules = $this->modulesFor($tankIds->all());
         $plans = $this->plans($account);
 
-        return $lines->map(function (array $line) use ($modules, $plans): array {
+        // A researched module is not worth Free XP, so this board has to know
+        // the same thing XP Remaining does — including the assumption that a
+        // vehicle whose successor you unlocked was finished on the way.
+        $owned = $this->progress->for($account);
+
+        return $lines->map(function (array $line) use ($modules, $plans, $owned): array {
             $cells = $line['vehicles']
                 ->map(fn ($v): array => $this->cell(
                     $v->tank_id,
                     $v->name,
                     $v->tier,
                     $modules->get($v->tank_id) ?? collect(),
-                    $plans->get($v->tank_id)?->planned_module_ids ?? [],
+                    $plans->get($v->tank_id),
+                    $owned[$v->tank_id]['modules_researched'] ?? false,
                 ))
                 ->sortBy('tier')
                 ->values();
@@ -97,12 +104,17 @@ class FreeXpBoard
 
     /**
      * @param  Collection<int, WotVehicleModule>  $modules
-     * @param  list<int>  $plannedIds
      * @return array<string, mixed>
      */
-    private function cell(int $tankId, string $name, int $tier, Collection $modules, array $plannedIds): array
-    {
-        $planned = array_flip($plannedIds);
+    private function cell(
+        int $tankId,
+        string $name,
+        int $tier,
+        Collection $modules,
+        ?WotTankModule $tankModule,
+        bool $researchedByDefault,
+    ): array {
+        $planned = array_flip($tankModule?->planned_module_ids ?? []);
 
         $options = $modules->where('is_default', false)->map(fn (WotVehicleModule $m): array => [
             'module_id' => $m->module_id,
@@ -110,6 +122,10 @@ class FreeXpBoard
             'slot' => $m->slot(),
             'price_xp' => (int) $m->price_xp,
             'is_planned' => isset($planned[$m->module_id]),
+            // Already researched, so there is nothing here to buy. Shown rather
+            // than hidden, so a dropdown does not silently shrink as a line is
+            // finished.
+            'is_researched' => WotTankModule::isResearched($tankModule, $m->module_id, $researchedByDefault),
         ])->values();
 
         /*
@@ -134,7 +150,8 @@ class FreeXpBoard
                 ...$topGun,
                 'outstanding' => (int) $modules
                     ->whereIn('module_id', $topGun['module_ids'])
-                    ->reject(fn (WotVehicleModule $m): bool => isset($planned[$m->module_id]))
+                    ->reject(fn (WotVehicleModule $m): bool => isset($planned[$m->module_id])
+                        || WotTankModule::isResearched($tankModule, $m->module_id, $researchedByDefault))
                     ->sum('price_xp'),
             ],
             'planned_xp' => (int) $options->where('is_planned', true)->sum('price_xp'),

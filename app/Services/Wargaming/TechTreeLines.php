@@ -36,6 +36,9 @@ class TechTreeLines
      */
     public const FLOOR_TIER = 1;
 
+    /** @var array<int, Collection<int, array<string, mixed>>> */
+    private array $cache = [];
+
     public function __construct(private readonly TechTree $tree) {}
 
     /**
@@ -49,6 +52,18 @@ class TechTreeLines
      * @return Collection<int, array{key: string, tank_id: int, name: string, nation: ?string, tier: ?int, type: ?string, vehicles: Collection<int, WotVehicle>}>
      */
     public function lines(int $minTier): Collection
+    {
+        // Memoised, and the service is a singleton for the request: all three
+        // boards want the same list, and building it walks every vehicle's
+        // ancestry. Keyed by tier because the floor is an argument, even though
+        // nothing passes two different ones today.
+        return $this->cache[$minTier] ??= $this->build($minTier);
+    }
+
+    /**
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function build(int $minTier): Collection
     {
         return $this->tree->vehicles()
             ->reject(fn (WotVehicle $v): bool => $v->is_premium
@@ -107,6 +122,20 @@ class TechTreeLines
             'type' => $namedBy->type,
             'vehicles' => $vehicles,
         ];
+    }
+
+    /**
+     * Every vehicle in the encyclopedia, keyed by tank id.
+     *
+     * Exposed because callers that have a line list usually want to look a
+     * vehicle up by id as well, and going back to TechTree for it would mean
+     * injecting both.
+     *
+     * @return Collection<int, WotVehicle>
+     */
+    public function vehicles(): Collection
+    {
+        return $this->tree->vehicles();
     }
 
     /** The vehicle a line unlocks beyond its top, where one exists. */

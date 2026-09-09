@@ -27,7 +27,7 @@ class XpBoard
 {
     public function __construct(
         private readonly TechTreeLines $lines,
-        private readonly LineOwnership $ownership,
+        private readonly AccountProgress $progress,
     ) {}
 
     /**
@@ -70,11 +70,14 @@ class XpBoard
             ->groupBy('tank_id');
 
         $purchases = $account->tankPurchases()->get()->keyBy('tank_id');
-        $played = $account->vehicleSnapshots()->distinct()->pluck('tank_id')->flip();
         $tankModules = WotTankModule::where('wot_account_id', $account->id)->get()->keyBy('tank_id');
 
-        return $lines->map(function (array $line) use ($modules, $purchases, $played, $tankModules): array {
-            $owned = $this->ownership->along($line['vehicles'], $purchases, $played);
+        // Account-wide rather than per line: owning a tank is a fact about the
+        // tank, so the same vehicle cannot be settled on one row and open on
+        // another.
+        $owned = $this->progress->for($account);
+
+        return $lines->map(function (array $line) use ($modules, $purchases, $owned, $tankModules): array {
             $byTier = $line['vehicles'];
 
             $cells = $byTier
@@ -104,7 +107,7 @@ class XpBoard
     /**
      * @param  Collection<int, WotVehicleModule>  $modules
      * @param  Collection<int, WotTankPurchase>  $purchases
-     * @param  array<int, array{is_purchased: bool, is_unlocked: bool}>  $owned
+     * @param  array<int, array{is_purchased: bool, is_unlocked: bool, modules_researched: bool}>  $owned
      * @return array<string, mixed>
      */
     private function cell(
@@ -115,14 +118,19 @@ class XpBoard
         array $owned,
         ?WotTankModule $tankModule,
     ): array {
-        $researched = array_flip($tankModule?->researched_module_ids ?? []);
+        /*
+         * Unlocking what a vehicle leads to is done from that vehicle, so a
+         * player who got there took its modules on the way. That is the
+         * default; a tick either way overrides it.
+         */
+        $default = $owned[$vehicle->tank_id]['modules_researched'] ?? false;
 
         $options = $modules->map(fn (WotVehicleModule $m): array => [
             'module_id' => $m->module_id,
             'name' => $m->name,
             'slot' => $m->slot(),
             'price_xp' => (int) $m->price_xp,
-            'is_researched' => isset($researched[$m->module_id]),
+            'is_researched' => WotTankModule::isResearched($tankModule, $m->module_id, $default),
         ])->values();
 
         return [
@@ -152,7 +160,7 @@ class XpBoard
      * held against a tank, not against a route to it.
      *
      * @param  Collection<int, WotTankPurchase>  $purchases
-     * @param  array<int, array{is_purchased: bool, is_unlocked: bool}>  $owned
+     * @param  array<int, array{is_purchased: bool, is_unlocked: bool, modules_researched: bool}>  $owned
      * @return array<string, mixed>
      */
     private function unlocks(WotVehicle $vehicle, WotVehicle $next, Collection $purchases, array $owned): array

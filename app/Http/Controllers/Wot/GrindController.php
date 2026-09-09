@@ -20,6 +20,7 @@ use App\Models\WotTankModule;
 use App\Models\WotTankPurchase;
 use App\Models\WotVehicle;
 use App\Models\WotVehicleModule;
+use App\Services\Wargaming\AccountProgress;
 use App\Services\Wargaming\GrindBoard;
 use App\Services\Wargaming\ModuleTree;
 use App\Services\Wargaming\TechTree;
@@ -184,8 +185,11 @@ class GrindController extends Controller
      * firstOrNew, then save inside the model — a vehicle you have never touched
      * has no plan row, and the first tick is what creates one.
      */
-    public function updateModulePlan(UpdateModulePlanRequest $request, int $tankId): RedirectResponse
-    {
+    public function updateModulePlan(
+        UpdateModulePlanRequest $request,
+        int $tankId,
+        AccountProgress $progress,
+    ): RedirectResponse {
         $account = $request->user()->wotAccount;
 
         abort_unless($account, 404);
@@ -196,7 +200,11 @@ class GrindController extends Controller
             'tank_id' => $tankId,
         ]);
 
-        $plan->setModulePlanned($request->integer('module_id'), $request->boolean('planned'));
+        $plan->setModulePlanned(
+            $request->integer('module_id'),
+            $request->boolean('planned'),
+            $progress->for($account)[$tankId]['modules_researched'] ?? false,
+        );
 
         return back(fallback: route('wot.grinding'));
     }
@@ -209,8 +217,12 @@ class GrindController extends Controller
      * would let any list of module ids arrive under this name — and the rule
      * for which gun is "top" has to have exactly one home.
      */
-    public function planTopGun(Request $request, int $tankId, ModuleTree $tree): RedirectResponse
-    {
+    public function planTopGun(
+        Request $request,
+        int $tankId,
+        ModuleTree $tree,
+        AccountProgress $progress,
+    ): RedirectResponse {
         $account = $request->user()->wotAccount;
 
         abort_unless($account, 404);
@@ -225,7 +237,10 @@ class GrindController extends Controller
         WotTankModule::firstOrNew([
             'wot_account_id' => $account->id,
             'tank_id' => $tankId,
-        ])->planModules($chain['module_ids']);
+        ])->planModules(
+            $chain['module_ids'],
+            $progress->for($account)[$tankId]['modules_researched'] ?? false,
+        );
 
         return back(fallback: route('wot.grinding'));
     }

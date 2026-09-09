@@ -1502,8 +1502,11 @@ it('settles an unlock once the next tank is researched', function () {
 
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
         ->where('xp.rows.0.cells.8.unlocks.is_unlocked', true)
-        // The unlock drops out; the tier VIII's own modules do not.
-        ->where('xp.rows.0.xp_remaining', 535_000),
+        // The unlock drops out, and so do the tier VIII's own modules: you
+        // researched the tier IX from it, so you took its modules on the way.
+        ->where('xp.rows.0.cells.8.module_xp', 0)
+        ->where('xp.rows.0.cells.9.module_xp', 100_000)
+        ->where('xp.rows.0.xp_remaining', 485_000),
     );
 });
 
@@ -1519,8 +1522,82 @@ it('settles the unlocks below a vehicle that has been played', function () {
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
         ->where('xp.rows.0.cells.8.unlocks.is_unlocked', true)
         ->where('xp.rows.0.cells.9.unlocks.is_unlocked', true)
-        // Only module XP is left across the whole line.
-        ->where('xp.rows.0.xp_remaining', 310_000),
+        // Everything below the played tier X is assumed finished, modules
+        // included. Only the tier X's own modules are left.
+        ->where('xp.rows.0.cells.8.module_xp', 0)
+        ->where('xp.rows.0.cells.9.module_xp', 0)
+        ->where('xp.rows.0.cells.10.module_xp', 160_000)
+        ->where('xp.rows.0.xp_remaining', 160_000),
+    );
+});
+
+/**
+ * The assumption is a default and nothing more: a module you say you have not
+ * researched stays unresearched, however finished the vehicle looks.
+ */
+it('lets an assumed-researched module be un-ticked', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+    played($account, 100);
+
+    $this->actingAs($user)->patch(route('wot.grinding.research-module', 90), [
+        'module_id' => 200, 'researched' => false,
+    ])->assertRedirect();
+
+    $row = WotTankModule::where('wot_account_id', $account->id)->first();
+
+    // Recorded as an explicit no rather than as an absence, which under a
+    // default of yes would have read as researched.
+    expect($row->unresearched_module_ids)->toBe([200])
+        ->and($row->researched_module_ids ?? [])->toBe([]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('xp.rows.0.cells.9.modules.0.is_researched', false)
+        ->where('xp.rows.0.cells.9.module_xp', 90_000)
+        ->where('xp.rows.0.xp_remaining', 250_000),
+    );
+});
+
+it('takes an explicit no back off again', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+    played($account, 100);
+
+    $this->actingAs($user)->patch(route('wot.grinding.research-module', 90), ['module_id' => 200, 'researched' => false]);
+    $this->actingAs($user)->patch(route('wot.grinding.research-module', 90), ['module_id' => 200, 'researched' => true]);
+
+    $row = WotTankModule::where('wot_account_id', $account->id)->first();
+
+    // The two lists must never both claim it.
+    expect($row->unresearched_module_ids)->toBe([])
+        ->and($row->researched_module_ids)->toBe([200]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(
+        fn ($page) => $page->where('xp.rows.0.cells.9.module_xp', 0),
+    );
+});
+
+/**
+ * Unlocking either of two tier Xs says the same thing about the tier IX they
+ * both come off, so the default follows any successor rather than the one that
+ * happens to sit on this row.
+ */
+it('assumes modules researched from a successor on another line', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+
+    $nation = WotVehicle::where('tank_id', 100)->value('nation');
+    WotVehicle::factory()->create(['tank_id' => 101, 'name' => 'Other X', 'short_name' => 'Oth X', 'tier' => 10, 'nation' => $nation, 'next_tanks' => null]);
+    WotVehicle::where('tank_id', 90)->update(['next_tanks' => json_encode([100 => 225_000, 101 => 240_000])]);
+
+    // Only the 'Tgt X' branch is researched, on the row sorted second.
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 100), ['is_unlocked' => true]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        // The tier IX is finished either way, so it reads finished on the row
+        // that owns it too.
+        ->where('xp.rows.0.cells.9.module_xp', 0)
+        ->where('xp.rows.1.cells.9.module_xp', 0),
     );
 });
 
@@ -1681,4 +1758,43 @@ it('remembers the XP filters under their own board key', function () {
         ->where('settings.xp_filters.hide_done', false)
         ->where('settings.purchase_filters', null),
     );
+});
+
+/**
+ * The Free XP board has to agree with XP Remaining about what is researched,
+ * assumption included — otherwise it would keep offering to buy modules the
+ * other tab has already written off.
+ */
+it('will not plan Free XP for a module only assumed researched', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+    played($account, 100);
+
+    $this->actingAs($user)->patch(route('wot.grinding.module-plan', 90), [
+        'module_id' => 200, 'planned' => true,
+    ])->assertRedirect();
+
+    expect(WotTankModule::where('wot_account_id', $account->id)->count())->toBe(0);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('freexp.rows.0.cells.9.modules.0.is_researched', true)
+        ->where('totals.free_xp_planned', 0),
+    );
+});
+
+it('leaves the top gun button nothing to add once the line is assumed finished', function () {
+    $user = User::factory()->create();
+    $account = gunChainTank($user);
+    played($account, 100);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        // The chain is still what it is; there is just nothing outstanding.
+        ->where('xp.rows.0.cells.9.module_xp', 0)
+        ->where('freexp.rows.0.cells.9.top_gun.xp', 66_000)
+        ->where('freexp.rows.0.cells.9.top_gun.outstanding', 0),
+    );
+
+    $this->actingAs($user)->patch(route('wot.grinding.top-gun', 90))->assertRedirect();
+
+    expect(WotTankModule::where('wot_account_id', $account->id)->count())->toBe(0);
 });
