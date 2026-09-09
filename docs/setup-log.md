@@ -1275,3 +1275,78 @@ suite deterministic.
 The general lesson, and the reason the CI work earlier was worth doing: a test suite that has
 only ever run on its author's machine is untested itself. Both of these were invisible until
 the code ran somewhere it had never run.
+
+---
+
+## 2026-09-09 — Production deploy at laravel-vilt.ethanbasham.xyz
+
+Live. The app rides the shared infrastructure documented in
+`~/projects/eb-portfolio/docs/new-portfolio-project-site-setup.md`; this entry only records
+what was incremental.
+
+**Most of it already existed.** A previous infrastructure pass had provisioned this app's slot:
+DNS `A` record to `54.211.52.97`, an nginx vhost with a Let's Encrypt cert, the
+`/projects/laravel-vilt/{releases,shared,current,.trigger}` layout, and an active
+`deploy-apply@laravel-vilt.path` systemd watcher. `deploy-apply.sh` even already named
+`laravel-vilt` in both of its case statements. Checking first turned a nine-step runbook into
+six small gaps.
+
+**Steps 1–5 of the runbook were skipped entirely** — S3 prefixes, a per-app IAM user, a dev
+ACM cert and two CloudFront distributions all exist to serve user-uploaded files. This app
+stores none, so none were created. No new AWS spend.
+
+### What was actually done
+
+| gap | resolution |
+|---|---|
+| vhost was a static placeholder | rewritten as a Laravel vhost: root on the `current` symlink, `try_files … /index.php`, fastcgi to a per-app socket, `fastcgi_param HTTPS on` so PHP generates `https://` URLs behind the TLS terminator. Certbot's managed lines reproduced verbatim so renewal still recognises the file. |
+| no php-fpm pool | `/etc/php-fpm.d/laravel-vilt.conf`, mirroring eb-portfolio's — own socket so one app can't starve another, `pm=ondemand` so an idle app costs nothing. |
+| `shared/` empty | `.env` (0640, `nginx:developers`) and `storage/`, symlinked into each release by `deploy-apply.sh`. |
+| no database | `eb_laravel_vilt` + scoped role `eb_laravel_vilt_app` on the shared RDS. |
+| no pipeline | `.github/workflows/deploy.yml`, adapted from eb-portfolio's. |
+| no repo secrets | `DEPLOY_SSH_KEY`, `DEPLOY_HOST`, `DEPLOY_SG_ID`, and the AWS CI pair. |
+
+### Three things that went wrong, and what they taught
+
+**RDS is not publicly accessible.** The first attempt ran `psql` from this laptop and hung.
+The instance is VPC-only (private IP `172.31.13.10`), so all database administration has to
+run from the box. Correct by design; worth knowing before debugging a timeout.
+
+**The master user is `eb_admin`, not `postgres`.** Assumed rather than checked, which cost a
+round trip. `aws rds describe-db-instances --query 'DBInstances[0].MasterUsername'` answers it.
+
+**`CREATE DATABASE … OWNER` failed with `must be able to SET ROLE`.** Exactly the wall
+`eb-portfolio` hit and documented: on RDS the master user is not a superuser, and PG16+ requires
+the creator to be a member of the owning role. `GRANT eb_laravel_vilt_app TO eb_admin` first,
+then create. Reading the sibling project's log was faster than rediscovering it.
+
+Also a self-inflicted one: a heredoc on the `ssh` invocation silently overrode the pipe feeding
+credentials to its stdin, so the remote script read the script text as its password. Passing
+secrets over SSH's stdin works — but not while a heredoc is also claiming stdin.
+
+### Scheduling
+
+**There is no cron on this box.** Amazon Linux 2023 ships without cronie, and `eb-portfolio`
+runs no scheduler at all, so there was no precedent to copy. Used a systemd timer instead,
+templated on the app name (`laravel-scheduler@laravel-vilt.timer`) to match the existing
+`deploy-apply@<app>` units, so the other Laravel apps can enable it later without new files.
+
+`StandardOutput=null` because `schedule:run` prints a line every minute when nothing is due;
+`StandardError=journal` keeps real failures visible. `Persistent=false` — replaying missed
+ticks after downtime would run nothing useful, since the scheduler decides what is due from the
+clock.
+
+The local crontab on the development machine was **removed** in the same change. Two schedulers
+writing snapshots to two different databases would have produced two incomplete histories and
+burned twice the API quota.
+
+### Verified
+
+`https://laravel-vilt.ethanbasham.xyz` returns 200 with the real app; `/login` and `/register`
+200; `/wot` correctly 302s to login; assets served from the release's `build/` directory.
+Production data: 1,028 vehicles, 862 WN8 expected values, 120 articles, 17 events.
+
+**The Wargaming API works from the box** — `wot:ping` returned live results, so `54.211.52.97`
+is already on the application's allow-list. This had been flagged as a likely blocker before
+deploying, on the grounds that the key is a Server-type application restricted to the home IP.
+Checking cost one command and saved raising a false alarm.
