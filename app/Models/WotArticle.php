@@ -89,7 +89,11 @@ class WotArticle extends Model
                 $join->on('wot_article_pins.wot_article_id', '=', 'wot_articles.id')
                     ->where('wot_article_pins.user_id', '=', $user->id);
             })
-            ->select('wot_articles.*')
+            // addSelect, not select: select() resets the column list, which
+            // silently discarded withSeenFor()'s subquery when the two scopes
+            // were chained in the other order. Qualified because the join puts
+            // an `id` on both sides.
+            ->addSelect('wot_articles.*')
             ->addSelect('wot_article_pins.pinned_at as pinned_at')
             // Postgres sorts false before true, so "is null" ascending puts the
             // pinned rows first without needing a CASE expression.
@@ -108,11 +112,9 @@ class WotArticle extends Model
     /**
      * Exposes when this user saw each article, as a `seen_at` column.
      *
-     * A correlated subquery rather than another left join. pinnedFirstFor()
-     * already joins wot_article_pins and calls select('wot_articles.*'), so a
-     * second join would make the result order-dependent — call the two in the
-     * wrong sequence and the select would wipe the other's column. A subquery
-     * composes in any order and cannot duplicate rows.
+     * A correlated subquery rather than another left join: a second join would
+     * risk duplicating rows, and a subquery composes with pinnedFirstFor() in
+     * either order. Both scopes use addSelect for the same reason.
      */
     public function scopeWithSeenFor(Builder $query, ?User $user): Builder
     {

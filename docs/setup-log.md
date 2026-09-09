@@ -1473,3 +1473,38 @@ Unseen articles carry a small green dot plus visually-hidden "(unread)" text, re
 existing seen tracker rather than inventing a second notion of new.
 
 Suite: **130 passed, 499 assertions.**
+
+---
+
+## 2026-09-09 — Pinning from the dashboard panel
+
+The pin routes already existed and already used `back()`, so they worked unchanged from the
+dashboard. The work was the panel's own state and one bug.
+
+**The Latest tab now hoists pinned articles.** Without that, pinning something from the
+dashboard produced no visible change until you switched tabs — the control would have looked
+broken.
+
+**Pinning reloads only the `news` prop.** A full Inertia visit would resend several hundred
+vehicles of garage JSON for a change that touched none of it. Both tabs come back together, so
+the Pinned list stays correct without a second request.
+
+### The bug, which was mine and recent
+
+Adding `is_pinned` meant chaining `withSeenFor()` and `pinnedFirstFor()` on the same query, and
+the seen state silently vanished: `is_seen` came back `false` for an article that had been
+marked seen.
+
+`pinnedFirstFor()` called `->select('wot_articles.*')`, and **`select()` resets the column
+list** — discarding the correlated subquery `withSeenFor()` had already added. Chained the
+other way it worked; chained this way it didn't, with no error either way.
+
+The irony is that `withSeenFor()`'s own docblock had described this hazard and claimed a
+subquery avoided it. It avoids *duplicate rows*, not a reset `select()`. Both scopes now use
+`addSelect`, so they compose in either order — verified explicitly by running the chain both
+ways and checking both columns come back populated.
+
+A test caught it, and the test that caught it was one written for a different feature entirely
+(the unseen marker), which is a fair argument for asserting the boring things.
+
+Suite: **131 passed, 527 assertions.**

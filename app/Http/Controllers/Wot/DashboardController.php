@@ -73,7 +73,13 @@ class DashboardController extends Controller
 
         return [
             'news' => [
-                'latest' => $this->articles(WotArticle::query()->withSeenFor($user)->inDefaultOrder(), $user),
+                // pinnedFirstFor supplies the pinned_at column the panel reads;
+                // on the Latest tab it also hoists pinned articles, which is
+                // what makes a pin visible without switching tabs.
+                'latest' => $this->articles(
+                    WotArticle::query()->withSeenFor($user)->pinnedFirstFor($user),
+                    $user,
+                ),
                 // Both tabs are sent up front: five rows each is a trivial
                 // payload, and switching tabs shouldn't cost a round trip.
                 'pinned' => $this->articles(
@@ -99,6 +105,7 @@ class DashboardController extends Controller
             'image_url' => $article->image_url,
             'published_at' => $article->published_at->toIso8601String(),
             'is_seen' => $article->seen_at !== null,
+            'is_pinned' => $article->pinned_at !== null,
         ])->all();
     }
 

@@ -1,5 +1,5 @@
 <script setup>
-import { Link } from '@inertiajs/vue3';
+import { Link, router } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 
 const props = defineProps({
@@ -17,6 +17,17 @@ const tabs = [
 ];
 
 const asDate = (iso) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+
+// only: ['news'] so a pin doesn't resend the garage table — several hundred
+// vehicles of JSON that hasn't changed. Both tabs come back together, so the
+// Pinned list stays correct without a second request.
+const togglePin = (article) => {
+    const options = { preserveScroll: true, preserveState: true, only: ['news'] };
+
+    article.is_pinned
+        ? router.delete(`/wot/news/${article.id}/pin`, options)
+        : router.post(`/wot/news/${article.id}/pin`, {}, options);
+};
 </script>
 
 <template>
@@ -43,12 +54,12 @@ const asDate = (iso) => new Date(iso).toLocaleDateString(undefined, { day: 'nume
         </div>
 
         <ul v-if="articles.length" role="list" class="flex-1 divide-y divide-wot-border-soft">
-            <li v-for="article in articles" :key="article.id">
+            <li v-for="article in articles" :key="article.id" class="flex items-stretch">
                 <a
                     :href="article.url"
                     target="_blank"
                     rel="noopener noreferrer"
-                    class="flex gap-3 p-3 transition-colors hover:bg-wot-sunken"
+                    class="flex min-w-0 flex-1 gap-3 p-3 transition-colors hover:bg-wot-sunken"
                 >
                     <!-- Fixed box so a missing or oddly-sized image can't make
                          one row taller than the rest. -->
@@ -78,6 +89,20 @@ const asDate = (iso) => new Date(iso).toLocaleDateString(undefined, { day: 'nume
                         </span>
                     </span>
                 </a>
+
+                <button
+                    type="button"
+                    class="shrink-0 border-s px-2.5 text-xs leading-none transition-colors"
+                    :class="article.is_pinned
+                        ? 'border-wot-border-soft bg-wot-gold/45 text-wot-abyss'
+                        : 'border-wot-border-soft text-wot-dim hover:bg-wot-sunken hover:text-wot-gold'"
+                    :aria-pressed="article.is_pinned"
+                    :title="article.is_pinned ? 'Unpin from your feed' : 'Pin to the top of your feed'"
+                    @click="togglePin(article)"
+                >
+                    <span aria-hidden="true">📌</span>
+                    <span class="sr-only">{{ article.is_pinned ? 'Unpin' : 'Pin' }} {{ article.title }}</span>
+                </button>
             </li>
         </ul>
 

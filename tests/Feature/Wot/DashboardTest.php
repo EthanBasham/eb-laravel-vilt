@@ -227,8 +227,11 @@ it('shows the five newest articles and the pinned ones separately', function () 
 
     $this->actingAs($user)->get(route('wot.dashboard'))->assertInertia(fn ($page) => $page
         ->has('news.latest', 5)
-        // Newest first, so Article 7 leads and Articles 1-2 fall off.
-        ->where('news.latest.0.title', 'Article 7')
+        // Article 1 was pinned, and Latest hoists pinned articles so a pin is
+        // visible without switching tabs; Article 7 is the newest unpinned one.
+        ->where('news.latest.0.title', 'Article 1')
+        ->where('news.latest.0.is_pinned', true)
+        ->where('news.latest.1.title', 'Article 7')
         ->has('news.pinned', 1)
         ->where('news.pinned.0.title', 'Article 1'),
     );
@@ -307,5 +310,34 @@ it('still renders the panels when the API fails', function () {
         ->where('summary', null)
         ->where('news.latest.0.title', 'Still here')
         ->has('upcoming.days', 5),
+    );
+});
+
+it('reports pinned state in the dashboard news panel', function () {
+    $user = User::factory()->create();
+    WotAccount::factory()->for($user)->create(['account_id' => 7]);
+    $older = WotArticle::factory()->create(['title' => 'Older', 'published_at' => now()->subWeek()]);
+    WotArticle::factory()->create(['title' => 'Newer', 'published_at' => now()]);
+
+    Http::fake([
+        '*/account/info/*' => Http::response(accountInfoResponse(7)),
+        '*/tanks/stats/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
+        '*/tanks/achievements/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
+    ]);
+
+    $this->actingAs($user)->get(route('wot.dashboard'))->assertInertia(fn ($page) => $page
+        ->where('news.latest.0.title', 'Newer')
+        ->where('news.latest.0.is_pinned', false),
+    );
+
+    $this->actingAs($user)->post(route('wot.news.pin', $older));
+
+    // Pinning hoists it on the Latest tab too, so the pin is visible without
+    // switching tabs.
+    $this->actingAs($user)->get(route('wot.dashboard'))->assertInertia(fn ($page) => $page
+        ->where('news.latest.0.title', 'Older')
+        ->where('news.latest.0.is_pinned', true)
+        ->where('news.latest.1.is_pinned', false)
+        ->has('news.pinned', 1),
     );
 });
