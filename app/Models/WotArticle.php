@@ -70,20 +70,20 @@ class WotArticle extends Model
     }
 
     /**
-     * Newest first, but with this user's pinned articles hoisted above
-     * everything else as a group. Pinning only groups; it does not reorder
-     * within the group, so a pinned article still sits by `published_at`
-     * among the other pins.
+     * Exposes this user's pin as a `pinned_at` column, without changing the
+     * order. Split out of pinnedFirstFor() so a caller that wants the
+     * dashboard's plain-newest ordering can still show pin state and offer
+     * the pin/unpin toggle on each row.
      *
      * A left join rather than a `whereHas`, because pinned-ness has to be
-     * available to ORDER BY — and this way one query still serves the
-     * paginator. `wot_articles.*` is selected explicitly since the join puts
-     * an `id` on both sides.
+     * available to a caller's own ORDER BY — and this way one query still
+     * serves the paginator. `wot_articles.*` is selected explicitly since the
+     * join puts an `id` on both sides.
      */
-    public function scopePinnedFirstFor(Builder $query, ?User $user): Builder
+    public function scopeWithPinnedFor(Builder $query, ?User $user): Builder
     {
         if (! $user) {
-            return $query->inDefaultOrder();
+            return $query->selectRaw('null as pinned_at');
         }
 
         return $query
@@ -96,7 +96,23 @@ class WotArticle extends Model
             // were chained in the other order. Qualified because the join puts
             // an `id` on both sides.
             ->addSelect('wot_articles.*')
-            ->addSelect('wot_article_pins.pinned_at as pinned_at')
+            ->addSelect('wot_article_pins.pinned_at as pinned_at');
+    }
+
+    /**
+     * Newest first, but with this user's pinned articles hoisted above
+     * everything else as a group. Pinning only groups; it does not reorder
+     * within the group, so a pinned article still sits by `published_at`
+     * among the other pins.
+     */
+    public function scopePinnedFirstFor(Builder $query, ?User $user): Builder
+    {
+        if (! $user) {
+            return $query->inDefaultOrder();
+        }
+
+        return $query
+            ->withPinnedFor($user)
             // Postgres sorts false before true, so "is null" ascending puts the
             // pinned rows first without needing a CASE expression.
             ->orderByRaw('wot_article_pins.pinned_at is null')

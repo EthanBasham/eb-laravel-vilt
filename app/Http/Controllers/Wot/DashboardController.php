@@ -73,11 +73,12 @@ class DashboardController extends Controller
 
         return [
             'news' => [
-                // pinnedFirstFor supplies the pinned_at column the panel reads;
-                // on the Latest tab it also hoists pinned articles, which is
-                // what makes a pin visible without switching tabs.
+                // Plain newest-first: the Latest tab shows what actually
+                // published most recently, not pinned articles hoisted above
+                // it. withPinnedFor still supplies the pinned_at column so a
+                // pin badge and the pin/unpin toggle work from this tab too.
                 'latest' => $this->articles(
-                    WotArticle::query()->withSeenFor($user)->pinnedFirstFor($user),
+                    WotArticle::query()->withSeenFor($user)->withPinnedFor($user)->inDefaultOrder(),
                     $user,
                 ),
                 // Both tabs are sent up front: five rows each is a trivial

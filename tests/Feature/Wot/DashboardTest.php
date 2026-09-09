@@ -227,11 +227,10 @@ it('shows the five newest articles and the pinned ones separately', function () 
 
     $this->actingAs($user)->get(route('wot.dashboard'))->assertInertia(fn ($page) => $page
         ->has('news.latest', 5)
-        // Article 1 was pinned, and Latest hoists pinned articles so a pin is
-        // visible without switching tabs; Article 7 is the newest unpinned one.
-        ->where('news.latest.0.title', 'Article 1')
-        ->where('news.latest.0.is_pinned', true)
-        ->where('news.latest.1.title', 'Article 7')
+        // Latest is plain newest-first — pinning Article 1 does not hoist it,
+        // so it falls outside the five newest and only shows on the Pinned tab.
+        ->where('news.latest.0.title', 'Article 7')
+        ->where('news.latest.0.is_pinned', false)
         ->has('news.pinned', 1)
         ->where('news.pinned.0.title', 'Article 1'),
     );
@@ -332,12 +331,13 @@ it('reports pinned state in the dashboard news panel', function () {
 
     $this->actingAs($user)->post(route('wot.news.pin', $older));
 
-    // Pinning hoists it on the Latest tab too, so the pin is visible without
-    // switching tabs.
+    // Pinning does not hoist on the Latest tab — it stays newest-first — but
+    // the pinned row still reports is_pinned so its toggle reflects state.
     $this->actingAs($user)->get(route('wot.dashboard'))->assertInertia(fn ($page) => $page
-        ->where('news.latest.0.title', 'Older')
-        ->where('news.latest.0.is_pinned', true)
-        ->where('news.latest.1.is_pinned', false)
+        ->where('news.latest.0.title', 'Newer')
+        ->where('news.latest.0.is_pinned', false)
+        ->where('news.latest.1.title', 'Older')
+        ->where('news.latest.1.is_pinned', true)
         ->has('news.pinned', 1),
     );
 });

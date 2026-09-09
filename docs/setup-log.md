@@ -2137,3 +2137,21 @@ that refresh no longer moves the article's position.
 pin-recency ordering; updated to assert publish-date ordering instead (`orders several pins by
 published date, not by when they were pinned`), and the idempotent re-pin test dropped its
 now-untrue "moves back to the top" assertion, keeping only the unique-constraint check.
+
+## 2026-09-09 — Dashboard's Latest tab no longer hoists pinned articles
+
+Follow-up to the entry above. The dashboard news panel's Latest tab was still calling
+`pinnedFirstFor()`, which — even after the previous change — still hoists pinned articles
+above unpinned ones as a group before sorting by `published_at`. The user wants Latest to be
+exactly the newest articles, full stop; pinning should only affect the separate Pinned tab and
+the `/wot/news` page.
+
+Split `pinnedFirstFor()` into two scopes: `withPinnedFor()` does just the left join and
+`pinned_at` select (so a row can still report `is_pinned` and drive the pin/unpin toggle), and
+`pinnedFirstFor()` now calls `withPinnedFor()` and adds the hoisting `ORDER BY` on top.
+Dashboard's Latest query switched to `withPinnedFor($user)->inDefaultOrder()`; its Pinned tab
+and `/wot/news` keep `pinnedFirstFor()` since hoisting-then-filtering (or filtering to
+already-pinned rows) is exactly what those still want.
+
+`DashboardTest.php` had two tests asserting the old hoist-on-Latest behavior; updated to
+assert plain newest-first with `is_pinned` still reported per row.
