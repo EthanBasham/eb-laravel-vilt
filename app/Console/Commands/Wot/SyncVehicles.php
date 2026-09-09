@@ -86,6 +86,9 @@ class SyncVehicles extends Command
                     'price_xp' => $module['price_xp'] ?? 0,
                     'price_credit' => $module['price_credit'] ?? 0,
                     'is_default' => (bool) ($module['is_default'] ?? false),
+                    // What researching this one opens up. Stored as sent —
+                    // forward-pointing — and inverted where it is read.
+                    'next_modules' => json_encode(array_values($module['next_modules'] ?? [])),
                     'created_at' => now(),
                     'updated_at' => now(),
                 ];
@@ -97,7 +100,7 @@ class SyncVehicles extends Command
             WotVehicleModule::upsert(
                 $chunk,
                 ['tank_id', 'module_id'],
-                ['name', 'type', 'price_xp', 'price_credit', 'is_default', 'updated_at'],
+                ['name', 'type', 'price_xp', 'price_credit', 'is_default', 'next_modules', 'updated_at'],
             );
         }
     }

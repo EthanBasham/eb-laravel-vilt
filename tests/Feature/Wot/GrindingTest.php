@@ -1301,3 +1301,144 @@ it('remembers the Free XP filters separately from the purchase ones', function (
         ->where('settings.freexp_filters.only_planned', true),
     );
 });
+
+/**
+ * The Tiger II's real module tree, which is the shape this feature exists for:
+ * the 10.5 cm gun sits behind nothing, but unlocks the Serienturm turret — so
+ * dependencies cross slots and the chain is not "every gun".
+ */
+function gunChainTank(User $user): WotAccount
+{
+    $account = WotAccount::factory()->for($user)->create();
+    WotVehicle::factory()->create(['tank_id' => 100, 'name' => 'Chain X', 'short_name' => 'Chn X', 'tier' => 10, 'nation' => 'germany', 'next_tanks' => null]);
+    WotVehicle::factory()->create(['tank_id' => 90, 'name' => 'Chain IX', 'tier' => 9, 'nation' => 'germany', 'next_tanks' => [100 => 225_000]]);
+
+    /*
+     * Module ids deliberately nowhere near the rows' primary keys. They were
+     * 1..5, which matched the auto-increment ids exactly — and that coincidence
+     * made a chain lookup that selected by primary key return the right rows
+     * for the wrong reason, hiding the bug until it was run against real data.
+     */
+    WotVehicleModule::insert([
+        // Stock gun, which unlocks the mid gun.
+        ['module_id' => 101, 'tank_id' => 90, 'name' => 'Stock Gun', 'type' => 'vehicleGun', 'price_xp' => 0, 'price_credit' => 0, 'is_default' => true, 'next_modules' => json_encode([102]), 'created_at' => now(), 'updated_at' => now()],
+        ['module_id' => 102, 'tank_id' => 90, 'name' => 'Mid Gun', 'type' => 'vehicleGun', 'price_xp' => 20_000, 'price_credit' => 0, 'is_default' => false, 'next_modules' => json_encode([103]), 'created_at' => now(), 'updated_at' => now()],
+        ['module_id' => 103, 'tank_id' => 90, 'name' => 'Top Gun', 'type' => 'vehicleGun', 'price_xp' => 46_000, 'price_credit' => 0, 'is_default' => false, 'next_modules' => json_encode([104]), 'created_at' => now(), 'updated_at' => now()],
+        // Unlocked BY the top gun, so it is not required to reach it.
+        ['module_id' => 104, 'tank_id' => 90, 'name' => 'Big Turret', 'type' => 'vehicleTurret', 'price_xp' => 22_000, 'price_credit' => 0, 'is_default' => false, 'next_modules' => null, 'created_at' => now(), 'updated_at' => now()],
+        // A separate branch entirely.
+        ['module_id' => 105, 'tank_id' => 90, 'name' => 'Big Engine', 'type' => 'vehicleEngine', 'price_xp' => 18_000, 'price_credit' => 0, 'is_default' => false, 'next_modules' => null, 'created_at' => now(), 'updated_at' => now()],
+    ]);
+
+    return $account;
+}
+
+it('reads the top gun chain off the module tree', function () {
+    $user = User::factory()->create();
+    gunChainTank($user);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('freexp.rows.0.cells.9.top_gun.name', 'Top Gun')
+        // The mid gun is on the way; the turret it unlocks and the engine
+        // beside it are not.
+        ->where('freexp.rows.0.cells.9.top_gun.module_ids', [102, 103])
+        ->where('freexp.rows.0.cells.9.top_gun.xp', 66_000)
+        ->where('freexp.rows.0.cells.9.top_gun.outstanding', 66_000),
+    );
+});
+
+it('plans the whole top gun chain in one click', function () {
+    $user = User::factory()->create();
+    $account = gunChainTank($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.top-gun', 90))->assertRedirect();
+
+    expect(WotModulePlan::where('wot_account_id', $account->id)->first()->module_ids)->toBe([102, 103]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('freexp.rows.0.cells.9.planned_xp', 66_000)
+        // Nothing left for the button to add, which is what greys it out.
+        ->where('freexp.rows.0.cells.9.top_gun.outstanding', 0)
+        ->where('totals.free_xp_planned', 66_000),
+    );
+});
+
+/**
+ * The button says "and this too", so it must never take a tick away — losing an
+ * unrelated module to a click labelled "plan top gun" would be a much larger
+ * claim than the label makes.
+ */
+it('adds to the plan rather than replacing it', function () {
+    $user = User::factory()->create();
+    $account = gunChainTank($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.module-plan', 90), ['module_id' => 105, 'planned' => true]);
+    $this->actingAs($user)->patch(route('wot.grinding.top-gun', 90));
+
+    expect(WotModulePlan::where('wot_account_id', $account->id)->first()->module_ids)->toBe([102, 103, 105]);
+});
+
+it('counts only what the chain still needs', function () {
+    $user = User::factory()->create();
+    gunChainTank($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.module-plan', 90), ['module_id' => 102, 'planned' => true]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('freexp.rows.0.cells.9.top_gun.xp', 66_000)
+        // The mid gun is already planned, so only the top gun is outstanding.
+        ->where('freexp.rows.0.cells.9.top_gun.outstanding', 46_000),
+    );
+});
+
+/**
+ * Most of tier X is elite on purchase, so its gun is the stock one and there is
+ * no chain to offer.
+ */
+it('offers no top gun where every gun is stock', function () {
+    $user = User::factory()->create();
+    gunChainTank($user);
+
+    WotVehicleModule::insert([
+        ['module_id' => 109, 'tank_id' => 100, 'name' => 'Only Gun', 'type' => 'vehicleGun', 'price_xp' => 0, 'price_credit' => 0, 'is_default' => true, 'next_modules' => null, 'created_at' => now(), 'updated_at' => now()],
+    ]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(
+        fn ($page) => $page->where('freexp.rows.0.cells.10.top_gun', null),
+    );
+
+    $this->actingAs($user)->patch(route('wot.grinding.top-gun', 100))->assertNotFound();
+});
+
+/**
+ * Six vehicles have two guns that neither leads to the other — the KV-4's
+ * 107 mm against its 122 mm, the StuG III B's derp against its Pak. The dearer
+ * chain is the one a player means by "top gun".
+ */
+it('picks the dearer chain when two guns both end a branch', function () {
+    $user = User::factory()->create();
+    gunChainTank($user);
+
+    // A second terminal gun off the mid gun, cheaper than the existing top.
+    WotVehicleModule::insert([
+        ['module_id' => 106, 'tank_id' => 90, 'name' => 'Derp Gun', 'type' => 'vehicleGun', 'price_xp' => 9_000, 'price_credit' => 0, 'is_default' => false, 'next_modules' => null, 'created_at' => now(), 'updated_at' => now()],
+    ]);
+    WotVehicleModule::where('tank_id', 90)->where('module_id', 2)->update(['next_modules' => json_encode([103, 106])]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('freexp.rows.0.cells.9.top_gun.name', 'Top Gun')
+        ->where('freexp.rows.0.cells.9.top_gun.module_ids', [102, 103]),
+    );
+});
+
+it('will not let one account plan another account top gun', function () {
+    $owner = User::factory()->create();
+    $account = gunChainTank($owner);
+
+    $intruder = User::factory()->create();
+    WotAccount::factory()->for($intruder)->create(['account_id' => 999_999]);
+
+    $this->actingAs($intruder)->patch(route('wot.grinding.top-gun', 90))->assertRedirect();
+
+    expect(WotModulePlan::where('wot_account_id', $account->id)->count())->toBe(0);
+});

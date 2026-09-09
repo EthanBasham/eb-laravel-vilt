@@ -59,6 +59,40 @@ class WotModulePlan extends Model
         $this->save();
     }
 
+    /**
+     * Adds several modules at once, leaving anything already planned alone.
+     *
+     * One save rather than one per module: the top-gun button plans a whole
+     * chain, and a request per link would be several round trips to express a
+     * single decision.
+     *
+     * Additive only. The button says "plan these"; taking one back off is what
+     * the checkboxes are for, and having it also clear unrelated modules would
+     * make it a much larger claim than it looks.
+     *
+     * @param  list<int>  $moduleIds
+     */
+    public function planModules(array $moduleIds): void
+    {
+        $valid = WotVehicleModule::where('tank_id', $this->tank_id)
+            ->whereIn('module_id', $moduleIds)
+            ->onlyUpgrades()
+            ->pluck('module_id');
+
+        if ($valid->isEmpty()) {
+            return;
+        }
+
+        $ids = collect($this->module_ids ?? [])->merge($valid)->unique()->sort()->values()->all();
+
+        if ($ids === ($this->module_ids ?? [])) {
+            return;
+        }
+
+        $this->module_ids = $ids;
+        $this->save();
+    }
+
     // Relationships
 
     public function account(): BelongsTo

@@ -17,7 +17,9 @@ use App\Models\WotGrindTarget;
 use App\Models\WotModulePlan;
 use App\Models\WotTankPurchase;
 use App\Models\WotVehicle;
+use App\Models\WotVehicleModule;
 use App\Services\Wargaming\GrindBoard;
+use App\Services\Wargaming\ModuleTree;
 use App\Services\Wargaming\TechTree;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -193,6 +195,35 @@ class GrindController extends Controller
         ]);
 
         $plan->setModulePlanned($request->integer('module_id'), $request->boolean('planned'));
+
+        return back(fallback: route('wot.grinding'));
+    }
+
+    /**
+     * Plans everything needed to unlock a vehicle's top gun.
+     *
+     * The chain is worked out here rather than sent by the client. The board
+     * already ships it so the button can show its cost, but trusting that back
+     * would let any list of module ids arrive under this name — and the rule
+     * for which gun is "top" has to have exactly one home.
+     */
+    public function planTopGun(Request $request, int $tankId, ModuleTree $tree): RedirectResponse
+    {
+        $account = $request->user()->wotAccount;
+
+        abort_unless($account, 404);
+        abort_unless(WotVehicle::where('tank_id', $tankId)->exists(), 404);
+
+        // Stock modules included: they are the roots of the graph, and without
+        // them every chain breaks at its first link.
+        $chain = $tree->topGunChain(WotVehicleModule::where('tank_id', $tankId)->get());
+
+        abort_unless($chain, 404);
+
+        WotModulePlan::firstOrNew([
+            'wot_account_id' => $account->id,
+            'tank_id' => $tankId,
+        ])->planModules($chain['module_ids']);
 
         return back(fallback: route('wot.grinding'));
     }

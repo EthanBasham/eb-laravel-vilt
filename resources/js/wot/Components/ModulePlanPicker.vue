@@ -19,6 +19,21 @@ const busy = ref(null);
 
 const planned = computed(() => props.cell.modules.filter((m) => m.is_planned).length);
 
+/*
+ * The top gun's chain is server-computed, and the button only ever adds to the
+ * plan. Ticking a module by hand still says nothing about what it sits behind,
+ * which is the same blind spot as before this button existed — this makes the
+ * common case one click rather than fixing that in general.
+ */
+const planTopGun = () => {
+    busy.value = 'top-gun';
+    router.patch(`/wot/grinding/modules/${props.cell.tank_id}/top-gun`, {}, {
+        preserveScroll: true,
+        only: ['freexp', 'totals'],
+        onFinish: () => (busy.value = null),
+    });
+};
+
 const toggle = (module) => {
     busy.value = module.module_id;
     router.patch(`/wot/grinding/modules/${props.cell.tank_id}`, {
@@ -66,9 +81,35 @@ const n = (v) => new Intl.NumberFormat().format(v ?? 0);
             v-if="open && cell.modules.length"
             class="absolute right-0 z-30 mt-1 w-72 border border-wot-border bg-wot-panel-solid p-2 text-left shadow-lg"
         >
-            <p class="px-1 pb-2 text-xs uppercase tracking-wider text-wot-dim">
+            <p class="px-1 pb-1 text-xs uppercase tracking-wider text-wot-dim">
                 {{ cell.name }} — tick what Free XP buys
             </p>
+
+            <!-- The chain that unlocks the top gun, as one click. Adds; never
+                 removes — so it reads as "and this too" rather than as a mode
+                 that would take your other ticks away.
+
+                 Disabled once nothing is outstanding rather than hidden: a
+                 vanishing control leaves you wondering whether you imagined it,
+                 where a spent one says the plan already covers the gun. -->
+            <div v-if="cell.top_gun" class="mb-2 border-b border-wot-border-soft pb-2">
+                <button
+                    type="button"
+                    class="w-full border px-2 py-1 text-start text-xs transition-colors disabled:opacity-40"
+                    :class="cell.top_gun.outstanding
+                        ? 'border-wot-gold text-wot-gold hover:bg-wot-sunken'
+                        : 'border-wot-border text-wot-dim'"
+                    :disabled="busy !== null || !cell.top_gun.outstanding"
+                    :title="`${cell.top_gun.name} — ${cell.top_gun.module_ids.length} module${cell.top_gun.module_ids.length === 1 ? '' : 's'}, ${n(cell.top_gun.xp)} XP in total`"
+                    @click="planTopGun"
+                >
+                    <span class="font-bold uppercase tracking-wider">
+                        {{ cell.top_gun.outstanding ? 'Plan top gun' : 'Top gun planned' }}
+                    </span>
+                    <span v-if="cell.top_gun.outstanding" class="tabular-nums">+{{ n(cell.top_gun.outstanding) }}</span>
+                    <span class="mt-0.5 block truncate normal-case tracking-normal text-wot-dim">{{ cell.top_gun.name }}</span>
+                </button>
+            </div>
 
             <ul role="list" class="space-y-0.5">
                 <li v-for="module in cell.modules" :key="module.module_id">

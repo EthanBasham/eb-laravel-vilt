@@ -26,6 +26,7 @@ Route::patch('/grinding/filters', [GrindController::class, 'updateFilters'])->na
 // use, so there is nothing to bind to until then.
 Route::patch('/grinding/purchases/{tankId}', [GrindController::class, 'updatePurchase'])->name('grinding.purchase');
 Route::patch('/grinding/modules/{tankId}', [GrindController::class, 'updateModulePlan'])->name('grinding.module-plan');
+Route::patch('/grinding/modules/{tankId}/top-gun', [GrindController::class, 'planTopGun'])->name('grinding.top-gun');
 
 Route::post('/refresh', [DashboardController::class, 'refresh'])->name('dashboard.refresh');
 

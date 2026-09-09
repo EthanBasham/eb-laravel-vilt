@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * A researchable module on a vehicle. Rows are owned by the encyclopedia and
  * replaced by `wot:sync-vehicles`.
  */
-#[Fillable(['module_id', 'tank_id', 'name', 'type', 'price_xp', 'price_credit', 'is_default'])]
+#[Fillable(['module_id', 'tank_id', 'name', 'type', 'price_xp', 'price_credit', 'is_default', 'next_modules'])]
 class WotVehicleModule extends Model
 {
     /**
@@ -27,6 +27,7 @@ class WotVehicleModule extends Model
             'price_xp' => 'integer',
             'price_credit' => 'integer',
             'is_default' => 'boolean',
+            'next_modules' => 'array',
         ];
     }
 

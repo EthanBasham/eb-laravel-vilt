@@ -22,7 +22,10 @@ use App\Models\WotVehicleModule;
  */
 class FreeXpBoard
 {
-    public function __construct(private readonly TechTreeLines $lines) {}
+    public function __construct(
+        private readonly TechTreeLines $lines,
+        private readonly ModuleTree $moduleTree,
+    ) {}
 
     /**
      * The whole tech tree as one row per line.
@@ -61,6 +64,10 @@ class FreeXpBoard
          * vehicles, and moduleOptions() on the grind step does it per step —
          * which is fine for the dozen steps of a path and would be hundreds of
          * round trips here.
+         *
+         * Stock modules come along too, unlike the dropdown that shows them:
+         * they are the roots of the research graph, so leaving them out would
+         * break every chain at its first link.
          */
         // pluck, not keys: a line's vehicles are keyed by tier, not by tank id.
         $tankIds = $lines->flatMap(fn (array $l): array => $l['vehicles']->pluck('tank_id')->all())->unique();
@@ -97,7 +104,7 @@ class FreeXpBoard
     {
         $planned = array_flip($plannedIds);
 
-        $options = $modules->map(fn (WotVehicleModule $m): array => [
+        $options = $modules->where('is_default', false)->map(fn (WotVehicleModule $m): array => [
             'module_id' => $m->module_id,
             'name' => $m->name,
             'slot' => $m->slot(),
@@ -105,11 +112,31 @@ class FreeXpBoard
             'is_planned' => isset($planned[$m->module_id]),
         ])->values();
 
+        /*
+         * The chain that unlocks the top gun, so the dropdown can offer it as
+         * one click. Computed here rather than in the client: it is a graph
+         * walk over data the client is not sent, and the same answer has to
+         * back the button and the request it fires.
+         */
+        $topGun = $this->moduleTree->topGunChain($modules);
+
         return [
             'tank_id' => $tankId,
             'name' => $name,
             'tier' => $tier,
             'modules' => $options->all(),
+            /*
+             * Null where a vehicle's gun is its stock one — most of tier X.
+             * `outstanding` is what the button would actually add, so a chain
+             * already fully planned offers nothing and says so.
+             */
+            'top_gun' => $topGun === null ? null : [
+                ...$topGun,
+                'outstanding' => (int) $modules
+                    ->whereIn('module_id', $topGun['module_ids'])
+                    ->reject(fn (WotVehicleModule $m): bool => isset($planned[$m->module_id]))
+                    ->sum('price_xp'),
+            ],
             'planned_xp' => (int) $options->where('is_planned', true)->sum('price_xp'),
             /*
              * The whole cost of maxing the vehicle, planned or not. Shown as
@@ -198,7 +225,6 @@ class FreeXpBoard
     private function modulesFor(array $tankIds): Collection
     {
         return WotVehicleModule::whereIn('tank_id', $tankIds)
-            ->onlyUpgrades()
             // Dearest first, which is the order they are worth Free XP in.
             ->orderByDesc('price_xp')
             ->get()
