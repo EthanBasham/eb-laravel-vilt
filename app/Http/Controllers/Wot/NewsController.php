@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Wot;
 
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -16,12 +17,18 @@ class NewsController extends Controller
     public function index(Request $request): Response
     {
         $category = $request->string('category')->toString() ?: null;
+        $pinnedOnly = $request->boolean('pinned');
+        $user = $request->user();
 
         return Inertia::render('News', [
             'articles' => WotArticle::query()
-                ->when($category, fn ($query) => $query->where('category', $category))
+                // Qualified: pinnedFirstFor joins wot_article_pins, which also
+                // has a category-free `id`, so an unqualified column here would
+                // be ambiguous.
+                ->when($category, fn ($query) => $query->where('wot_articles.category', $category))
+                ->when($pinnedOnly, fn ($query) => $query->onlyPinnedBy($user))
                 ->withCount('events')
-                ->inDefaultOrder()
+                ->pinnedFirstFor($user)
                 ->paginate(24)
                 ->withQueryString()
                 ->through(fn (WotArticle $article): array => [
@@ -33,6 +40,9 @@ class NewsController extends Controller
                     'image_url' => $article->image_url,
                     'published_at' => $article->published_at->toIso8601String(),
                     'events_count' => $article->events_count,
+                    // pinned_at comes from the join in pinnedFirstFor(); its
+                    // presence is what "pinned" means here.
+                    'is_pinned' => $article->pinned_at !== null,
                 ]),
             'categories' => WotArticle::query()
                 ->select('category')
@@ -42,7 +52,35 @@ class NewsController extends Controller
                 ->filter()
                 ->values(),
             'activeCategory' => $category,
+            'pinnedOnly' => $pinnedOnly,
+            'pinnedCount' => $user->pinnedArticles()->count(),
         ]);
+    }
+
+    /**
+     * Pin an article to the top of this user's feed.
+     *
+     * Idempotent: pinning something already pinned refreshes its position
+     * rather than failing on the unique constraint.
+     */
+    public function pin(Request $request, WotArticle $article): RedirectResponse
+    {
+        $request->user()->pinnedArticles()->syncWithoutDetaching([
+            $article->id => ['pinned_at' => now()],
+        ]);
+
+        // Position depends on pinned_at, and syncWithoutDetaching leaves an
+        // existing row's pivot alone — so re-pinning has to update it.
+        $request->user()->pinnedArticles()->updateExistingPivot($article->id, ['pinned_at' => now()]);
+
+        return back(fallback: route('wot.news.index'))->with('success', 'Pinned to the top of your feed.');
+    }
+
+    public function unpin(Request $request, WotArticle $article): RedirectResponse
+    {
+        $request->user()->pinnedArticles()->detach($article->id);
+
+        return back(fallback: route('wot.news.index'))->with('success', 'Unpinned.');
     }
 
     /**

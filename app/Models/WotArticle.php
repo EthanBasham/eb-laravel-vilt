@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Database\Factories\WotArticleFactory;
 
@@ -60,7 +61,47 @@ class WotArticle extends Model
     }
     public function scopeInDefaultOrder(Builder $query): Builder
     {
-        return $query->orderByDesc('published_at');
+        // The id tiebreaker is not cosmetic. Many articles share a publish date,
+        // and without a deterministic final sort the database is free to return
+        // tied rows in a different order per query — which, across a paginated
+        // set, can show one article on two pages and another on none.
+        return $query->orderByDesc('published_at')->orderByDesc('id');
+    }
+
+    /**
+     * Newest first, but with this user's pinned articles hoisted above
+     * everything and their most recent pin at the very top.
+     *
+     * A left join rather than a `whereHas`, because the pin timestamp has to be
+     * available to ORDER BY — and this way one query still serves the paginator.
+     * `wot_articles.*` is selected explicitly since the join puts an `id` on
+     * both sides.
+     */
+    public function scopePinnedFirstFor(Builder $query, ?User $user): Builder
+    {
+        if (! $user) {
+            return $query->inDefaultOrder();
+        }
+
+        return $query
+            ->leftJoin('wot_article_pins', function ($join) use ($user): void {
+                $join->on('wot_article_pins.wot_article_id', '=', 'wot_articles.id')
+                    ->where('wot_article_pins.user_id', '=', $user->id);
+            })
+            ->select('wot_articles.*')
+            ->addSelect('wot_article_pins.pinned_at as pinned_at')
+            // Postgres sorts false before true, so "is null" ascending puts the
+            // pinned rows first without needing a CASE expression.
+            ->orderByRaw('wot_article_pins.pinned_at is null')
+            ->orderByDesc('wot_article_pins.pinned_at')
+            ->orderByDesc('wot_articles.published_at')
+            // Deterministic tiebreaker; see inDefaultOrder().
+            ->orderByDesc('wot_articles.id');
+    }
+
+    public function scopeOnlyPinnedBy(Builder $query, User $user): Builder
+    {
+        return $query->whereHas('pinnedBy', fn (Builder $pins) => $pins->whereKey($user->id));
     }
 
     // Relationships
@@ -69,5 +110,11 @@ class WotArticle extends Model
     public function events(): HasMany
     {
         return $this->hasMany(WotEvent::class);
+    }
+
+    /** @return BelongsToMany<User, $this> */
+    public function pinnedBy(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'wot_article_pins')->withPivot('pinned_at');
     }
 }

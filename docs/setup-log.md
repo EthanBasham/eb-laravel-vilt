@@ -1073,3 +1073,55 @@ visible again. Worth noting the general lesson: this was only apparent with prod
 the fixtures all looked fine.
 
 Suite: **107 passed, 344 assertions.**
+
+---
+
+## 2026-09-09 — Pinning articles
+
+A pin is **per user**, in its own `wot_article_pins` table, rather than a boolean on
+`wot_articles`. Articles are shared rows synced from Wargaming's feed and owned by nobody, so
+a flag on the article would mean one person pinning something rearranged everybody else's
+feed. The table also gives pins their own `pinned_at`, which is what orders several of them.
+
+### Ordering
+
+`scopePinnedFirstFor()` left-joins the pin table for the current user rather than using
+`whereHas`, because the pin timestamp has to be available to `ORDER BY` — and a join keeps it
+to one query that the paginator can still drive. `wot_articles.*` is selected explicitly since
+both tables carry an `id`.
+
+The sort is `pinned_at is null`, then `pinned_at` descending, then `published_at` descending.
+Postgres orders `false` before `true`, so the first clause hoists pinned rows without needing
+a `CASE`.
+
+Pinned-first ordering composes with the category filter rather than overriding it: filtering
+to Updates shows pinned *updates* first, not a pinned Special. A "Pinned" toggle gives the
+cross-category view instead.
+
+### A real bug the live test exposed
+
+Pinning an article and reloading showed two same-day articles swapping places between
+requests. They share a `published_at`, and with no further sort clause the database is free to
+return tied rows in any order.
+
+That is not cosmetic once the list is paginated: a non-deterministic sort across a paginated
+set can put one article on two pages and another on none. Both ordering scopes now end with
+`id` descending, and there's a test that pages through 30 articles sharing one timestamp and
+asserts it sees 30 distinct ids.
+
+Worth remembering generally — **any paginated query needs a unique final sort column**, and
+the symptom (an item silently missing from a list) is one nobody reports as a bug.
+
+### Interface details
+
+The pin button sits *outside* the card's anchor. A `<button>` nested inside an `<a>` is
+invalid markup and clicking it would follow the link as well; positioning it absolutely over
+the card keeps both controls working. Requests use `preserveScroll`, so pinning something
+halfway down the list doesn't throw the page back to the top — the reorder is visible without
+losing your place.
+
+Re-pinning is idempotent. `syncWithoutDetaching` alone would leave an existing row's pivot
+untouched, so the position would silently not refresh; an explicit `updateExistingPivot`
+follows it.
+
+Suite: **117 passed, 422 assertions.**

@@ -21,6 +21,11 @@ Route::delete('/grinds/{grind}', [GrindController::class, 'destroy'])->name('gri
 Route::get('/news', [NewsController::class, 'index'])->name('news.index');
 Route::get('/calendar', [NewsController::class, 'calendar'])->name('calendar');
 
+// Pins are per user, so these live under the authenticated group like
+// everything else here.
+Route::post('/news/{article}/pin', [NewsController::class, 'pin'])->name('news.pin');
+Route::delete('/news/{article}/pin', [NewsController::class, 'unpin'])->name('news.unpin');
+
 Route::get('/connect', [AccountLinkController::class, 'create'])->name('link.create');
 Route::get('/connect/callback', [AccountLinkController::class, 'callback'])->name('link.callback');
 Route::delete('/connect', [AccountLinkController::class, 'destroy'])->name('link.destroy');
