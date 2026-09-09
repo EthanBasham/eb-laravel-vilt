@@ -114,7 +114,9 @@ class NewsController extends Controller
             );
         }
 
-        return back(fallback: route('wot.news.index'))->with('success', "Marked {$unseen->count()} articles as seen.");
+        // No flash: every NEW badge and the button itself disappear, which
+        // reports the outcome more directly than a banner restating it.
+        return back(fallback: route('wot.news.index'));
     }
 
     /**

@@ -41,7 +41,7 @@ it('starts a grind from the vehicle current XP', function () {
 
     $this->actingAs($user)
         ->post(route('wot.grinds.store'), ['tank_id' => 9761, 'target_type' => 'tank', 'target_id' => 16673])
-        ->assertSessionHas('success');
+        ->assertRedirect();
 
     $grind = $account->grinds()->first();
 
@@ -133,7 +133,7 @@ it('accepts a module target and rejects a default module', function () {
 
     $this->actingAs($user)->post(route('wot.grinds.store'), [
         'tank_id' => 9761, 'target_type' => 'module', 'target_id' => 5001,
-    ])->assertSessionHas('success');
+    ])->assertRedirect();
 
     expect($account->grinds()->first()->target_name)->toBe('75 mm Gun M17');
 

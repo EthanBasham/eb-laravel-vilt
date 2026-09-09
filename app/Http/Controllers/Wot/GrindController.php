@@ -84,7 +84,9 @@ class GrindController extends Controller
             ],
         );
 
-        return back()->with('success', "Tracking {$vehicle->name} → {$target['name']}.");
+        // The grind appears in the list below, so a banner naming it again is
+        // noise.
+        return back();
     }
     public function destroy(Request $request, WotGrind $grind): RedirectResponse
     {
@@ -94,7 +96,7 @@ class GrindController extends Controller
 
         $grind->delete();
 
-        return back()->with('success', 'Grind removed.');
+        return back();
     }
 
     /**

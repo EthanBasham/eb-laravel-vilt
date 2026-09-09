@@ -79,7 +79,7 @@ it('marks everything seen at once', function () {
     $user = User::factory()->create();
     WotArticle::factory()->count(5)->create();
 
-    $this->actingAs($user)->post(route('wot.news.seen-all'))->assertSessionHas('success');
+    $this->actingAs($user)->post(route('wot.news.seen-all'))->assertRedirect();
 
     $this->actingAs($user)->get(route('wot.news.index'))->assertInertia(fn ($page) => $page
         ->where('unseenCount', 0)
@@ -146,4 +146,17 @@ it('reports seen and pinned state together', function () {
         ->where('articles.data.0.is_pinned', true)
         ->where('articles.data.0.is_seen', true),
     );
+});
+
+/**
+ * Clearing the backlog removes every NEW badge and the button itself, so a
+ * banner would only restate what the page already shows.
+ */
+it('flashes no message when marking everything seen', function () {
+    User::factory()->create();
+    WotArticle::factory()->count(2)->create();
+
+    $this->actingAs(User::first())
+        ->post(route('wot.news.seen-all'))
+        ->assertSessionMissing('success');
 });

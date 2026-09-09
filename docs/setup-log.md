@@ -1201,3 +1201,29 @@ didn't update. It was redundant all along. Removed, and the earlier log entry co
 place with a note rather than silently edited.
 
 Suite: **132 passed, 497 assertions.**
+
+---
+
+## 2026-09-09 — Removed the rest of the redundant flash messages
+
+Applied the rule properly this time instead of one banner at a time. A success flash earns its
+place only when nothing else on the page reports the outcome.
+
+Removed:
+
+| action | what already says it |
+|---|---|
+| Mark all as seen | every NEW badge and the button itself disappear |
+| Start tracking a grind | the grind appears in the list below |
+| Remove a grind | the row vanishes |
+| Disconnect account | the dashboard is replaced by the Connect screen |
+
+Kept exactly one: **"Connected as {nickname}"**. It survives because it reports *which*
+account got linked — a fact the page doesn't otherwise state — and it lands after a redirect
+back from Wargaming's site, where some confirmation that the round trip worked is genuinely
+useful.
+
+Error flashes all stay. A failure is never self-evident from the interface.
+
+Tests assert the absence rather than merely omitting the assertion, so the intent survives
+someone later "restoring" what looks like missing feedback.

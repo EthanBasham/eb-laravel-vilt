@@ -87,6 +87,7 @@ class AccountLinkController extends Controller
             $account->delete();
         }
 
-        return redirect()->route('wot.dashboard')->with('success', 'Disconnected.');
+        // The dashboard is replaced by the Connect screen, which says it.
+        return redirect()->route('wot.dashboard');
     }
 }
