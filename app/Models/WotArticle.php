@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\DB;
 use Database\Factories\WotArticleFactory;
 
 /**
@@ -104,6 +105,34 @@ class WotArticle extends Model
         return $query->whereHas('pinnedBy', fn (Builder $pins) => $pins->whereKey($user->id));
     }
 
+    /**
+     * Exposes when this user saw each article, as a `seen_at` column.
+     *
+     * A correlated subquery rather than another left join. pinnedFirstFor()
+     * already joins wot_article_pins and calls select('wot_articles.*'), so a
+     * second join would make the result order-dependent — call the two in the
+     * wrong sequence and the select would wipe the other's column. A subquery
+     * composes in any order and cannot duplicate rows.
+     */
+    public function scopeWithSeenFor(Builder $query, ?User $user): Builder
+    {
+        if (! $user) {
+            return $query->selectRaw('null as seen_at');
+        }
+
+        return $query->addSelect(['seen_at' => DB::table('wot_article_views')
+            ->select('seen_at')
+            ->whereColumn('wot_article_views.wot_article_id', 'wot_articles.id')
+            ->where('wot_article_views.user_id', $user->id)
+            ->limit(1),
+        ]);
+    }
+
+    public function scopeOnlyUnseenBy(Builder $query, User $user): Builder
+    {
+        return $query->whereDoesntHave('seenBy', fn (Builder $views) => $views->whereKey($user->id));
+    }
+
     // Relationships
 
     /** @return HasMany<WotEvent, $this> */
@@ -116,5 +145,11 @@ class WotArticle extends Model
     public function pinnedBy(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'wot_article_pins')->withPivot('pinned_at');
+    }
+
+    /** @return BelongsToMany<User, $this> */
+    public function seenBy(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'wot_article_views')->withPivot('seen_at');
     }
 }

@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Wot\MarkArticlesSeenRequest;
 use App\Models\WotArticle;
 use App\Models\WotEvent;
 use Inertia\Inertia;
@@ -21,7 +22,9 @@ class NewsController extends Controller
         $user = $request->user();
 
         return Inertia::render('News', [
-            'articles' => WotArticle::query()
+            // A closure so Inertia partial reloads (the seen-tracker flushes
+            // ask only for unseenCount) skip this query entirely.
+            'articles' => fn () => WotArticle::query()
                 // Qualified: pinnedFirstFor joins wot_article_pins, which also
                 // has a category-free `id`, so an unqualified column here would
                 // be ambiguous.
@@ -29,6 +32,7 @@ class NewsController extends Controller
                 ->when($pinnedOnly, fn ($query) => $query->onlyPinnedBy($user))
                 ->withCount('events')
                 ->pinnedFirstFor($user)
+                ->withSeenFor($user)
                 ->paginate(24)
                 ->withQueryString()
                 ->through(fn (WotArticle $article): array => [
@@ -43,6 +47,7 @@ class NewsController extends Controller
                     // pinned_at comes from the join in pinnedFirstFor(); its
                     // presence is what "pinned" means here.
                     'is_pinned' => $article->pinned_at !== null,
+                    'is_seen' => $article->seen_at !== null,
                 ]),
             'categories' => WotArticle::query()
                 ->select('category')
@@ -54,7 +59,62 @@ class NewsController extends Controller
             'activeCategory' => $category,
             'pinnedOnly' => $pinnedOnly,
             'pinnedCount' => $user->pinnedArticles()->count(),
+            'unseenCount' => WotArticle::onlyUnseenBy($user)->count(),
         ]);
+    }
+
+    /**
+     * Marks a batch of articles seen.
+     *
+     * A batch rather than one call per article: the client observes cards
+     * scrolling past and would otherwise fire a request every second or so
+     * during a scroll.
+     */
+    public function markSeen(MarkArticlesSeenRequest $request): RedirectResponse
+    {
+        $user = $request->user();
+
+        // Only ids that exist are marked, so a stale client sending an id for a
+        // since-deleted article can't fail the whole batch.
+        $ids = WotArticle::whereIn('id', $request->validated('ids'))->pluck('id');
+
+        // attach(), not syncWithoutDetaching(). The latter calls
+        // updateExistingPivot for ids already present, which would rewrite
+        // seen_at every time a card scrolled past again — and "first seen" is
+        // the fact worth keeping. Already-seen ids are filtered out instead.
+        $unseen = $ids->diff(
+            $user->seenArticles()->whereIn('wot_articles.id', $ids)->pluck('wot_articles.id'),
+        );
+
+        $user->seenArticles()->attach(
+            $unseen->mapWithKeys(fn (int $id): array => [$id => ['seen_at' => now()]])->all(),
+        );
+
+        return back(fallback: route('wot.news.index'));
+    }
+
+    /**
+     * Clears the whole backlog — the escape hatch for coming back after a
+     * while and not wanting to scroll past two months of articles.
+     */
+    public function markAllSeen(Request $request): RedirectResponse
+    {
+        $user = $request->user();
+
+        $unseen = WotArticle::onlyUnseenBy($user)->pluck('id');
+
+        // Chunked because this is unbounded: it grows with the feed, and a
+        // single insert of every article a user has never seen is the one place
+        // here that could get large.
+        foreach ($unseen->chunk(500) as $chunk) {
+            // Safe to attach outright: the query above selected only rows with
+            // no existing pivot.
+            $user->seenArticles()->attach(
+                $chunk->mapWithKeys(fn (int $id): array => [$id => ['seen_at' => now()]])->all(),
+            );
+        }
+
+        return back(fallback: route('wot.news.index'))->with('success', "Marked {$unseen->count()} articles as seen.");
     }
 
     /**
@@ -65,13 +125,13 @@ class NewsController extends Controller
      */
     public function pin(Request $request, WotArticle $article): RedirectResponse
     {
+        // syncWithoutDetaching already refreshes pinned_at on a row that exists
+        // — its attachNew() calls updateExistingPivot for ids already present —
+        // so re-pinning moves the article back to the top without a second
+        // call. An earlier version had one; it was redundant.
         $request->user()->pinnedArticles()->syncWithoutDetaching([
             $article->id => ['pinned_at' => now()],
         ]);
-
-        // Position depends on pinned_at, and syncWithoutDetaching leaves an
-        // existing row's pivot alone — so re-pinning has to update it.
-        $request->user()->pinnedArticles()->updateExistingPivot($article->id, ['pinned_at' => now()]);
 
         // No flash message: the card gains its pinned styling and jumps to the
         // top of the list, which says it more directly than a banner would.

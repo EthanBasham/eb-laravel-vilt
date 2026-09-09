@@ -23,6 +23,8 @@ Route::get('/calendar', [NewsController::class, 'calendar'])->name('calendar');
 
 // Pins are per user, so these live under the authenticated group like
 // everything else here.
+Route::post('/news/seen', [NewsController::class, 'markSeen'])->name('news.seen');
+Route::post('/news/seen-all', [NewsController::class, 'markAllSeen'])->name('news.seen-all');
 Route::post('/news/{article}/pin', [NewsController::class, 'pin'])->name('news.pin');
 Route::delete('/news/{article}/pin', [NewsController::class, 'unpin'])->name('news.unpin');
 

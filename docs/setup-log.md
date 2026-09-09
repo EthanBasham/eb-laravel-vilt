@@ -1120,9 +1120,14 @@ the card keeps both controls working. Requests use `preserveScroll`, so pinning 
 halfway down the list doesn't throw the page back to the top — the reorder is visible without
 losing your place.
 
-Re-pinning is idempotent. `syncWithoutDetaching` alone would leave an existing row's pivot
-untouched, so the position would silently not refresh; an explicit `updateExistingPivot`
-follows it.
+Re-pinning is idempotent, via `syncWithoutDetaching`.
+
+> **Correction (later that day):** this originally carried an extra
+> `updateExistingPivot` call, on the belief that `syncWithoutDetaching` leaves an existing
+> row's pivot alone. It does not — `InteractsWithPivotTable::attachNew()` calls
+> `updateExistingPivot` itself for any id already present. The extra call was redundant and
+> has been removed. The same wrong assumption then caused a real bug in the seen tracker; see
+> that entry.
 
 Suite: **117 passed, 422 assertions.**
 
@@ -1148,3 +1153,51 @@ to scan past.
 The border is now hover-only, and the pin button alone carries pinned state (gold when pinned,
 plus `aria-pressed`). A general rule worth keeping: don't overload a hover treatment with
 persistent state.
+
+---
+
+## 2026-09-09 — "Seen" tracking
+
+Five approaches were compared before building, because the obvious one was wrong.
+
+| approach | why not |
+|---|---|
+| Click-through | Articles deliberately skipped stay new forever, so the badge count only grows and stops meaning anything. |
+| Hover dwell 3s | Mouse-only, and in a grid the pointer simply *rests* somewhere while you read — scrolling parks it over whatever card passes beneath. That's structural, not a tuning problem. |
+| **Viewport dwell** | **Chosen.** Literal "seen", works with mouse, touch and keyboard alike. |
+| **Mark all as seen** | **Chosen** alongside it, as the way to clear a backlog. |
+| Visit watermark | One timestamp, no table, no client detection — genuinely tempting at ~5 new articles a week, but can't leave one article unseen to come back to. |
+
+`IntersectionObserver` at 60% visibility for 1.5s. Both numbers matter: the threshold stops a
+card clipped at the viewport edge counting, and the dwell stops a fling from top to bottom
+marking everything — the failure people actually resent. Marks are batched and flushed every
+two seconds, so scrolling a full page is one request rather than twenty-four, and the flush
+also runs on unmount so navigating away mid-interval loses nothing.
+
+**Badges deliberately do not clear mid-scroll.** The flush asks only for `unseenCount`, so the
+counter ticks down while the cards stay put — restyling them as they pass would make the grid
+shimmer under the cursor. They clear on the next load, which is when you'd look again. The
+`articles` prop became a closure so those partial reloads skip the paginator query entirely.
+
+Absent `IntersectionObserver` the tracker does nothing and "mark all as seen" still works, so
+it degrades rather than breaks.
+
+### The bug, and the earlier mistake it exposed
+
+A test asserted that re-seeing an article keeps its original `seen_at`. It failed: the
+timestamp moved by an hour.
+
+`syncWithoutDetaching` **does** update pivot attributes on rows that already exist —
+`InteractsWithPivotTable::attachNew()` calls `updateExistingPivot` for any id already present.
+Confirmed in the framework source rather than inferred. Every card scrolling past a second
+time would therefore have rewritten its "first seen" time, so the column would have quietly
+meant "last seen" instead.
+
+Fixed by filtering already-seen ids and `attach()`ing only the rest.
+
+The same wrong assumption had produced the opposite mistake in the pinning work earlier: an
+explicit `updateExistingPivot` was added there *because* `syncWithoutDetaching` supposedly
+didn't update. It was redundant all along. Removed, and the earlier log entry corrected in
+place with a note rather than silently edited.
+
+Suite: **132 passed, 497 assertions.**

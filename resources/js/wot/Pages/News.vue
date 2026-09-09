@@ -1,6 +1,7 @@
 <script setup>
 import { Head, Link, router } from '@inertiajs/vue3';
 import AppShell from '../Components/AppShell.vue';
+import { useSeenTracker } from '../composables/useSeenTracker';
 
 const props = defineProps({
     articles: { type: Object, required: true },
@@ -8,7 +9,15 @@ const props = defineProps({
     activeCategory: { type: String, default: null },
     pinnedOnly: { type: Boolean, default: false },
     pinnedCount: { type: Number, default: 0 },
+    unseenCount: { type: Number, default: 0 },
 });
+
+// Cards mark themselves seen once they've been ~60% visible for 1.5s.
+const { track } = useSeenTracker();
+
+const markAllSeen = () => {
+    router.post('/wot/news/seen-all', {}, { preserveScroll: true });
+};
 
 const filterBy = (category) => {
     router.get('/wot/news', {
@@ -90,9 +99,18 @@ const asDate = (iso) => new Date(iso).toLocaleDateString(undefined, { dateStyle:
             </button>
 
             <button
+                v-if="unseenCount"
+                type="button"
+                class="ms-auto border border-wot-border px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-wot-dim transition-colors hover:border-wot-good hover:text-wot-good"
+                @click="markAllSeen"
+            >
+                Mark {{ unseenCount }} as seen
+            </button>
+
+            <button
                 v-if="pinnedCount || pinnedOnly"
                 type="button"
-                class="ms-auto border px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors"
+                class="border px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors"
                 :class="pinnedOnly ? 'border-wot-gold text-wot-gold' : 'border-wot-border text-wot-dim hover:text-wot-text'"
                 :aria-pressed="pinnedOnly"
                 @click="togglePinnedOnly"
@@ -102,7 +120,21 @@ const asDate = (iso) => new Date(iso).toLocaleDateString(undefined, { dateStyle:
         </div>
 
         <ul role="list" class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <li v-for="article in articles.data" :key="article.id" class="relative">
+            <li
+                v-for="article in articles.data"
+                :key="article.id"
+                :ref="(el) => track(el, article.id, article.is_seen)"
+                class="relative"
+            >
+                <!-- Sits opposite the pin so the two never collide on a card
+                     that is both new and pinned. -->
+                <span
+                    v-if="!article.is_seen"
+                    class="absolute left-2 top-2 z-10 border border-wot-good bg-wot-good/20 px-1.5 py-0.5 text-xs font-bold uppercase tracking-wider text-wot-good backdrop-blur-sm"
+                >
+                    New
+                </span>
+
                 <!-- The pin control sits outside the anchor rather than inside
                      it: a button nested in a link is invalid markup, and
                      clicking it would follow the link as well. -->
