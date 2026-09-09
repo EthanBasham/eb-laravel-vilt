@@ -7,6 +7,7 @@ use App\Models\WotGrindStep;
 use App\Models\WotGrindTarget;
 use App\Models\WotVehicle;
 use App\Models\WotVehicleSnapshot;
+use App\Models\WotVehicleModule;
 
 /** A three-tier line: T8 -> T9 -> T10. */
 function techLine(): array
@@ -209,4 +210,127 @@ it('offers only researchable vehicles as new targets', function () {
         expect($ids)->not->toContain(500)->not->toContain(100)
             ->and($ids)->toContain(90);
     });
+});
+
+// --- Module research ----------------------------------------------------------
+
+function moduleStep(): array
+{
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create();
+    WotVehicle::factory()->create(['tank_id' => 900, 'name' => 'Grinder', 'tier' => 9]);
+    $target = WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => 900]);
+    $step = WotGrindStep::create([
+        'wot_grind_target_id' => $target->id, 'tank_id' => 900, 'tier' => 9, 'position' => 0,
+        'research_xp' => 200_000, 'banked_xp' => 100_000,
+    ]);
+
+    WotVehicleModule::insert([
+        ['module_id' => 1, 'tank_id' => 900, 'name' => 'Big Gun', 'type' => 'vehicleGun', 'price_xp' => 60_000, 'price_credit' => 0, 'is_default' => false, 'created_at' => now(), 'updated_at' => now()],
+        ['module_id' => 2, 'tank_id' => 900, 'name' => 'Engine', 'type' => 'vehicleEngine', 'price_xp' => 25_000, 'price_credit' => 0, 'is_default' => false, 'created_at' => now(), 'updated_at' => now()],
+        ['module_id' => 3, 'tank_id' => 900, 'name' => 'Stock Tracks', 'type' => 'vehicleChassis', 'price_xp' => 0, 'price_credit' => 0, 'is_default' => true, 'created_at' => now(), 'updated_at' => now()],
+    ]);
+
+    return [$user, $step];
+}
+
+it('offers only upgrade modules, never stock ones', function () {
+    [$user, $step] = moduleStep();
+
+    expect($step->moduleOptions())->toHaveCount(2)
+        ->and($step->moduleOptions()->pluck('name'))->not->toContain('Stock Tracks')
+        // Outstanding is derived, not stored.
+        ->and($step->outstandingModuleXp())->toBe(85_000);
+});
+
+/**
+ * The whole point of the feature: researching a module spends banked XP in
+ * game, so the banked figure should drop by exactly its cost rather than being
+ * adjusted by hand.
+ */
+it('drops banked XP by the module cost when one is researched', function () {
+    [$user, $step] = moduleStep();
+
+    $this->actingAs($user)->patch(route('wot.grinding.module', $step), [
+        'module_id' => 1, 'researched' => true,
+    ])->assertRedirect();
+
+    $step->refresh();
+
+    expect($step->banked_xp)->toBe(40_000)
+        ->and($step->module_xp_remaining)->toBe(25_000)
+        ->and($step->researched_modules)->toBe([1]);
+});
+
+it('gives the XP back when a module is un-ticked', function () {
+    [$user, $step] = moduleStep();
+
+    $this->actingAs($user)->patch(route('wot.grinding.module', $step), ['module_id' => 1, 'researched' => true]);
+    $this->actingAs($user)->patch(route('wot.grinding.module', $step), ['module_id' => 1, 'researched' => false]);
+
+    $step->refresh();
+
+    expect($step->banked_xp)->toBe(100_000)
+        ->and($step->module_xp_remaining)->toBe(85_000)
+        ->and($step->researched_modules)->toBe([]);
+});
+
+it('ignores a repeated tick', function () {
+    [$user, $step] = moduleStep();
+
+    $this->actingAs($user)->patch(route('wot.grinding.module', $step), ['module_id' => 1, 'researched' => true]);
+    $this->actingAs($user)->patch(route('wot.grinding.module', $step), ['module_id' => 1, 'researched' => true]);
+
+    // Charged once, not twice.
+    expect($step->refresh()->banked_xp)->toBe(40_000);
+});
+
+/**
+ * A module can legitimately be researched with Free XP, leaving less banked
+ * than it cost. Going negative would be nonsense on the page.
+ */
+it('floors banked XP at zero', function () {
+    [$user, $step] = moduleStep();
+    $step->update(['banked_xp' => 10_000]);
+
+    $this->actingAs($user)->patch(route('wot.grinding.module', $step), ['module_id' => 1, 'researched' => true]);
+
+    expect($step->refresh()->banked_xp)->toBe(0);
+});
+
+it('refuses a module that belongs to another vehicle', function () {
+    [$user, $step] = moduleStep();
+    WotVehicleModule::insert([['module_id' => 99, 'tank_id' => 555, 'name' => 'Elsewhere',
+        'type' => 'vehicleGun', 'price_xp' => 50_000, 'price_credit' => 0, 'is_default' => false,
+        'created_at' => now(), 'updated_at' => now()]]);
+
+    $this->actingAs($user)->patch(route('wot.grinding.module', $step), ['module_id' => 99, 'researched' => true]);
+
+    expect($step->refresh()->banked_xp)->toBe(100_000)
+        ->and($step->researched_modules)->toBeNull();
+});
+
+it('will not let one account tick another board modules', function () {
+    [$user, $step] = moduleStep();
+    $other = User::factory()->create();
+    WotAccount::factory()->for($other)->create();
+
+    $this->actingAs($other)->patch(route('wot.grinding.module', $step), ['module_id' => 1, 'researched' => true])
+        ->assertNotFound();
+
+    expect($step->refresh()->banked_xp)->toBe(100_000);
+});
+
+it('falls back to the stored figure when a vehicle has no module rows', function () {
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create();
+    WotVehicle::factory()->create(['tank_id' => 901, 'tier' => 9]);
+    $target = WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => 901]);
+    $step = WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => 901, 'tier' => 9,
+        'position' => 0, 'module_xp_remaining' => 42_000]);
+
+    // Without this, a vehicle the encyclopedia hasn't described would read as
+    // fully upgraded.
+    expect($step->outstandingModuleXp())->toBe(42_000)
+        ->and($step->moduleOptions())->toBeEmpty();
 });

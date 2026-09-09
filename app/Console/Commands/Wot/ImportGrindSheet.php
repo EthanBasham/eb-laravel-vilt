@@ -3,10 +3,12 @@
 namespace App\Console\Commands\Wot;
 
 use Illuminate\Console\Command;
+use Illuminate\Support\Collection;
 use App\Models\WotAccount;
 use App\Models\WotGrindSetting;
 use App\Models\WotGrindStep;
 use App\Models\WotGrindTarget;
+use App\Models\WotVehicleModule;
 use App\Models\WotVehicleSnapshot;
 use App\Services\Wargaming\TechTree;
 
@@ -94,7 +96,7 @@ class ImportGrindSheet extends Command
                 $tier = $row['tiers'][(string) $step['tier']] ?? $row['tiers'][$step['tier']] ?? null;
                 $active = $banked->get($step['tank_id']);
 
-                WotGrindStep::create([
+                $created = WotGrindStep::create([
                     'wot_grind_target_id' => $target->id,
                     'tank_id' => $step['tank_id'],
                     'tier' => $step['tier'],
@@ -117,11 +119,15 @@ class ImportGrindSheet extends Command
                     'is_active' => $active !== null,
                     'price_credit' => $step['price_credit'],
                 ]);
+
+                $this->seedResearchedModules($created);
             }
 
             $imported++;
             $this->line(sprintf('  %-26s %2d steps', $row['name'], count($steps)));
         }
+
+        $this->info('Reconciled modules for '.WotGrindStep::whereNotNull('researched_modules')->count().' steps.');
 
         WotGrindSetting::updateOrCreate(
             ['wot_account_id' => $account->id],
@@ -134,5 +140,93 @@ class ImportGrindSheet extends Command
         $this->info("Imported {$imported} targets.");
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Works out which modules must already be researched for the sheet's "XP to
+     * Max" figure to be true.
+     *
+     * The sheet records a total, not a list, so the individual modules are
+     * inferred: zero means everything is done, a figure equal to the full sum
+     * means nothing is, and anything between is solved as a subset. Only exact
+     * matches are accepted — a near-miss is left alone rather than guessed at,
+     * because a wrong module ticked would quietly change the banked XP maths
+     * later.
+     *
+     * banked_xp is deliberately untouched: the sheet's figure is already what
+     * remains *after* those modules were researched.
+     */
+    private function seedResearchedModules(WotGrindStep $step): void
+    {
+        $modules = WotVehicleModule::where('tank_id', $step->tank_id)->onlyUpgrades()->get();
+
+        if ($modules->isEmpty()) {
+            return;
+        }
+
+        $full = (int) $modules->sum('price_xp');
+        $target = $full - (int) $step->module_xp_remaining;
+
+        if ($target <= 0) {
+            $step->update(['researched_modules' => [], 'module_xp_remaining' => $full === 0 ? 0 : $step->module_xp_remaining]);
+
+            return;
+        }
+
+        if ($target === $full) {
+            $step->update([
+                'researched_modules' => $modules->pluck('module_id')->all(),
+                'module_xp_remaining' => 0,
+            ]);
+
+            return;
+        }
+
+        $subset = $this->subsetSummingTo($modules, $target);
+
+        if ($subset === null) {
+            $this->warn("  could not reconcile modules for tank {$step->tank_id} (needs {$target} of {$full})");
+
+            return;
+        }
+
+        $step->update([
+            'researched_modules' => $subset,
+            'module_xp_remaining' => $full - $target,
+        ]);
+    }
+
+    /**
+     * Smallest set of module ids summing exactly to a total.
+     *
+     * Brute force over every combination, which is safe because a vehicle has
+     * at most a handful of upgrade modules — the search space is tiny and the
+     * alternative, a greedy pick, could match the total with the wrong modules.
+     *
+     * @param  Collection<int, WotVehicleModule>  $modules
+     * @return list<int>|null
+     */
+    private function subsetSummingTo($modules, int $target): ?array
+    {
+        $items = $modules->values();
+        $count = $items->count();
+
+        for ($mask = 1; $mask < (1 << $count); $mask++) {
+            $sum = 0;
+            $ids = [];
+
+            for ($i = 0; $i < $count; $i++) {
+                if ($mask & (1 << $i)) {
+                    $sum += $items[$i]->price_xp;
+                    $ids[] = $items[$i]->module_id;
+                }
+            }
+
+            if ($sum === $target) {
+                return $ids;
+            }
+        }
+
+        return null;
     }
 }

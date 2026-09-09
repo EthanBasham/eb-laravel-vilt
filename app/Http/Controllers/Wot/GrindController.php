@@ -89,6 +89,28 @@ class GrindController extends Controller
 
         return back(fallback: route('wot.grinding'));
     }
+
+    /**
+     * Ticks a module researched, or un-ticks it.
+     *
+     * The model does the arithmetic: banked XP drops by the module's cost,
+     * because that is what happens in game when you research it. That is the
+     * point of the feature — the alternative was doing the subtraction by hand.
+     */
+    public function updateModule(Request $request, WotGrindStep $step): RedirectResponse
+    {
+        $this->authorizeStep($request, $step);
+
+        $validated = $request->validate([
+            'module_id' => ['required', 'integer'],
+            'researched' => ['required', 'boolean'],
+        ]);
+
+        $step->setModuleResearched($validated['module_id'], $validated['researched']);
+
+        return back(fallback: route('wot.grinding'));
+    }
+
     public function destroy(Request $request, WotGrindTarget $target): RedirectResponse
     {
         abort_unless($target->wot_account_id === $request->user()->wotAccount?->id, 404);

@@ -4,6 +4,7 @@ namespace App\Console\Commands\Wot;
 
 use Illuminate\Console\Command;
 use App\Models\WotVehicle;
+use App\Models\WotVehicleModule;
 use App\Services\Wargaming\WargamingClient;
 use App\Services\Wargaming\WargamingException;
 
@@ -50,13 +51,54 @@ class SyncVehicles extends Command
                 );
             }
 
+            $this->storeModules($vehicles);
+
             $seen += count($vehicles);
             $this->line("  page {$page}: ".count($vehicles).' vehicles');
             $page++;
         } while (count($vehicles) === 100);
 
-        $this->info("Synced {$seen} vehicles.");
+        $this->info("Synced {$seen} vehicles, ".WotVehicleModule::count().' modules.');
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Flattens each vehicle's modules_tree into rows.
+     *
+     * upsert rather than delete-then-insert so a partial failure mid-sync can't
+     * leave the board with no modules to tick — the grind view would silently
+     * report every vehicle as fully upgraded.
+     *
+     * @param  array<string, mixed>  $vehicles
+     */
+    private function storeModules(array $vehicles): void
+    {
+        $rows = [];
+
+        foreach ($vehicles as $vehicle) {
+            foreach ($vehicle['modules_tree'] ?? [] as $module) {
+                $rows[] = [
+                    'module_id' => $module['module_id'],
+                    'tank_id' => $vehicle['tank_id'],
+                    'name' => $module['name'],
+                    'type' => $module['type'],
+                    'price_xp' => $module['price_xp'] ?? 0,
+                    'price_credit' => $module['price_credit'] ?? 0,
+                    'is_default' => (bool) ($module['is_default'] ?? false),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ];
+            }
+        }
+
+        foreach (array_chunk($rows, 300) as $chunk) {
+            // Matched on the pair, since a module id repeats across vehicles.
+            WotVehicleModule::upsert(
+                $chunk,
+                ['tank_id', 'module_id'],
+                ['name', 'type', 'price_xp', 'price_credit', 'is_default', 'updated_at'],
+            );
+        }
     }
 }

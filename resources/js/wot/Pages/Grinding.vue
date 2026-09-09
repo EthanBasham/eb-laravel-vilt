@@ -3,6 +3,7 @@ import { Head, router, useForm } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 import AppShell from '../Components/AppShell.vue';
 import EditableNumber from '../Components/EditableNumber.vue';
+import ModulePicker from '../Components/ModulePicker.vue';
 
 const props = defineProps({
     active: { type: Array, default: () => [] },
@@ -143,7 +144,9 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
                             <td class="px-4 py-2 text-right">
                                 <EditableNumber :step-id="row.id" field="banked_xp" :model-value="row.banked_xp" />
                             </td>
-                            <td class="px-4 py-2 text-right tabular-nums text-wot-muted">{{ n(row.module_xp_remaining) }}</td>
+                            <td class="px-4 py-2 text-right">
+                                <ModulePicker :step-id="row.id" :modules="row.modules" :outstanding="row.module_xp_remaining" />
+                            </td>
                             <td class="px-4 py-2 text-right tabular-nums text-wot-muted">{{ n(row.research_cost) }}</td>
                             <td class="px-4 py-2 text-right tabular-nums text-wot-heading">{{ n(row.xp_remaining) }}</td>
                             <td class="px-4 py-2 text-right">
@@ -253,7 +256,19 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
                                                     <span v-if="s.research_xp && s.research_xp_remaining !== null && s.research_xp !== s.research_xp_remaining"
                                                           class="ms-2 text-wot-dim">full {{ n(s.research_xp) }}</span>
                                                 </td>
-                                                <td class="py-1 text-right"><EditableNumber :step-id="s.id" field="module_xp_remaining" :model-value="s.module_xp_remaining" /></td>
+                                                <td class="py-1 text-right">
+                                                    <!-- Editable only where the encyclopedia has no
+                                                         modules for this vehicle; otherwise the total
+                                                         is a consequence of the ticks, and typing over
+                                                         it would be undone by the next one. -->
+                                                    <ModulePicker
+                                                        v-if="s.modules.length"
+                                                        :step-id="s.id"
+                                                        :modules="s.modules"
+                                                        :outstanding="s.module_xp_remaining"
+                                                    />
+                                                    <EditableNumber v-else :step-id="s.id" field="module_xp_remaining" :model-value="s.module_xp_remaining" />
+                                                </td>
                                                 <td class="py-1 text-right"><EditableNumber :step-id="s.id" field="research_xp_remaining" :model-value="s.research_xp_remaining ?? s.research_xp ?? 0" /></td>
                                                 <td class="py-1 text-right"><EditableNumber :step-id="s.id" field="banked_xp" :model-value="s.banked_xp" /></td>
                                                 <td class="py-1 text-right"><EditableNumber :step-id="s.id" field="free_xp_planned" :model-value="s.free_xp_planned" /></td>

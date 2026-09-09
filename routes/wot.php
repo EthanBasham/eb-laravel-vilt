@@ -19,6 +19,7 @@ Route::post('/grinding/targets', [GrindController::class, 'store'])->name('grind
 Route::delete('/grinding/targets/{target}', [GrindController::class, 'destroy'])->name('grinding.destroy');
 Route::patch('/grinding/targets/{target}/complete', [GrindController::class, 'complete'])->name('grinding.complete');
 Route::patch('/grinding/steps/{step}', [GrindController::class, 'updateStep'])->name('grinding.step');
+Route::patch('/grinding/steps/{step}/modules', [GrindController::class, 'updateModule'])->name('grinding.module');
 Route::patch('/grinding/settings', [GrindController::class, 'updateSettings'])->name('grinding.settings');
 
 Route::post('/refresh', [DashboardController::class, 'refresh'])->name('dashboard.refresh');

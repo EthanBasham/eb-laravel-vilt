@@ -76,6 +76,7 @@ class GrindBoard
                     'xp_required' => $step->xpRequired(),
                     'xp_remaining' => $step->xpRemaining(),
                     'progress' => $step->progress,
+                    'modules' => $step->moduleOptions()->all(),
                 ];
             })->values()->all();
     }
@@ -118,6 +119,7 @@ class GrindBoard
                 'xp_required' => $s->xpRequired(),
                 'xp_remaining' => $s->xpRemaining(),
                 'progress' => $s->progress,
+                'modules' => $s->moduleOptions()->all(),
             ])->values()->all(),
         ];
     }

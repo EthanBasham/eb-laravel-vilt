@@ -1608,3 +1608,55 @@ have made one table behave unlike the rest.
 
 The two planning inputs (credits available, vacant slots) are still `type="number"`
 — a different form, filled in rarely, where the stepper does no harm.
+
+---
+
+## 2026-09-09 — Module upgrades as toggles, and banked XP that follows the game
+
+"XP to Max" stops being a number to maintain and becomes a consequence of which module upgrades
+are ticked. Ticking one drops banked XP by exactly its cost, because that is what researching a
+module does in game.
+
+### The API had it, and the spreadsheet proved it
+
+`modules_tree` carries `module_id`, `name`, `type`, `price_xp`, `price_credit` and `is_default`
+per vehicle. Checked before building: **the sheet's "XP to Max" is exactly the sum of a
+vehicle's unresearched upgrade costs**, matching on 19 of 20 steps.
+
+The twentieth was the tell. Object 705 read 79,300 against an API total of 140,300 — a gap of
+61,000, which is precisely its 130 mm S-70 gun. Not a discrepancy: a module already researched.
+That single row confirmed the whole model.
+
+### A modelling error worth recording
+
+The first schema keyed modules on `module_id` alone. The sync failed immediately with
+`ON CONFLICT DO UPDATE command cannot affect row a second time` — **the same module fits many
+vehicles**, so the encyclopedia repeats an id under each. The real identity is the
+`(tank_id, module_id)` pair. Corrected in place rather than patched around, since the migration
+hadn't shipped.
+
+### Inferring the seed state
+
+The sheet records a total, not a list, so which modules are done has to be inferred: zero means
+all of them, the full sum means none, and anything between is solved as an exact subset. Brute
+force over every combination, which is safe because a vehicle has at most a handful of upgrades
+— and only exact matches are accepted. A near-miss is left alone with a warning rather than
+guessed at, because a wrongly-ticked module would quietly corrupt the banked XP arithmetic from
+then on.
+
+Seeding deliberately does **not** touch banked XP: the sheet's figure is already what remained
+after those modules were researched. Only a user's tick moves it.
+
+### Behaviour
+
+Ticking subtracts the module's cost from banked XP; un-ticking gives it back, so a misclick
+costs nothing. Verified end to end on ST-I: 83,305 → un-tick the gun → 142,605 → re-tick →
+83,305, with "to max" moving 0 → 59,300 → 0 alongside.
+
+Banked XP floors at zero — a module can legitimately be researched with Free XP, leaving less
+banked than it cost, and a negative balance would be nonsense on the page.
+
+Where the encyclopedia has no modules for a vehicle the old manual field still shows, so a
+vehicle it hasn't described doesn't silently read as fully upgraded.
+
+Suite: **155 passed, 610 assertions.**

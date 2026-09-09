@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Collection;
 
 /**
  * One tier along a research path: the vehicle you play, what its modules still
@@ -17,6 +18,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[Fillable([
     'wot_grind_target_id', 'tank_id', 'tier', 'position', 'research_xp', 'research_xp_remaining',
     'module_xp_remaining', 'banked_xp', 'free_xp_planned', 'blueprint_fragments', 'price_credit', 'is_active',
+    'researched_modules',
 ])]
 class WotGrindStep extends Model
 {
@@ -39,7 +41,94 @@ class WotGrindStep extends Model
             'blueprint_fragments' => 'integer',
             'price_credit' => 'integer',
             'is_active' => 'boolean',
+            'researched_modules' => 'array',
         ];
+    }
+
+    /**
+     * The upgrade modules on this step's vehicle, each flagged researched.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    public function moduleOptions(): Collection
+    {
+        $done = array_flip($this->researched_modules ?? []);
+
+        return WotVehicleModule::where('tank_id', $this->tank_id)
+            ->onlyUpgrades()
+            ->orderByDesc('price_xp')
+            ->get()
+            ->map(fn (WotVehicleModule $m): array => [
+                'module_id' => $m->module_id,
+                'name' => $m->name,
+                'slot' => $m->slot(),
+                'price_xp' => $m->price_xp,
+                'is_researched' => isset($done[$m->module_id]),
+            ]);
+    }
+
+    /**
+     * Marks a module researched (or not) and keeps the two derived numbers in
+     * step with it.
+     *
+     * Researching a module spends banked XP in game, so the banked figure drops
+     * by exactly the module's cost — the whole point of tracking modules here
+     * rather than maintaining an "XP to Max" total by hand. Un-ticking reverses
+     * it, so a misclick costs nothing.
+     */
+    public function setModuleResearched(int $moduleId, bool $researched): void
+    {
+        $module = WotVehicleModule::where('tank_id', $this->tank_id)
+            ->where('module_id', $moduleId)
+            ->onlyUpgrades()
+            ->first();
+
+        if (! $module) {
+            return;
+        }
+
+        $done = collect($this->researched_modules ?? []);
+
+        if ($researched === $done->contains($moduleId)) {
+            return;
+        }
+
+        $done = $researched
+            ? $done->push($moduleId)
+            : $done->reject(fn (int $id): bool => $id === $moduleId);
+
+        $this->researched_modules = $done->unique()->values()->all();
+
+        // Floored at zero: banked XP can legitimately be lower than a module's
+        // cost if it was researched with Free XP, and a negative balance would
+        // be nonsense on the page.
+        $this->banked_xp = $researched
+            ? max(0, (int) $this->banked_xp - $module->price_xp)
+            : (int) $this->banked_xp + $module->price_xp;
+
+        $this->module_xp_remaining = $this->outstandingModuleXp();
+
+        $this->save();
+    }
+
+    /**
+     * Sum of the upgrade modules still to research.
+     *
+     * Falls back to the stored figure when the vehicle has no module rows —
+     * a vehicle added before the encyclopedia sync knew about modules would
+     * otherwise silently report as fully upgraded.
+     */
+    public function outstandingModuleXp(): int
+    {
+        $modules = WotVehicleModule::where('tank_id', $this->tank_id)->onlyUpgrades()->get();
+
+        if ($modules->isEmpty()) {
+            return (int) $this->module_xp_remaining;
+        }
+
+        $done = array_flip($this->researched_modules ?? []);
+
+        return (int) $modules->reject(fn (WotVehicleModule $m): bool => isset($done[$m->module_id]))->sum('price_xp');
     }
 
     /**
