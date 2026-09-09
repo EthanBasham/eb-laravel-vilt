@@ -26,6 +26,29 @@ class PurchaseBoard
     /** Tier XI sits above the tech tree's old ceiling; paths stop at X. */
     private const TOP_TIER = 11;
 
+    /**
+     * The tier a row is named after.
+     *
+     * A branch is known by its tier X in game and in every community tool, so
+     * that is the name the row carries whatever tier it was entered at.
+     */
+    private const NAMED_TIER = 10;
+
+    /**
+     * The tier a row's cells reach down to.
+     *
+     * Distinct from config('wargaming.purchase_min_tier'), which decides what
+     * earns a row of its own. Nothing below that gets a row; every row shows
+     * its whole line regardless, so a tier III you do not actually own has
+     * somewhere to appear and something to un-tick.
+     *
+     * This supersedes the earlier "two floors" arrangement, where the column
+     * range was min(that config, the lowest tier any tracked line started at).
+     * That computation existed to answer "how low does any line start?", which
+     * stops being a question once the answer is always the bottom of the tree.
+     */
+    private const FLOOR_TIER = 1;
+
     public function __construct(private readonly TechTree $tree) {}
 
     /**
@@ -45,12 +68,8 @@ class PurchaseBoard
         // rather than something a budget is planned around.
         $minTier = (int) config('wargaming.purchase_min_tier');
 
-        // Tracked lines are shown in full however low they start, so the tier
-        // the columns reach down to is whichever of the two is lower.
-        $floor = min($minTier, (int) ($targets->flatMap->steps->min('tier') ?? $minTier));
-
         $tracked = $targets
-            ->map(fn (WotGrindTarget $t): array => $this->targetRow($t, $floor, $purchases, $played))
+            ->map(fn (WotGrindTarget $t): array => $this->targetRow($t, $purchases, $played))
             ->values();
 
         // Every vehicle a tracked line already shows, at any tier — not just the
@@ -60,24 +79,34 @@ class PurchaseBoard
             ->flatMap(fn (array $r): array => array_column($r['cells'], 'tank_id'))
             ->flip();
 
-        $rows = $tracked
-            ->concat($this->candidateRows($covered, $floor, $minTier, $purchases, $played))
-            // A line you have finished buying is not a shopping list.
-            ->reject(fn (array $row): bool => $row['is_bought_out'])
-            // Same tech-tree nation order as every other vehicle list here.
-            ->sortBy(fn (array $r): array => [WotVehicle::rankOf($r['nation']), -$r['tier'], $r['name']])
-            ->values();
+        $rows = $this->claimShared(
+            $tracked
+                ->concat($this->candidateRows($covered, $minTier, $purchases, $played))
+                // A line you have finished buying is not a shopping list. This
+                // goes before anything is claimed, so a row nobody can see
+                // never takes a vehicle away from a row they can — the claim
+                // would name a row that is not on the board, and nothing would
+                // pay for the tank.
+                ->reject(fn (array $row): bool => $row['is_bought_out'])
+                // Same tech-tree nation order as every other vehicle list here.
+                // Sorted before claiming, so the row that owns a shared vehicle
+                // is the one you meet first reading down the board.
+                ->sortBy(fn (array $r): array => [WotVehicle::rankOf($r['nation']), -$r['tier'], $r['name']])
+                ->values()
+        );
 
         return [
             'rows' => $rows->all(),
-            'tiers' => $this->tiers($rows),
+            ...$this->tierColumns($rows),
             /*
              * Summed over the visible rows, so the tab's own total, its footer
-             * and the headline card are always the same number.
+             * and the headline card are always the same number. Each vehicle is
+             * in exactly one row's total after claimShared(), so a tank on two
+             * lines is charged once.
              *
-             * Buying a line's last vehicle therefore settles the line, even if
-             * an intermediate tier was never ticked off. That is the intended
-             * rule — you cannot research past a vehicle without owning it, so a
+             * Buying a line's last vehicle settles the line, even if an
+             * intermediate tier was never ticked off. That is the intended rule
+             * — you cannot research past a vehicle without owning it, so a
              * bought tier X means the tiers below it were bought too.
              */
             'credits_required' => (int) $rows->sum('credits_remaining'),
@@ -93,7 +122,6 @@ class PurchaseBoard
      */
     private function targetRow(
         WotGrindTarget $target,
-        int $floor,
         Collection $purchases,
         Collection $played,
     ): array {
@@ -102,7 +130,7 @@ class PurchaseBoard
 
         // Everything under the vehicle being played was researched through to
         // get there, so it is owned whether or not it is still in the garage.
-        $below = $first ? $this->tree->ancestorsOf($first->tank_id, $floor) : [];
+        $below = $first ? $this->tree->ancestorsOf($first->tank_id, self::FLOOR_TIER) : [];
 
         $cells = collect($below)
             ->map(fn (WotVehicle $v): ?array => $this->cell($v, $purchases->get($v->tank_id), true))
@@ -127,7 +155,6 @@ class PurchaseBoard
      */
     private function candidateRows(
         Collection $covered,
-        int $floor,
         int $minTier,
         Collection $purchases,
         Collection $played,
@@ -151,14 +178,14 @@ class PurchaseBoard
         $subsumed = $pool
             ->flatMap(fn (WotVehicle $v): array => array_map(
                 fn (WotVehicle $a): int => $a->tank_id,
-                $this->tree->ancestorsOf($v->tank_id, $floor),
+                $this->tree->ancestorsOf($v->tank_id, self::FLOOR_TIER),
             ))
             ->flip();
 
         return $pool
             ->reject(fn (WotVehicle $v): bool => $subsumed->has($v->tank_id))
-            ->map(function (WotVehicle $v) use ($floor, $purchases, $played): array {
-                $cells = collect($this->tree->ancestorsOf($v->tank_id, $floor))
+            ->map(function (WotVehicle $v) use ($purchases, $played): array {
+                $cells = collect($this->tree->ancestorsOf($v->tank_id, self::FLOOR_TIER))
                     ->map(fn (WotVehicle $a): ?array => $this->cell($a, $purchases->get($a->tank_id), true))
                     ->push($this->cell($v, $purchases->get($v->tank_id), false));
 
@@ -191,19 +218,36 @@ class PurchaseBoard
 
         $cells = $cells->filter()->values();
 
+        /*
+         * Rows reach this board from two directions — a tracked target, whose
+         * top may be a IX or an XI, and a researchable candidate, which can be
+         * any tier — so naming each after its own entry point put the same
+         * branch on screen under different names. The tier X is the constant.
+         *
+         * Falls back to the row's top for a line that never reaches X, which is
+         * the best name available rather than a deliberate second choice.
+         */
+        $named = $cells->firstWhere('tier', self::NAMED_TIER);
+        $namedBy = $named ? $this->tree->vehicles()->get($named['tank_id']) : $top;
+
         return [
             'key' => $key,
             'tank_id' => $topTankId,
-            'name' => $top?->name ?? "Tank {$topTankId}",
+            /*
+             * short_name, not name: the encyclopedia ships both, and the short
+             * form is the one written down — "Obj. 279 (e)" against "Object 279
+             * early". Of the 122 tier X vehicles synced, 55 differ from their
+             * long form and none are null; the column is nullable all the same,
+             * so name stays as a fallback.
+             */
+            'name' => $namedBy?->short_name ?? $namedBy?->name ?? "Tank {$topTankId}",
             'nation' => $top?->nation,
             'tier' => $top?->tier,
+            'type' => $namedBy?->type,
             'cells' => $cells->keyBy('tier')->all(),
-            // Owned vehicles are not an outlay. The line's lowest tier is one of
-            // them by default, but by its purchase flag rather than by its
-            // position — un-ticking it has to put its price back on the bill.
-            'credits_remaining' => (int) $cells
-                ->reject(fn (array $c): bool => $c['is_purchased'])
-                ->sum('price'),
+            // credits_remaining is not set here: it depends on which cells this
+            // row actually pays for, which is not known until rows are sorted
+            // and shared vehicles claimed. claimShared() adds it.
             'is_bought_out' => (bool) ($cells->last()['is_purchased'] ?? false),
         ];
     }
@@ -233,6 +277,14 @@ class PurchaseBoard
             'is_purchased' => $purchased,
             // Buying implies researching, whatever the stored flag says.
             'is_unlocked' => $purchased || ($purchase?->is_unlocked ?? false),
+            /*
+             * Filled in by claimShared() once the rows are named and sorted.
+             * Seeded here so every cell has the same shape whether it ends up
+             * shared or not — the client reads these on every cell, and a
+             * missing key would read as undefined rather than as false.
+             */
+            'is_shared' => false,
+            'shared_with' => null,
         ];
     }
 
@@ -255,22 +307,87 @@ class PurchaseBoard
     }
 
     /**
-     * The tier columns to render.
+     * The tier columns, and which of them are already settled.
      *
-     * A tier every visible line has already bought is dropped: the column would
-     * be a wall of zeroes saying nothing about what is left to spend. Cells at
-     * a dropped tier stay in the payload and simply go unrendered.
+     * Every tier holding a cell gets a column. The board is the whole tree, and
+     * which part of it you look at belongs to the filter row rather than to the
+     * server — this used to drop a fully-bought tier outright, which meant a
+     * column you could not click was also a column you could not un-tick
+     * anything in.
      *
      * @param  Collection<int, array<string, mixed>>  $rows
-     * @return list<int>
+     * @return array{tiers: list<int>, bought_tiers: list<int>}
      */
-    private function tiers(Collection $rows): array
+    private function tierColumns(Collection $rows): array
     {
-        return $rows->flatMap(fn (array $r): array => array_values($r['cells']))
+        $byTier = $rows
+            ->flatMap(fn (array $r): array => array_values($r['cells']))
             ->groupBy('tier')
-            ->reject(fn (Collection $cells): bool => $cells->every('is_purchased'))
-            ->keys()
-            ->map(fn ($tier): int => (int) $tier)
-            ->sort()->values()->all();
+            ->sortKeys();
+
+        return [
+            'tiers' => $byTier->keys()->map(fn ($tier): int => (int) $tier)->all(),
+            /*
+             * A tier is settled when nothing on it is still owed. Shared cells
+             * count as settled: another row is paying for that vehicle, so a
+             * column held open only by duplicates would be a column of zeroes,
+             * which is what this rule exists to keep off the screen.
+             *
+             * shownRows on the client hides a row with nothing left to pay in
+             * the visible tiers, so this predicate has to stay the exact
+             * inverse of cellCost — a tier holding anything a row still owes
+             * must never land here, or hiding it by default would take a row
+             * off the board with it.
+             */
+            'bought_tiers' => $byTier
+                ->filter(fn (Collection $cells): bool => $cells->every(
+                    fn (array $cell): bool => $cell['is_purchased'] || $cell['is_shared'],
+                ))
+                ->keys()->map(fn ($tier): int => (int) $tier)->all(),
+        ];
+    }
+
+    /**
+     * Assign each vehicle to one row, and total what that row owes.
+     *
+     * A vehicle can sit on more than one line — twelve Soviet lines share the
+     * MS-1 — and it is still one tank bought once. The first row to show it in
+     * display order keeps it as an editable cell and pays for it; the rest
+     * carry it as a read-only figure naming where it lives and contribute
+     * nothing to their own total, so the row totals still sum to the grand
+     * total.
+     *
+     * Runs after the sort for exactly that reason: "first" has to mean first
+     * on screen, or the one editable copy lands on an arbitrary row.
+     *
+     * @param  Collection<int, array<string, mixed>>  $rows
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function claimShared(Collection $rows): Collection
+    {
+        $owner = [];
+
+        return $rows->map(function (array $row) use (&$owner): array {
+            foreach ($row['cells'] as $tier => $cell) {
+                if (isset($owner[$cell['tank_id']])) {
+                    $row['cells'][$tier]['is_shared'] = true;
+                    $row['cells'][$tier]['shared_with'] = $owner[$cell['tank_id']];
+
+                    continue;
+                }
+
+                $owner[$cell['tank_id']] = $row['name'];
+            }
+
+            // Owned vehicles are not an outlay, and neither is one another row
+            // is already paying for. The line's lowest tier is owned by default,
+            // but by its purchase flag rather than by its position — un-ticking
+            // it has to put its price back on the bill.
+            $row['credits_remaining'] = (int) collect($row['cells'])
+                ->reject(fn (array $c): bool => $c['is_purchased'] || $c['is_shared'])
+                ->sum('price');
+
+            return $row;
+        });
     }
 }
