@@ -1508,3 +1508,82 @@ A test caught it, and the test that caught it was one written for a different fe
 (the unseen marker), which is a fair argument for asserting the boring things.
 
 Suite: **131 passed, 527 assertions.**
+
+---
+
+## 2026-09-09 — Grinding board, rebuilt from the spreadsheet
+
+`docs/WOT Stat Trackers.xlsx` has seventeen sheets; five of them are the grind planner. They
+turned out to be **one dataset viewed five ways**, not five datasets, which is what the schema
+models: a target vehicle, an ordered path of steps, and every manual number living on a step.
+
+### Decoding the sheets
+
+No xlsx library was installed and none was added — a workbook is a zip of XML, so a ~40-line
+parser read it directly.
+
+| sheet | what it is |
+|---|---|
+| Active Grinding | tanks being played, with **XP banked on them** — the one figure the Wargaming API cannot report, and the reason this board is manual |
+| XP Remaining | the path to each target: pairs of *(modules at tier N, cost of the tier N+1 unlock)*, ending with a Tier X modules column |
+| Free XP Usage | Free XP earmarked per tier |
+| Tanks to Purchase | credits to buy each vehicle on the path |
+| Blueprints | fragments held per tier |
+
+The column pairing was confirmed arithmetically on Concept No. 5:
+`75,400 + 109,062 + 124,400 + 225,000 = 533,862`, the sheet's own total.
+
+**Blueprints column J is the API's undiscounted research cost** — identical on twelve of
+eighteen rows, the other six only failing my name matching. That explained the whole workbook:
+the XP Remaining figures are *post-blueprint*. IS-4 is 189,000 in the API and 149,310 in the
+sheet, exactly ×0.79.
+
+### Where the numbers come from
+
+Confirmed against the API before designing: `price_credit` matches the sheet exactly
+(6,100,000 per tier X), and the reconstructed tech-tree path for Concept No. 5 gives
+3,400,000 + 6,100,000 = **9,500,000**, the sheet's own credit total.
+
+So the API supplies the *skeleton* — path, full research costs, credit prices — and the sheet
+supplies what only a player knows: banked XP, the discounted figure, module XP, Free XP intent,
+fragments.
+
+Blueprint discounts are **entered, not computed**. Wargaming doesn't publish the
+fragments-to-discount curve, so deriving it would mean reverse-engineering a formula that rots
+silently on the next rebalance. The game already shows the real number.
+
+### Two things the import got wrong first
+
+Both surfaced by reconciling totals against the sheet rather than eyeballing the output.
+
+**The auto-path walked back too far.** "Owned" is inferred from snapshot history, which records
+what has been *played*; the sheet knows what has been *researched*. Researched-but-unplayed
+vehicles made paths include tiers long finished, inflating the total by ~600k XP. The import
+now trims each path to the tiers the sheet actually covers — where the sheet has an opinion it
+wins, because it is the record of real progress.
+
+**A tier with module XP but no research figure is already researched.** Leaving that null fell
+back to the API's full price and re-charged for unlocks paid for years ago — K-91 read 562,000
+instead of 158,800. Zero, not null.
+
+After both fixes the board reconciles **exactly**: 6,073,283 XP required, 1,001,318 banked,
+358,500 Free XP planned — every figure matching the spreadsheet, and every per-target total
+matching its row. Progress percentages agree to the decimal (ST-I 55.8% against the sheet's
+0.5579).
+
+### Name matching
+
+41 of 46 names resolved automatically; three of the failures were label rows ("Total",
+"Vacant Slots"). The two real ones needed aliases: **Błyskawica** (a Polish `Ł` the normaliser
+couldn't fold) and **Tesak**, an in-game nickname that isn't in the encyclopedia at all — it is
+Object 452K.
+
+### The page
+
+Five tabs over one board, plus inline editing: every manual number is an input that saves on
+blur and reloads only the board props, never the rest of the page.
+
+`wot:import-grind-sheet` is idempotent and reads a JSON fixture extracted from the workbook, so
+no spreadsheet-reading dependency ships for a one-off import.
+
+Suite: **147 passed, 592 assertions.**

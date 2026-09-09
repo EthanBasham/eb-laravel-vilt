@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Wot\AccountLinkController;
 use App\Http\Controllers\Wot\DashboardController;
+use App\Http\Controllers\Wot\GrindController;
 use App\Http\Controllers\Wot\NewsController;
 
 /*
@@ -12,6 +13,13 @@ use App\Http\Controllers\Wot\NewsController;
  */
 
 Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
+
+Route::get('/grinding', [GrindController::class, 'index'])->name('grinding');
+Route::post('/grinding/targets', [GrindController::class, 'store'])->name('grinding.store');
+Route::delete('/grinding/targets/{target}', [GrindController::class, 'destroy'])->name('grinding.destroy');
+Route::patch('/grinding/targets/{target}/complete', [GrindController::class, 'complete'])->name('grinding.complete');
+Route::patch('/grinding/steps/{step}', [GrindController::class, 'updateStep'])->name('grinding.step');
+Route::patch('/grinding/settings', [GrindController::class, 'updateSettings'])->name('grinding.settings');
 
 Route::post('/refresh', [DashboardController::class, 'refresh'])->name('dashboard.refresh');
 

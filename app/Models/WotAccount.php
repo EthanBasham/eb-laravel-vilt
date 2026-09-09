@@ -74,6 +74,12 @@ class WotAccount extends Model
         return $this->belongsTo(User::class);
     }
 
+    /** @return HasMany<WotGrindTarget, $this> */
+    public function grindTargets(): HasMany
+    {
+        return $this->hasMany(WotGrindTarget::class);
+    }
+
     /** @return HasMany<WotSnapshot, $this> */
     public function snapshots(): HasMany
     {

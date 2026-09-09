@@ -42,6 +42,10 @@ class SyncVehicles extends Command
                         'type' => $vehicle['type'],
                         'is_premium' => (bool) ($vehicle['is_premium'] ?? false),
                         'image_url' => $vehicle['images']['small_icon'] ?? null,
+                        // Null rather than [] outside the tech tree, so "no
+                        // research line" and "an empty one" stay distinct.
+                        'next_tanks' => $vehicle['next_tanks'] ?: null,
+                        'price_credit' => $vehicle['price_credit'] ?? null,
                     ],
                 );
             }
