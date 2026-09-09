@@ -58,6 +58,23 @@ class WargamingClient
     }
 
     /**
+     * Per-vehicle achievements, keyed by account id.
+     *
+     * This is where Marks of Excellence live (`achievements.marksOnGun`, 0-3)
+     * alongside `markOfMastery` and every campaign medal. They are not part of
+     * tanks/stats, so the dashboard needs both endpoints.
+     *
+     * @return array<string, mixed>
+     */
+    public function tankAchievements(int $accountId, ?string $accessToken = null): array
+    {
+        return $this->get('/wot/tanks/achievements/', array_filter([
+            'account_id' => $accountId,
+            'access_token' => $accessToken,
+        ]));
+    }
+
+    /**
      * One page of the vehicle encyclopedia, keyed by tank id.
      *
      * The endpoint caps `limit` at 100, so a full sync pages through it — see

@@ -127,6 +127,29 @@ body:has(.wot) {
     border-color: var(--color-wot-gold);
 }
 
+/*
+ * WN8 colour bands. These are the community-standard colours the whole player
+ * base reads ratings by — they are not a design choice and should not be
+ * swapped for the Wargaming palette, or the numbers stop meaning what everyone
+ * expects them to mean.
+ */
+.wn8-very-bad { color: #930d0d; }
+.wn8-bad { color: #cd3333; }
+.wn8-below-average { color: #cc7a00; }
+.wn8-average { color: #ccb800; }
+.wn8-good { color: #849b24; }
+.wn8-very-good { color: #4d7326; }
+.wn8-great { color: #4a92b7; }
+.wn8-unicum { color: #83579d; }
+.wn8-super-unicum { color: #5a3d5c; }
+.wn8-unknown { color: var(--color-wot-dim); }
+
+/* `good` and `very-good` are dark greens picked for a light background; on this
+   one they need lifting or they read as muddy. */
+.wot .wn8-good { color: #a4bf2c; }
+.wot .wn8-very-good { color: #6fa337; }
+.wot .wn8-very-bad { color: #c53030; }
+
 /* The global focus ring from _base.scss is tuned for the light site. */
 .wot :focus-visible {
     outline-color: var(--color-wot-gold);

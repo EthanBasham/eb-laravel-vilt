@@ -773,3 +773,103 @@ Grepping the served HTML for the hashed asset filenames found nothing at first, 
 like the theme hadn't loaded. It had — `public/hot` existed because a Vite dev server was
 running, so `@vite` was serving from `localhost:5173` and the manifest hashes weren't in the
 markup at all. Check for `public/hot` before concluding an asset didn't build.
+
+---
+
+## 2026-09-09 — Matching tomato.gg: richer stats, WN8, and period tracking
+
+Three phases, in answer to "what would it take to replicate tomato.gg's stats page".
+
+### Phase 1 — the API was already giving us far more than we used
+
+`account/info` returns **39** statistic fields and `tanks/stats` **33** per vehicle; the
+dashboard was reading about eight. Added average tier, assist damage, blocked damage,
+accuracy, damage ratio, K/D, max frags and max XP — no new dependency, no new table, just
+reading the payload properly.
+
+Marks of Excellence and mastery badges come from `tanks/achievements`, a **different endpoint**
+that had to be added to the client. MoE is not in the statistics payload at all. Checked
+against tomato.gg's own page for the same account:
+
+| | ours | tomato.gg |
+|---|---|---|
+| MoE 1 / 2 / 3 | **104 / 8 / 5** | 104 / 8 / 5 |
+| Mastery 3rd/2nd/1st/Ace | 34 / 87 / 135 / 144 | 33 / 87 / 134 / 144 |
+
+Exact on MoE, one off on two mastery rows because their snapshot is slightly stale. Their
+achievement data is this same public endpoint.
+
+### Phase 2 — WN8
+
+Expected values are **not** Wargaming data. XVM publishes them as one ~87 kB JSON covering 862
+vehicles (`static.modxvm.com/wn8-data-exp/json/wn8exp.json`), refreshed weekly by
+`wot:sync-expected-values`. That command bypasses `WargamingClient` deliberately — it's a
+static CDN file with no application id, no envelope and no rate limit.
+
+`Wn8Calculator` works on plain per-tank arrays rather than models, which is what lets the same
+code serve both lifetime totals and period deltas: a "recent WN8" is this calculation over the
+difference between two snapshots. Verified against the live account — **1547**, against
+tomato.gg's WNX of 1553 (their own variant of the same idea).
+
+The formula's constants are fixed by the community specification and are not tuning knobs.
+Vehicles XVM has no values for are excluded and *reported* (`wn8_unrated_battles`) rather than
+scored against a guess — 1,130 battles in this account's case, which the UI states plainly.
+
+### Phase 3 — period statistics, and why they can't be backfilled
+
+**The Wargaming API only ever returns lifetime totals.** There is no endpoint for "last 7
+days". Every period figure on tomato.gg is a difference between two captures they took, which
+means the only way to have that data is to start collecting it.
+
+Two tables:
+
+| table | holds | why |
+|---|---|---|
+| `wot_snapshots` | account lifetime totals per capture | the source of every period figure |
+| `wot_vehicle_snapshots` | per-vehicle totals, **only for vehicles that changed** | recent WN8 is per-vehicle weighted, so account-level deltas can't produce it |
+
+`wot:snapshot` runs hourly. It writes nothing when no battles have been played, and per
+vehicle only when that vehicle's battle count moved — a player touches a handful of tanks out
+of several hundred owned, so the table stays proportional to activity rather than to uptime.
+Confirmed in practice: the first run wrote 431 vehicle rows (no prior state), the immediate
+second run wrote none.
+
+Statistics are stored as JSON rather than 39 columns. Nothing queries individual metrics —
+deltas are computed in PHP across two rows — and Wargaming adding a field upstream shouldn't
+require a migration. `battles` and `captured_at` are promoted to real indexed columns because
+both period lookups filter on them: by date for 7d/30d/60d, by battle count for the "last
+1000 battles" window.
+
+**The design decision worth defending:** a period with no capture from before it began reports
+`available: false`, not a number. Computing 30 days from whatever the oldest row happens to be
+would present three days of play as a month's — plausible-looking and wrong. The UI says "not
+enough history yet" instead. Right now every period says that, correctly, because history
+began today.
+
+### The bug this turned up
+
+`PeriodStats` spreads the WN8 result into the period array, and `Wn8Calculator` was returning
+a key named `battles` — which silently overwrote the period's own battle count with the WN8
+*rated* count. Every other figure in the row was correct (win rate 60%, damage ratio 2.0, K/D
+2.5), only `battles` read 0. A test caught it; a human reading the page probably would not
+have, because nothing else looked wrong.
+
+Fixed by removing the ambiguous key entirely: `rated_battles` and `unrated_battles` say what
+they mean, and their sum is the total. General lesson — a function whose result gets spread
+into someone else's array should not use generic key names.
+
+Pint also re-appended an import out of order in `PeriodStats` (`WotVehicle` after
+`WotVehicleSnapshot`), the third time this has happened. `pint --test` stays green, as
+`CLAUDE.md` warns.
+
+### Not replicated, and why
+
+- **WNX** — tomato.gg's proprietary rating; the formula isn't published. WN8 is the standard
+  equivalent and is computed exactly.
+- **Per-battle detail** (damage/credits/accuracy for individual battles) — not in the public
+  API at all. That comes from their own in-game mod uploading session data; matching it means
+  shipping a mod.
+- **Percentiles against server averages** — needs aggregate statistics across the player base,
+  which they obtain by crawling.
+
+Suite: **83 passed, 239 assertions.**

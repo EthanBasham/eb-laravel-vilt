@@ -32,6 +32,14 @@ function tankStatsResponse(int $accountId, int $tankId): array
     ]]];
 }
 
+/** Wargaming's tanks/achievements shape — where Marks of Excellence live. */
+function achievementsResponse(int $accountId, int $tankId): array
+{
+    return ['status' => 'ok', 'data' => [(string) $accountId => [
+        ['tank_id' => $tankId, 'achievements' => ['marksOnGun' => 3, 'markOfMastery' => 4]],
+    ]]];
+}
+
 it('shows the connect screen when no account is linked', function () {
     $this->actingAs(User::factory()->create())
         ->get(route('wot.dashboard'))
@@ -47,6 +55,7 @@ it('renders the summary and garage for a linked account', function () {
     Http::fake([
         '*/account/info/*' => Http::response(accountInfoResponse(1005000001)),
         '*/tanks/stats/*' => Http::response(tankStatsResponse(1005000001, $vehicle->tank_id)),
+        '*/tanks/achievements/*' => Http::response(achievementsResponse(1005000001, $vehicle->tank_id)),
     ]);
 
     $this->actingAs($user)
@@ -62,7 +71,12 @@ it('renders the summary and garage for a linked account', function () {
             ->where('vehicles.0.name', 'T-54')
             ->where('vehicles.0.win_rate', 60)
             ->where('vehicles.0.avg_damage', 2000)
-            ->where('vehicles.0.mastery', 4),
+            ->where('vehicles.0.mastery', 4)
+            ->where('vehicles.0.marks', 3)
+            ->has('achievements.marks_of_excellence')
+            ->where('achievements.marks_of_excellence.three', 1)
+            ->where('achievements.mastery.ace', 1)
+            ->has('history.periods'),
         );
 });
 
@@ -72,6 +86,7 @@ it('records when the account was last synced', function () {
     Http::fake([
         '*/account/info/*' => Http::response(accountInfoResponse(7)),
         '*/tanks/stats/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
+        '*/tanks/achievements/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
     ]);
 
     $this->actingAs($user)->get(route('wot.dashboard'));
@@ -85,6 +100,7 @@ it('omits the private block when the API returns no private data', function () {
     Http::fake([
         '*/account/info/*' => Http::response(accountInfoResponse(7)),
         '*/tanks/stats/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
+        '*/tanks/achievements/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
     ]);
 
     $this->actingAs($user)
@@ -133,11 +149,12 @@ it('caches API responses rather than re-fetching per page view', function () {
     Http::fake([
         '*/account/info/*' => Http::response(accountInfoResponse(7)),
         '*/tanks/stats/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
+        '*/tanks/achievements/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
     ]);
 
     $this->actingAs($user)->get(route('wot.dashboard'));
     $this->actingAs($user)->get(route('wot.dashboard'));
 
-    // Two endpoints, hit once each across two page views.
-    Http::assertSentCount(2);
+    // Three endpoints, hit once each across two page views.
+    Http::assertSentCount(3);
 });

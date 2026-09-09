@@ -2,11 +2,14 @@
 import { Head, router } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 import AppShell from '../Components/AppShell.vue';
+import PeriodTable from '../Components/PeriodTable.vue';
 import StatTile from '../Components/StatTile.vue';
 
 const props = defineProps({
     account: { type: Object, required: true },
     summary: { type: Object, default: null },
+    achievements: { type: Object, default: null },
+    history: { type: Object, default: () => ({ history_since: null, periods: [] }) },
     vehicles: { type: Array, default: () => [] },
     error: { type: String, default: null },
 });
@@ -20,6 +23,7 @@ const tier = ref('');
 const nation = ref('');
 const type = ref('');
 const premiumOnly = ref(false);
+const minBattles = ref(0);
 const sortKey = ref('battles');
 const sortAsc = ref(false);
 
@@ -38,6 +42,7 @@ const filtered = computed(() => {
         if (nation.value !== '' && v.nation !== nation.value) return false;
         if (type.value !== '' && v.type !== type.value) return false;
         if (premiumOnly.value && !v.is_premium) return false;
+        if (v.battles < Number(minBattles.value)) return false;
 
         return true;
     });
@@ -53,6 +58,11 @@ const sorted = computed(() => {
         const y = b[sortKey.value];
 
         if (typeof x === 'string') return x.localeCompare(y) * direction;
+
+        // Tanks with no WN8 (no XVM expected values) sort last either way,
+        // rather than being treated as a score of zero.
+        if (x === null) return 1;
+        if (y === null) return -1;
 
         return (x - y) * direction;
     });
@@ -82,6 +92,7 @@ const resetFilters = () => {
     nation.value = '';
     type.value = '';
     premiumOnly.value = false;
+    minBattles.value = 0;
 };
 
 const columns = [
@@ -90,13 +101,16 @@ const columns = [
     { key: 'battles', label: 'Battles', align: 'text-right' },
     { key: 'win_rate', label: 'Win rate', align: 'text-right' },
     { key: 'avg_damage', label: 'Avg dmg', align: 'text-right' },
-    { key: 'avg_xp', label: 'Avg XP', align: 'text-right' },
+    { key: 'avg_assist', label: 'Assist', align: 'text-right' },
+    { key: 'kd_ratio', label: 'K/D', align: 'text-right' },
+    { key: 'wn8', label: 'WN8', align: 'text-right' },
+    { key: 'marks', label: 'MoE', align: 'text-center' },
     { key: 'mastery', label: 'Mastery', align: 'text-center' },
 ];
 
 const masteryLabels = ['—', '3rd', '2nd', '1st', 'Ace'];
 
-const number = (value) => new Intl.NumberFormat().format(value ?? 0);
+const number = (value) => (value === null || value === undefined ? '—' : new Intl.NumberFormat().format(value));
 
 const asDate = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' }) : '—');
 
@@ -119,6 +133,12 @@ const disconnect = () => {
                 </p>
             </div>
 
+            <div v-if="summary" class="text-right">
+                <p class="text-xs font-bold uppercase tracking-wider text-wot-dim">WN8</p>
+                <p class="text-4xl tabular-nums" :class="`wn8-${summary.wn8_band}`">{{ number(summary.wn8) }}</p>
+                <p class="text-xs capitalize text-wot-dim">{{ summary.wn8_band.replace('-', ' ') }}</p>
+            </div>
+
             <button
                 type="button"
                 class="border border-wot-border px-4 py-2 text-xs font-bold uppercase tracking-wider text-wot-dim transition-colors hover:border-wot-bad hover:text-wot-bad"
@@ -134,7 +154,7 @@ const disconnect = () => {
 
         <template v-if="summary">
             <dl class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <StatTile label="Battles" :value="number(summary.battles)" />
+                <StatTile label="Battles" :value="number(summary.battles)" :hint="`Avg tier ${summary.avg_tier}`" />
                 <StatTile
                     label="Win rate"
                     :value="summary.win_rate"
@@ -142,13 +162,18 @@ const disconnect = () => {
                     :tone="summary.win_rate >= 50 ? 'good' : 'bad'"
                     :hint="`${number(summary.wins)} wins`"
                 />
-                <StatTile label="Avg damage" :value="number(summary.avg_damage)" />
+                <StatTile label="Avg damage" :value="number(summary.avg_damage)" :hint="`${number(summary.avg_assist)} assisted`" />
                 <StatTile label="Survival" :value="summary.survival_rate" suffix="%" />
-                <StatTile label="Avg XP" :value="number(summary.avg_xp)" />
-                <StatTile label="Avg frags" :value="summary.avg_frags" />
-                <StatTile label="Max damage" :value="number(summary.max_damage)" />
+                <StatTile label="Damage ratio" :value="summary.damage_ratio ?? '—'" :tone="summary.damage_ratio >= 1 ? 'good' : 'bad'" />
+                <StatTile label="K/D ratio" :value="summary.kd_ratio ?? '—'" :tone="summary.kd_ratio >= 1 ? 'good' : 'bad'" />
+                <StatTile label="Accuracy" :value="summary.accuracy" suffix="%" :hint="`${number(summary.avg_blocked)} blocked`" />
                 <StatTile label="Global rating" :value="number(summary.global_rating)" tone="gold" :hint="`Last battle ${asDate(summary.last_battle_at)}`" />
             </dl>
+
+            <p v-if="summary.wn8_unrated_battles > 0" class="mt-3 text-xs text-wot-dim">
+                {{ number(summary.wn8_unrated_battles) }} battles excluded from WN8 — XVM publishes no
+                expected values for those vehicles.
+            </p>
 
             <!-- Only present when a valid access token was sent with the
                  request, so it is absent rather than zeroed when the token has
@@ -158,6 +183,36 @@ const disconnect = () => {
                 <StatTile label="Gold" :value="number(summary.private.gold)" tone="gold" />
                 <StatTile label="Free XP" :value="number(summary.private.free_xp)" />
             </dl>
+
+            <div class="mt-12">
+                <PeriodTable :overall="summary" :history="history" />
+            </div>
+
+            <section v-if="achievements" class="mt-12" aria-labelledby="achievements-heading">
+                <h2 id="achievements-heading" class="text-xl">Achievements</h2>
+
+                <div class="mt-4 grid gap-4 sm:grid-cols-2">
+                    <div class="border border-wot-border bg-wot-panel p-4">
+                        <h3 class="text-sm">Marks of Excellence</h3>
+                        <dl class="mt-3 flex gap-6">
+                            <div v-for="(count, label) in achievements.marks_of_excellence" :key="label">
+                                <dt class="text-xs uppercase tracking-wider text-wot-dim">{{ label }}</dt>
+                                <dd class="text-2xl tabular-nums text-wot-gold">{{ count }}</dd>
+                            </div>
+                        </dl>
+                    </div>
+
+                    <div class="border border-wot-border bg-wot-panel p-4">
+                        <h3 class="text-sm">Mastery badges</h3>
+                        <dl class="mt-3 flex gap-6">
+                            <div v-for="(count, label) in achievements.mastery" :key="label">
+                                <dt class="text-xs uppercase tracking-wider text-wot-dim">{{ label }}</dt>
+                                <dd class="text-2xl tabular-nums text-wot-heading">{{ count }}</dd>
+                            </div>
+                        </dl>
+                    </div>
+                </div>
+            </section>
         </template>
 
         <section class="mt-12" aria-labelledby="garage-heading">
@@ -170,7 +225,7 @@ const disconnect = () => {
             </div>
 
             <div class="mt-4 flex flex-wrap items-end gap-3 border border-wot-border bg-wot-panel p-4">
-                <div class="flex-1 min-w-48">
+                <div class="min-w-48 flex-1">
                     <label for="search" class="block text-xs font-medium uppercase tracking-wider text-wot-dim">Search</label>
                     <input id="search" v-model="search" type="search" placeholder="Vehicle name" class="mt-1 w-full border px-2 py-1.5 text-sm">
                 </div>
@@ -197,6 +252,11 @@ const disconnect = () => {
                         <option value="">All</option>
                         <option v-for="t in types" :key="t" :value="t">{{ t }}</option>
                     </select>
+                </div>
+
+                <div>
+                    <label for="min-battles" class="block text-xs font-medium uppercase tracking-wider text-wot-dim">Min battles</label>
+                    <input id="min-battles" v-model="minBattles" type="number" min="0" step="25" class="mt-1 w-24 border px-2 py-1.5 text-sm">
                 </div>
 
                 <label class="flex items-center gap-2 pb-2 text-sm text-wot-text">
@@ -254,7 +314,14 @@ const disconnect = () => {
                                 :class="vehicle.win_rate >= 50 ? 'text-wot-good' : 'text-wot-bad'"
                             >{{ vehicle.win_rate }}%</td>
                             <td class="px-4 py-2 text-right tabular-nums text-wot-muted">{{ number(vehicle.avg_damage) }}</td>
-                            <td class="px-4 py-2 text-right tabular-nums text-wot-muted">{{ number(vehicle.avg_xp) }}</td>
+                            <td class="px-4 py-2 text-right tabular-nums text-wot-muted">{{ number(vehicle.avg_assist) }}</td>
+                            <td class="px-4 py-2 text-right tabular-nums text-wot-muted">{{ vehicle.kd_ratio ?? '—' }}</td>
+                            <td class="px-4 py-2 text-right tabular-nums" :class="`wn8-${vehicle.wn8_band}`">
+                                {{ number(vehicle.wn8) }}
+                            </td>
+                            <td class="px-4 py-2 text-center text-wot-gold">
+                                {{ vehicle.marks ? '★'.repeat(vehicle.marks) : '' }}
+                            </td>
                             <td
                                 class="px-4 py-2 text-center"
                                 :class="vehicle.mastery === 4 ? 'text-wot-gold' : 'text-wot-dim'"
