@@ -18,7 +18,10 @@ use App\Models\WotVehicle;
  */
 class GrindBoard
 {
-    public function __construct(private readonly PurchaseBoard $purchases) {}
+    public function __construct(
+        private readonly PurchaseBoard $purchases,
+        private readonly FreeXpBoard $freeXp,
+    ) {}
 
     /**
      * @return array<string, mixed>
@@ -46,13 +49,16 @@ class GrindBoard
 
         $activeSteps = $this->activeSteps($targets, $vehicles);
 
-        // Credits are the purchase board's business alone, so the headline card
-        // and the Tanks to Purchase tab can never quote different figures.
+        // Credits are the purchase board's business alone, and planned Free XP
+        // the Free XP board's, so the headline cards and the tabs they head can
+        // never quote different figures.
         $purchase = $this->purchases->for($account);
+        $freexp = $this->freeXp->for($account);
 
         return [
             'active' => $this->active($activeSteps, $targets, $vehicles),
             'purchase' => $purchase,
+            'freexp' => $freexp,
             'targets' => $targets->map(fn (WotGrindTarget $t): array => $this->target($t, $vehicles))->values()->all(),
             'settings' => [
                 'credits_available' => (int) $settings->credits_available,
@@ -63,8 +69,9 @@ class GrindBoard
                  * former seeds the tier filter from bought_tiers.
                  */
                 'purchase_filters' => $settings->purchase_filters,
+                'freexp_filters' => $settings->freexp_filters,
             ],
-            'totals' => $this->totals($targets, $activeSteps, $purchase['credits_required']),
+            'totals' => $this->totals($targets, $activeSteps, $purchase['credits_required'], $freexp['free_xp_planned']),
         ];
     }
 
@@ -141,7 +148,6 @@ class GrindBoard
             'notes' => $target->notes,
             'xp_required' => $target->steps->sum(fn (WotGrindStep $s): int => $s->xpRequired()),
             'xp_remaining' => $target->xpRemaining(),
-            'free_xp_planned' => $target->freeXpPlanned(),
             'blueprint_fragments' => (int) $target->steps->sum('blueprint_fragments'),
             'steps' => $target->steps->map(fn (WotGrindStep $s): array => [
                 'id' => $s->id,
@@ -154,7 +160,6 @@ class GrindBoard
                 'research_cost' => $s->researchCost(),
                 'module_xp_remaining' => $s->module_xp_remaining,
                 'banked_xp' => $s->banked_xp,
-                'free_xp_planned' => $s->free_xp_planned,
                 'blueprint_fragments' => $s->blueprint_fragments,
                 'price_credit' => $s->price_credit,
                 'is_active' => $s->is_active,
@@ -171,8 +176,12 @@ class GrindBoard
      * @param  Collection<int, WotGrindStep>  $activeSteps
      * @return array<string, mixed>
      */
-    private function totals(Collection $targets, Collection $activeSteps, int $creditsRequired): array
-    {
+    private function totals(
+        Collection $targets,
+        Collection $activeSteps,
+        int $creditsRequired,
+        int $freeXpPlanned,
+    ): array {
         $open = $targets->where('is_complete', false);
 
         return [
@@ -185,7 +194,7 @@ class GrindBoard
             'open' => $open->count(),
             'xp_required' => (int) $open->sum(fn (WotGrindTarget $t): int => $t->steps->sum(fn (WotGrindStep $s): int => $s->xpRequired())),
             'xp_remaining' => (int) $open->sum(fn (WotGrindTarget $t): int => $t->xpRemaining()),
-            'free_xp_planned' => (int) $open->sum(fn (WotGrindTarget $t): int => $t->freeXpPlanned()),
+            'free_xp_planned' => $freeXpPlanned,
             'credits_required' => $creditsRequired,
             'blueprint_fragments' => (int) $targets->flatMap->steps->sum('blueprint_fragments'),
             'banked_xp' => (int) $targets->flatMap->steps->sum('banked_xp'),
@@ -205,9 +214,7 @@ class GrindBoard
     private function activeTotals(Collection $activeSteps): array
     {
         $required = (int) $activeSteps->sum(fn (WotGrindStep $s): int => $s->xpRequired());
-        $covered = (int) $activeSteps->sum(
-            fn (WotGrindStep $s): int => (int) $s->banked_xp + (int) $s->free_xp_planned
-        );
+        $covered = (int) $activeSteps->sum('banked_xp');
 
         return [
             'steps' => $activeSteps->count(),

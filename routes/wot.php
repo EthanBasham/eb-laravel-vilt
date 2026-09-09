@@ -25,6 +25,7 @@ Route::patch('/grinding/filters', [GrindController::class, 'updateFilters'])->na
 // Bound by tank_id rather than by model: a purchase row is created on first
 // use, so there is nothing to bind to until then.
 Route::patch('/grinding/purchases/{tankId}', [GrindController::class, 'updatePurchase'])->name('grinding.purchase');
+Route::patch('/grinding/modules/{tankId}', [GrindController::class, 'updateModulePlan'])->name('grinding.module-plan');
 
 Route::post('/refresh', [DashboardController::class, 'refresh'])->name('dashboard.refresh');
 

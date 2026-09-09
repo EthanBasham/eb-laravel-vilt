@@ -6,12 +6,15 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 /**
- * Where the Tanks to Purchase filter row was left.
+ * Where a board's filter row was left.
  *
- * Every key is `sometimes`, so a client that learns a fifth filter can send
- * only that one, and a partial payload never clears the rest.
+ * Serves both grids. `board` picks which column the payload lands in; the rest
+ * of the keys are `sometimes`, so a client sends only what changed and a
+ * partial payload never clears the rest. hide_owned belongs to the purchase
+ * board and only_planned to Free XP, but neither is rejected on the other —
+ * a key a board never sends is simply a key it never stores.
  */
-class UpdatePurchaseFiltersRequest extends FormRequest
+class BoardFiltersRequest extends FormRequest
 {
     /**
      * Get the validation rules that apply to the request.
@@ -26,6 +29,7 @@ class UpdatePurchaseFiltersRequest extends FormRequest
              * the common case — "nothing hidden" — rather than a missing value.
              * present, not required, for that reason.
              */
+            'board' => ['required', Rule::in(['purchase', 'freexp'])],
             'hidden_nations' => ['sometimes', 'present', 'array', 'max:50'],
             'hidden_nations.*' => [Rule::in(array_keys((array) config('wargaming.nations')))],
             'hidden_tiers' => ['sometimes', 'present', 'array', 'max:20'],
@@ -33,6 +37,7 @@ class UpdatePurchaseFiltersRequest extends FormRequest
             'hidden_tiers.*' => ['integer', 'min:1', 'max:11'],
             'hide_owned' => ['sometimes', 'boolean'],
             'show_sale' => ['sometimes', 'boolean'],
+            'only_planned' => ['sometimes', 'boolean'],
         ];
     }
 }

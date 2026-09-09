@@ -7,12 +7,14 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response as HttpResponse;
 use Illuminate\Validation\Rule;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Wot\BoardFiltersRequest;
 use App\Http\Requests\Wot\UpdateGrindStepRequest;
-use App\Http\Requests\Wot\UpdatePurchaseFiltersRequest;
+use App\Http\Requests\Wot\UpdateModulePlanRequest;
 use App\Http\Requests\Wot\UpdateTankPurchaseRequest;
 use App\Models\WotGrindSetting;
 use App\Models\WotGrindStep;
 use App\Models\WotGrindTarget;
+use App\Models\WotModulePlan;
 use App\Models\WotTankPurchase;
 use App\Models\WotVehicle;
 use App\Services\Wargaming\GrindBoard;
@@ -168,6 +170,33 @@ class GrindController extends Controller
         return back(fallback: route('wot.grinding'));
     }
 
+    /**
+     * Puts a module on the Free XP plan, or takes it off.
+     *
+     * Keyed on the tank rather than on a grind step, like updatePurchase(): the
+     * Free XP board is the whole tech tree, and a module worth spending on need
+     * not sit on a line you are currently tracking.
+     *
+     * firstOrNew, then save inside the model — a vehicle you have never touched
+     * has no plan row, and the first tick is what creates one.
+     */
+    public function updateModulePlan(UpdateModulePlanRequest $request, int $tankId): RedirectResponse
+    {
+        $account = $request->user()->wotAccount;
+
+        abort_unless($account, 404);
+        abort_unless(WotVehicle::where('tank_id', $tankId)->exists(), 404);
+
+        $plan = WotModulePlan::firstOrNew([
+            'wot_account_id' => $account->id,
+            'tank_id' => $tankId,
+        ]);
+
+        $plan->setModulePlanned($request->integer('module_id'), $request->boolean('planned'));
+
+        return back(fallback: route('wot.grinding'));
+    }
+
     public function destroy(Request $request, WotGrindTarget $target): RedirectResponse
     {
         abort_unless($target->wot_account_id === $request->user()->wotAccount?->id, 404);
@@ -201,7 +230,7 @@ class GrindController extends Controller
     }
 
     /**
-     * Remembers where the Tanks to Purchase filter row was left.
+     * Remembers where a board's filter row was left.
      *
      * Merged into whatever is stored rather than replacing it, so a client that
      * sends one changed filter does not silently reset the other three.
@@ -217,7 +246,7 @@ class GrindController extends Controller
      * the board on screen already shows the filtered state, so redirecting
      * would rebuild the whole thing to produce props nobody reads.
      */
-    public function updateFilters(UpdatePurchaseFiltersRequest $request): HttpResponse
+    public function updateFilters(BoardFiltersRequest $request): HttpResponse
     {
         $account = $request->user()->wotAccount;
 
@@ -225,9 +254,13 @@ class GrindController extends Controller
 
         $settings = WotGrindSetting::firstOrNew(['wot_account_id' => $account->id]);
 
-        $settings->purchase_filters = [
-            ...(array) $settings->purchase_filters,
-            ...$request->validated(),
+        // 'board' says which column, so it is routing rather than filter state
+        // and does not belong in the stored payload.
+        $column = $request->string('board').'_filters';
+
+        $settings->{$column} = [
+            ...(array) $settings->{$column},
+            ...collect($request->validated())->except('board')->all(),
         ];
 
         $settings->save();

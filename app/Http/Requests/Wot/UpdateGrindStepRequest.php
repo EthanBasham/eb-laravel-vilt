@@ -24,7 +24,6 @@ class UpdateGrindStepRequest extends FormRequest
             // discount hasn't been worked out yet.
             'research_xp_remaining' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:100000000'],
             'module_xp_remaining' => ['sometimes', 'integer', 'min:0', 'max:100000000'],
-            'free_xp_planned' => ['sometimes', 'integer', 'min:0', 'max:100000000'],
             'blueprint_fragments' => ['sometimes', 'integer', 'min:0', 'max:1000'],
             'is_active' => ['sometimes', 'boolean'],
         ];

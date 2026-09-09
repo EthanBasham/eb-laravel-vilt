@@ -8,9 +8,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * Board-wide state that belongs to no single target: the two planning
- * figures, and where the Tanks to Purchase filter row was left.
+ * figures, and where each board's filter row was left.
  */
-#[Fillable(['wot_account_id', 'credits_available', 'garage_slots_vacant', 'purchase_filters'])]
+#[Fillable(['wot_account_id', 'credits_available', 'garage_slots_vacant', 'purchase_filters', 'freexp_filters'])]
 class WotGrindSetting extends Model
 {
     /**
@@ -24,6 +24,7 @@ class WotGrindSetting extends Model
             'credits_available' => 'integer',
             'garage_slots_vacant' => 'integer',
             'purchase_filters' => 'array',
+            'freexp_filters' => 'array',
         ];
     }
 

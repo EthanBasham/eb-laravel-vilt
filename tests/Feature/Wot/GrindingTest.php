@@ -5,6 +5,7 @@ use App\Models\WotAccount;
 use App\Models\WotGrindSetting;
 use App\Models\WotGrindStep;
 use App\Models\WotGrindTarget;
+use App\Models\WotModulePlan;
 use App\Models\WotVehicle;
 use App\Models\WotVehicleSnapshot;
 use App\Models\WotVehicleModule;
@@ -96,10 +97,10 @@ it('prefers the discounted figure over the full price', function () {
     expect($step->researchCost())->toBe(189_000);
 });
 
-it('subtracts banked and planned free XP from what is left', function () {
+it('subtracts banked XP from what is left', function () {
     $step = new WotGrindStep([
         'research_xp' => 149_310, 'research_xp_remaining' => 149_310,
-        'module_xp_remaining' => 0, 'banked_xp' => 83_305, 'free_xp_planned' => 0,
+        'module_xp_remaining' => 0, 'banked_xp' => 83_305,
     ]);
 
     // The spreadsheet's ST-I row, to the digit.
@@ -193,7 +194,6 @@ it('rejects nonsense on the manual fields', function (array $payload) {
     $this->actingAs($user)->patch(route('wot.grinding.step', $step), $payload)->assertSessionHasErrors();
 })->with([
     'negative banked' => [['banked_xp' => -1]],
-    'absurd free xp' => [['free_xp_planned' => 999_999_999]],
     'too many fragments' => [['blueprint_fragments' => 5000]],
 ]);
 
@@ -390,7 +390,7 @@ it('totals the active grinding columns', function () {
 
     WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => 80, 'tier' => 8,
         'position' => 0, 'research_xp' => 149_400, 'module_xp_remaining' => 30_000,
-        'banked_xp' => 40_000, 'free_xp_planned' => 10_000, 'is_active' => true]);
+        'banked_xp' => 40_000, 'is_active' => true]);
     WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => 90, 'tier' => 9,
         'position' => 1, 'research_xp' => 225_000, 'module_xp_remaining' => 20_000,
         'banked_xp' => 5_000, 'is_active' => true]);
@@ -404,10 +404,12 @@ it('totals the active grinding columns', function () {
         ->where('totals.active.module_xp_remaining', 50_000)
         ->where('totals.active.research_cost', 374_400)
         ->where('totals.active.xp_required', 424_400)
-        // (149,400 + 30,000 - 50,000) + (225,000 + 20,000 - 5,000)
-        ->where('totals.active.xp_remaining', 369_400)
-        // 55,000 covered of 424,400 required.
-        ->where('totals.active.progress', 13),
+        // (149,400 + 30,000 - 40,000) + (225,000 + 20,000 - 5,000)
+        ->where('totals.active.xp_remaining', 379_400)
+        // 45,000 banked of 424,400 required. Free XP is no longer subtracted
+        // here — it is a statement about modules now, and a planned module is
+        // still XP that has to be found.
+        ->where('totals.active.progress', 10.6),
     );
 });
 
@@ -1042,6 +1044,7 @@ it('remembers where the purchase filters were left', function () {
     $account = WotAccount::factory()->for($user)->create();
 
     $this->actingAs($user)->patch(route('wot.grinding.filters'), [
+        'board' => 'purchase',
         'hidden_nations' => ['usa', 'japan'],
         'hidden_tiers' => [1, 2, 3],
         'hide_owned' => false,
@@ -1065,9 +1068,9 @@ it('merges a partial filter payload into what is stored', function () {
     $account = WotAccount::factory()->for($user)->create();
 
     $this->actingAs($user)->patch(route('wot.grinding.filters'), [
-        'hidden_nations' => ['ussr'], 'show_sale' => true,
+        'board' => 'purchase', 'hidden_nations' => ['ussr'], 'show_sale' => true,
     ]);
-    $this->actingAs($user)->patch(route('wot.grinding.filters'), ['hidden_tiers' => [4]]);
+    $this->actingAs($user)->patch(route('wot.grinding.filters'), ['board' => 'purchase', 'hidden_tiers' => [4]]);
 
     // toEqual, not toBe: the stored key order follows whichever request wrote
     // each key, and nothing reads these positionally.
@@ -1092,7 +1095,8 @@ it('rejects a filter value the board could never produce', function (array $payl
     $user = User::factory()->create();
     WotAccount::factory()->for($user)->create();
 
-    $this->actingAs($user)->patch(route('wot.grinding.filters'), $payload)->assertSessionHasErrors();
+    $this->actingAs($user)->patch(route('wot.grinding.filters'), ['board' => 'purchase', ...$payload])
+        ->assertSessionHasErrors();
 })->with([
     'unknown nation' => [['hidden_nations' => ['atlantis']]],
     'tier above the tree' => [['hidden_tiers' => [12]]],
@@ -1100,12 +1104,20 @@ it('rejects a filter value the board could never produce', function (array $payl
     'nations as a scalar' => [['hidden_nations' => 'usa']],
 ]);
 
+it('refuses filters for a board that does not exist', function () {
+    $user = User::factory()->create();
+    WotAccount::factory()->for($user)->create();
+
+    $this->actingAs($user)->patch(route('wot.grinding.filters'), ['board' => 'blueprints', 'hide_owned' => true])
+        ->assertSessionHasErrors('board');
+});
+
 it('saves an empty filter set as showing everything', function () {
     $user = User::factory()->create();
     $account = WotAccount::factory()->for($user)->create();
 
     $this->actingAs($user)->patch(route('wot.grinding.filters'), [
-        'hidden_nations' => [], 'hidden_tiers' => [],
+        'board' => 'purchase', 'hidden_nations' => [], 'hidden_tiers' => [],
     ])->assertNoContent();
 
     // Distinct from never having saved, which is null and seeds from
@@ -1116,6 +1128,168 @@ it('saves an empty filter set as showing everything', function () {
 
 it('will not store filters for a user with no linked account', function () {
     $this->actingAs(User::factory()->create())
-        ->patch(route('wot.grinding.filters'), ['hide_owned' => true])
+        ->patch(route('wot.grinding.filters'), ['board' => 'purchase', 'hide_owned' => true])
         ->assertNotFound();
+});
+
+/**
+ * The tech line from techLine() with upgrade modules on every tier, which is
+ * what the Free XP board is a grid of.
+ */
+function freeXpLine(User $user): WotAccount
+{
+    [$eight, $nine, $ten] = techLine();
+    $account = WotAccount::factory()->for($user)->create();
+
+    $rows = [];
+
+    foreach ([[80, 100, 40_000], [90, 200, 90_000], [100, 300, 150_000]] as [$tank, $module, $xp]) {
+        $rows[] = ['module_id' => $module, 'tank_id' => $tank, 'name' => "Gun {$tank}", 'type' => 'vehicleGun', 'price_xp' => $xp, 'price_credit' => 0, 'is_default' => false, 'created_at' => now(), 'updated_at' => now()];
+        $rows[] = ['module_id' => $module + 1, 'tank_id' => $tank, 'name' => "Engine {$tank}", 'type' => 'vehicleEngine', 'price_xp' => 10_000, 'price_credit' => 0, 'is_default' => false, 'created_at' => now(), 'updated_at' => now()];
+        // Stock: fitted from the start, so it must never be offerable.
+        $rows[] = ['module_id' => $module + 2, 'tank_id' => $tank, 'name' => "Stock {$tank}", 'type' => 'vehicleChassis', 'price_xp' => 0, 'price_credit' => 0, 'is_default' => true, 'created_at' => now(), 'updated_at' => now()];
+    }
+
+    WotVehicleModule::insert($rows);
+
+    return $account;
+}
+
+it('lays the Free XP board out as one column per tier', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('freexp.tiers', [8, 9, 10])
+        ->has('freexp.rows', 1)
+        // Named by the line's tier X, like every other board here.
+        ->where('freexp.rows.0.name', 'Tgt X')
+        ->where('freexp.rows.0.type', 'mediumTank')
+        // Upgrades only — the stock chassis is not something Free XP buys.
+        ->has('freexp.rows.0.cells.9.modules', 2)
+        ->where('freexp.rows.0.cells.9.total_xp', 100_000)
+        // Nothing planned yet, which is not the same as nothing to plan.
+        ->where('freexp.rows.0.cells.9.planned_xp', 0)
+        ->where('freexp.rows.0.planned_xp', 0)
+        ->where('totals.free_xp_planned', 0),
+    );
+});
+
+it('plans a module and totals what it costs', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.module-plan', 90), [
+        'module_id' => 200, 'planned' => true,
+    ])->assertRedirect();
+
+    expect(WotModulePlan::where('wot_account_id', $account->id)->first()->module_ids)->toBe([200]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('freexp.rows.0.cells.9.planned_xp', 90_000)
+        ->where('freexp.rows.0.planned_xp', 90_000)
+        // The board's own total and the headline card are one figure.
+        ->where('freexp.free_xp_planned', 90_000)
+        ->where('totals.free_xp_planned', 90_000),
+    );
+});
+
+it('takes a module back off the plan', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.module-plan', 90), ['module_id' => 200, 'planned' => true]);
+    $this->actingAs($user)->patch(route('wot.grinding.module-plan', 90), ['module_id' => 201, 'planned' => true]);
+    $this->actingAs($user)->patch(route('wot.grinding.module-plan', 90), ['module_id' => 200, 'planned' => false]);
+
+    expect(WotModulePlan::where('wot_account_id', $account->id)->first()->module_ids)->toBe([201]);
+});
+
+/**
+ * A stock module is fitted from the start, so planning Free XP against it is
+ * meaningless — and it never appears in the dropdown, so a row that accepted it
+ * could never be un-ticked again.
+ */
+it('refuses to plan a module that is not an upgrade on that vehicle', function (int $tankId, int $moduleId) {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.module-plan', $tankId), [
+        'module_id' => $moduleId, 'planned' => true,
+    ])->assertRedirect();
+
+    expect(WotModulePlan::where('wot_account_id', $account->id)->count())->toBe(0);
+})->with([
+    'stock module' => [90, 202],
+    'a module on another tank' => [90, 100],
+    'no such module' => [90, 999],
+]);
+
+it('rejects a Free XP plan for a tank the encyclopedia has never heard of', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.module-plan', 4242), [
+        'module_id' => 200, 'planned' => true,
+    ])->assertNotFound();
+});
+
+it('will not let one account plan another account modules', function () {
+    $owner = User::factory()->create();
+    $account = freeXpLine($owner);
+
+    $intruder = User::factory()->create();
+    WotAccount::factory()->for($intruder)->create(['account_id' => 999_999]);
+
+    $this->actingAs($intruder)->patch(route('wot.grinding.module-plan', 90), [
+        'module_id' => 200, 'planned' => true,
+    ])->assertRedirect();
+
+    expect(WotModulePlan::where('wot_account_id', $account->id)->count())->toBe(0);
+});
+
+/**
+ * A tank on two lines is one tank with one plan. Counting it on both rows would
+ * put the same XP in the grand total twice.
+ */
+it('counts a shared vehicle on one row only', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+
+    // A second tier X off the same tier IX, so the VIII and IX sit on both.
+    WotVehicle::factory()->create(['tank_id' => 101, 'name' => 'Other X', 'short_name' => 'Oth X', 'tier' => 10, 'type' => 'heavyTank', 'next_tanks' => null]);
+    WotVehicle::where('tank_id', 90)->update(['next_tanks' => json_encode([100 => 225_000, 101 => 240_000])]);
+
+    $this->actingAs($user)->patch(route('wot.grinding.module-plan', 90), ['module_id' => 200, 'planned' => true]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->has('freexp.rows', 2)
+        // 'Oth X' sorts before 'Tgt X', so it meets the shared cells first.
+        ->where('freexp.rows.0.name', 'Oth X')
+        ->where('freexp.rows.0.cells.9.is_shared', false)
+        ->where('freexp.rows.0.planned_xp', 90_000)
+        ->where('freexp.rows.1.cells.9.is_shared', true)
+        ->where('freexp.rows.1.cells.9.shared_with', 'Oth X')
+        ->where('freexp.rows.1.planned_xp', 0)
+        // Counted once, not twice.
+        ->where('totals.free_xp_planned', 90_000),
+    );
+});
+
+it('remembers the Free XP filters separately from the purchase ones', function () {
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create();
+
+    $this->actingAs($user)->patch(route('wot.grinding.filters'), [
+        'board' => 'purchase', 'hidden_nations' => ['usa'],
+    ])->assertNoContent();
+    $this->actingAs($user)->patch(route('wot.grinding.filters'), [
+        'board' => 'freexp', 'hidden_nations' => ['ussr'], 'only_planned' => true,
+    ])->assertNoContent();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('settings.purchase_filters.hidden_nations', ['usa'])
+        ->where('settings.freexp_filters.hidden_nations', ['ussr'])
+        ->where('settings.freexp_filters.only_planned', true),
+    );
 });

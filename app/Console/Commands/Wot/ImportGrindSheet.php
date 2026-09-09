@@ -113,7 +113,6 @@ class ImportGrindSheet extends Command
                      */
                     'research_xp_remaining' => $tier === null ? null : ($tier['research'] ?? 0),
                     'module_xp_remaining' => $tier['module'] ?? 0,
-                    'free_xp_planned' => $tier['free_xp'] ?? 0,
                     'blueprint_fragments' => $tier['fragments'] ?? 0,
                     'banked_xp' => $active['banked_xp'] ?? 0,
                     'is_active' => $active !== null,

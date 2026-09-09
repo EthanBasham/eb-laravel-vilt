@@ -17,7 +17,7 @@ use Illuminate\Support\Collection;
  */
 #[Fillable([
     'wot_grind_target_id', 'tank_id', 'tier', 'position', 'research_xp', 'research_xp_remaining',
-    'module_xp_remaining', 'banked_xp', 'free_xp_planned', 'blueprint_fragments', 'price_credit', 'is_active',
+    'module_xp_remaining', 'banked_xp', 'blueprint_fragments', 'price_credit', 'is_active',
     'researched_modules',
 ])]
 class WotGrindStep extends Model
@@ -37,7 +37,6 @@ class WotGrindStep extends Model
             'research_xp_remaining' => 'integer',
             'module_xp_remaining' => 'integer',
             'banked_xp' => 'integer',
-            'free_xp_planned' => 'integer',
             'blueprint_fragments' => 'integer',
             'price_credit' => 'integer',
             'is_active' => 'boolean',
@@ -147,13 +146,17 @@ class WotGrindStep extends Model
     }
 
     /**
-     * What is left to earn. Free XP counts as already covered — it's earmarked
-     * for exactly this — and banked XP is subtracted, so a step never reads as
-     * needing more than it does.
+     * What is left to earn, after the XP already banked on this vehicle.
+     *
+     * Free XP no longer figures here. It used to, as a per-step number that
+     * could be earmarked against anything; it is now a statement about which
+     * modules will be bought with it, and a planned module still has to be
+     * paid for — with Free XP instead of banked XP, but paid for. Subtracting
+     * it twice was the old behaviour, not a feature lost.
      */
     public function xpRemaining(): int
     {
-        return max(0, $this->xpRequired() - (int) $this->banked_xp - (int) $this->free_xp_planned);
+        return max(0, $this->xpRequired() - (int) $this->banked_xp);
     }
 
     protected function progress(): Attribute
@@ -165,7 +168,7 @@ class WotGrindStep extends Model
                 return 100.0;
             }
 
-            return round(min(100, ((int) $this->banked_xp + (int) $this->free_xp_planned) / $required * 100), 1);
+            return round(min(100, (int) $this->banked_xp / $required * 100), 1);
         });
     }
 

@@ -56,11 +56,6 @@ class WotGrindTarget extends Model
         return (int) $this->steps->sum('price_credit');
     }
 
-    public function freeXpPlanned(): int
-    {
-        return (int) $this->steps->sum('free_xp_planned');
-    }
-
     // Scopes
 
     public function scopeOnlyActive(Builder $query): Builder

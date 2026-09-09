@@ -1,12 +1,14 @@
 <script setup>
-import { Head, router, useForm, useHttp, usePage } from '@inertiajs/vue3';
+import { Head, router, useForm, usePage } from '@inertiajs/vue3';
 import { IconLock, IconLockOpen, IconShoppingCart } from '@tabler/icons-vue';
-import { computed, ref, watch } from 'vue';
+import { computed, ref } from 'vue';
 import AppShell from '../Components/AppShell.vue';
 import EditableNumber from '../Components/EditableNumber.vue';
 import ModulePicker from '../Components/ModulePicker.vue';
+import ModulePlanPicker from '../Components/ModulePlanPicker.vue';
 import NationFlag from '../Components/NationFlag.vue';
 import VehicleTypeIcon from '../Components/VehicleTypeIcon.vue';
+import { useBoardFilters } from '../composables/useBoardFilters';
 
 const props = defineProps({
     active: { type: Array, default: () => [] },
@@ -14,6 +16,7 @@ const props = defineProps({
     settings: { type: Object, required: true },
     totals: { type: Object, required: true },
     purchase: { type: Object, required: true },
+    freexp: { type: Object, required: true },
     options: { type: Array, default: () => [] },
 });
 
@@ -150,51 +153,32 @@ const priceTone = (cell) => (cell.is_unlocked
 /*
  * Purchase filters.
  *
- * Held as what is *hidden* rather than what is selected, so everything starts on
- * and stays on: buying a tank can retire a nation or collapse a tier column, and
- * a selected-set would then have to guess whether a column that reappears later
- * was meant to be on. Deselections survive that; stale entries are harmless.
+ * Held as what is *hidden* rather than what is selected, so everything starts
+ * on and stays on: buying a tank can retire a nation or collapse a tier column,
+ * and a selected-set would then have to guess whether a column that reappears
+ * later was meant to be on. Deselections survive that; stale entries are
+ * harmless.
  *
- * Where the row was left is stored per account, so it survives a reload and
- * follows the user between browsers. Null means it never has been — read once,
- * at setup, and never watched: a save writes this column, so re-seeding from it
- * would feed every filter click back into the refs that produced it.
+ * The tier row is seeded from the tiers the server reports as settled, but only
+ * on a board whose filters have never been saved — a stored selection
+ * supersedes the seed outright, so a bought-out column you deliberately turned
+ * back on stays on. The cost is that the seed only ever runs on the very first
+ * visit: a tier bought out after that is a column of zeroes until you hide it
+ * yourself.
  */
-const saved = props.settings.purchase_filters;
-
-const hiddenNations = ref([...(saved?.hidden_nations ?? [])]);
-
-/*
- * Seeded once, at setup, from the tiers the server reports as settled — never
- * watched. A column with nothing left to pay for is noise on arrival, but
- * buying the last tank in a column while you are looking at it must not make
- * the column vanish underneath you.
- *
- * Setup runs once per component instance, and every purchase on this tab is a
- * partial reload that updates props on the existing instance, so this fires on
- * a real visit and never again while you click. A watcher here would re-seed on
- * every response and do exactly the disappearing act described above.
- *
- * A stored selection supersedes that seed outright rather than being unioned
- * with it, so a bought-out column you deliberately turned back on stays on. The
- * cost is that the seed only ever runs on the very first visit: a tier bought
- * out after that is a column of zeroes until you hide it yourself.
- *
- * Copied rather than aliased, so toggling a filter never writes to the prop.
- */
-const hiddenTiers = ref([...(saved?.hidden_tiers ?? props.purchase.bought_tiers ?? [])]);
-
-/*
- * Lines with nothing left to buy, hidden by default.
- *
- * The board is the whole tech tree now, so most of what it holds on any given
- * visit is finished business — and the arithmetic above it reads the visible
- * rows, so leaving them in makes the headline figure the cost of the tree
- * rather than the cost of what is left. They are still there, one click away,
- * which is the part that was missing before: the server used to drop them and
- * there was nothing to click.
- */
-const hideOwned = ref(saved?.hide_owned ?? true);
+const {
+    hiddenNations,
+    hiddenTiers,
+    hide_owned: hideOwned,
+    show_sale: showSale,
+    toggleNation,
+    toggleTier,
+    clearNations,
+    clearTiers,
+} = useBoardFilters('purchase', props.settings.purchase_filters, {
+    hiddenTiers: props.purchase.bought_tiers ?? [],
+    extra: { hide_owned: true, show_sale: false },
+});
 
 /*
  * Wargaming's standard sale structure, as a discount per tier.
@@ -207,42 +191,6 @@ const hideOwned = ref(saved?.hide_owned ?? true);
  * along with the rest.
  */
 const SALE = { 2: 0.5, 3: 0.5, 4: 0.5, 5: 0.5, 6: 0.3, 7: 0.3, 8: 0.15, 9: 0.15, 10: 0.15 };
-const showSale = ref(saved?.show_sale ?? false);
-
-/*
- * Remember the filter row, per account.
- *
- * useHttp rather than router.patch: nothing on the page changes as a result of
- * the save — the board already shows the filtered state — so this wants a
- * standalone request that returns 204 and touches no props, not a visit that
- * rebuilds the board to hand back data the client already has.
- *
- * Debounced because picking a nation means clicking several flags, and each
- * click is a separate ref write. Half a second is long enough to collect a run
- * of them and short enough that closing the tab straight after a click still
- * saves it.
- *
- * Fire-and-forget by design. A filter is a preference, not a record: if the
- * request fails the board on screen is still filtered the way you asked, and
- * interrupting that to report it would be worse than losing the position.
- */
-const filterState = () => ({
-    hidden_nations: hiddenNations.value,
-    hidden_tiers: hiddenTiers.value,
-    hide_owned: hideOwned.value,
-    show_sale: showSale.value,
-});
-
-const filters = useHttp(filterState());
-
-let saveFilters;
-
-watch([hiddenNations, hiddenTiers, hideOwned, showSale], () => {
-    Object.assign(filters, filterState());
-
-    clearTimeout(saveFilters);
-    saveFilters = setTimeout(() => filters.patch('/wot/grinding/filters'), 500);
-});
 
 const salePrice = (cell) => (showSale.value
     ? Math.round(cell.price * (1 - (SALE[cell.tier] ?? 0)))
@@ -250,19 +198,14 @@ const salePrice = (cell) => (showSale.value
 
 const page = usePage();
 
-const drop = (list, value) => (list.includes(value)
-    ? list.filter((x) => x !== value)
-    : [...list, value]);
-
-const toggleNation = (nation) => (hiddenNations.value = drop(hiddenNations.value, nation));
-const toggleTier = (tier) => (hiddenTiers.value = drop(hiddenTiers.value, tier));
-
 // In tech-tree order, like every other vehicle list here.
-const purchaseNations = computed(() => {
-    const present = new Set(props.purchase.rows.map((r) => r.nation));
+const nationsOf = (rows) => {
+    const present = new Set(rows.map((r) => r.nation));
 
     return Object.keys(page.props.nations ?? {}).filter((nation) => present.has(nation));
-});
+};
+
+const purchaseNations = computed(() => nationsOf(props.purchase.rows));
 
 const shownTiers = computed(() => props.purchase.tiers.filter((t) => !hiddenTiers.value.includes(t)));
 
@@ -289,6 +232,43 @@ const shownRows = computed(() => props.purchase.rows.filter(
 const tierTotal = (tier) => shownRows.value.reduce((sum, r) => sum + cellCost(r.cells[tier]), 0);
 const grandTotal = computed(() => shownRows.value.reduce((sum, r) => sum + rowRemaining(r), 0));
 const short = (v) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : n(v));
+
+/*
+ * Free XP filters.
+ *
+ * Nation and tier work exactly as they do on the purchase board. The third
+ * control does not: there is no settled state for a module plan — nothing
+ * records which modules you have already researched off a tracked line — so
+ * there is nothing to hide by default. It narrows to lines you have planned
+ * something on instead, which makes it a review tool rather than a tidy-up,
+ * and it starts off because the whole tree is what you plan against.
+ */
+const {
+    hiddenNations: fxHiddenNations,
+    hiddenTiers: fxHiddenTiers,
+    only_planned: onlyPlanned,
+    toggleNation: fxToggleNation,
+    toggleTier: fxToggleTier,
+    clearNations: fxClearNations,
+    clearTiers: fxClearTiers,
+} = useBoardFilters('freexp', props.settings.freexp_filters, {
+    extra: { only_planned: false },
+});
+
+const freexpNations = computed(() => nationsOf(props.freexp.rows));
+
+const fxShownTiers = computed(() => props.freexp.tiers.filter((t) => !fxHiddenTiers.value.includes(t)));
+
+// A shared cell is planned and counted on the row that owns it, which keeps the
+// row totals summing to the grand total.
+const fxCellXp = (cell) => (cell && !cell.is_shared ? cell.planned_xp : 0);
+const fxRowPlanned = (row) => fxShownTiers.value.reduce((sum, t) => sum + fxCellXp(row.cells[t]), 0);
+
+const fxShownRows = computed(() => props.freexp.rows.filter(
+    (r) => !fxHiddenNations.value.includes(r.nation) && !(onlyPlanned.value && fxRowPlanned(r) === 0),
+));
+const fxTierTotal = (tier) => fxShownRows.value.reduce((sum, r) => sum + fxCellXp(r.cells[tier]), 0);
+const fxGrandTotal = computed(() => fxShownRows.value.reduce((sum, r) => sum + fxRowPlanned(r), 0));
 
 /*
  * Credits shortfall is the number that decides whether a plan is realistic, so
@@ -460,7 +440,7 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
                         </button>
                         <button v-if="hiddenNations.length" type="button"
                                 class="ms-1 text-xs uppercase tracking-wider text-wot-dim hover:text-wot-text"
-                                @click="hiddenNations = []">
+                                @click="clearNations">
                             All
                         </button>
                     </div>
@@ -483,7 +463,7 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
                         </button>
                         <button v-if="hiddenTiers.length" type="button"
                                 class="ms-1 text-xs uppercase tracking-wider text-wot-dim hover:text-wot-text"
-                                @click="hiddenTiers = []">
+                                @click="clearTiers">
                             All
                         </button>
                     </div>
@@ -686,7 +666,145 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
             </template>
         </section>
 
-        <!-- 3-5. Target-driven views -------------------------------------------->
+        <!-- 4. Free XP ---------------------------------------------------------
+             Modules, and nothing else. Laid out like Tanks to Purchase because
+             it asks the same shape of question against the same tree, but a
+             cell here is a list to tick rather than a price to pay — there is
+             no discount, no owned state, and nothing to type.
+        -->
+        <section v-else-if="view === 'freexp'" class="mt-4" aria-labelledby="freexp-heading">
+            <h2 id="freexp-heading" class="sr-only">Free XP</h2>
+
+            <p v-if="!freexp.rows.length" class="border border-dashed border-wot-border p-8 text-center text-sm text-wot-dim">
+                No lines to plan against. Run <code>php artisan wot:sync-vehicles</code> to fill the encyclopedia.
+            </p>
+
+            <template v-else>
+                <div class="mb-3 space-y-2 border border-wot-border bg-wot-panel p-3">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                        <span class="w-12 shrink-0 text-xs font-bold uppercase tracking-wider text-wot-dim">Nation</span>
+                        <button
+                            v-for="nation in freexpNations"
+                            :key="nation"
+                            type="button"
+                            class="border p-1 leading-none transition-colors"
+                            :class="fxHiddenNations.includes(nation)
+                                ? 'border-wot-border opacity-30 hover:opacity-70'
+                                : 'border-wot-gold'"
+                            :aria-pressed="!fxHiddenNations.includes(nation)"
+                            @click="fxToggleNation(nation)"
+                        >
+                            <NationFlag :nation="nation" />
+                        </button>
+                        <button v-if="fxHiddenNations.length" type="button"
+                                class="ms-1 text-xs uppercase tracking-wider text-wot-dim hover:text-wot-text"
+                                @click="fxClearNations">
+                            All
+                        </button>
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-1.5">
+                        <span class="w-12 shrink-0 text-xs font-bold uppercase tracking-wider text-wot-dim">Tier</span>
+                        <button
+                            v-for="tier in freexp.tiers"
+                            :key="tier"
+                            type="button"
+                            class="min-w-9 border px-2 py-0.5 text-xs font-bold tracking-wider transition-colors"
+                            :class="fxHiddenTiers.includes(tier)
+                                ? 'border-wot-border text-wot-dim hover:text-wot-text'
+                                : 'border-wot-gold text-wot-gold'"
+                            :aria-pressed="!fxHiddenTiers.includes(tier)"
+                            :aria-label="`Tier ${ROMAN[tier]}`"
+                            @click="fxToggleTier(tier)"
+                        >
+                            {{ ROMAN[tier] }}
+                        </button>
+                        <button v-if="fxHiddenTiers.length" type="button"
+                                class="ms-1 text-xs uppercase tracking-wider text-wot-dim hover:text-wot-text"
+                                @click="fxClearTiers">
+                            All
+                        </button>
+                    </div>
+
+                    <!-- Opposite polarity to the purchase board's Lines
+                         checkbox, deliberately. There it hides what is settled;
+                         a module plan is never settled, so this narrows to what
+                         you have already planned instead — useful for reading
+                         the plan back, useless as a default. -->
+                    <div class="flex flex-wrap items-center gap-1.5">
+                        <span class="w-12 shrink-0 text-xs font-bold uppercase tracking-wider text-wot-dim">Lines</span>
+                        <label class="flex items-center gap-2 text-xs text-wot-text">
+                            <input v-model="onlyPlanned" type="checkbox" class="border">
+                            Only lines I have planned on
+                        </label>
+                    </div>
+                </div>
+
+                <p v-if="!fxShownRows.length" class="border border-dashed border-wot-border p-8 text-center text-sm text-wot-dim">
+                    {{ onlyPlanned ? 'Nothing planned in the selected nations and tiers.' : 'No lines in the selected nations and tiers.' }}
+                </p>
+
+                <div v-else class="overflow-x-auto border border-wot-border bg-wot-panel">
+                    <table class="min-w-full border-separate border-spacing-0 divide-y divide-wot-border text-sm">
+                        <thead class="bg-wot-sunken">
+                            <tr>
+                                <th scope="col" class="sticky left-0 z-20 whitespace-nowrap border-e border-wot-border bg-wot-sunken-solid px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Line</th>
+                                <th v-for="tier in fxShownTiers" :key="tier" scope="col"
+                                    class="px-3 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">
+                                    Tier {{ ROMAN[tier] }}
+                                </th>
+                                <th scope="col" class="sticky right-0 z-20 whitespace-nowrap border-s border-wot-border bg-wot-sunken-solid px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Planned</th>
+                            </tr>
+                        </thead>
+
+                        <tbody class="divide-y divide-wot-border-soft">
+                            <tr v-for="row in fxShownRows" :key="row.key" class="group hover:bg-wot-sunken">
+                                <td class="sticky left-0 z-10 whitespace-nowrap border-e border-wot-border bg-wot-panel-solid px-4 py-2 group-hover:bg-wot-sunken-solid">
+                                    <NationFlag :nation="row.nation" class="me-2" />
+                                    <span class="text-wot-heading">{{ row.name }}</span>
+                                    <VehicleTypeIcon :type="row.type" class="ms-2 text-wot-dim" />
+                                </td>
+
+                                <td v-for="tier in fxShownTiers" :key="tier" class="px-3 py-2 text-right align-top">
+                                    <template v-if="row.cells[tier]">
+                                        <!-- Shared with a line above, where it is the
+                                             editable one. The same tank must never be
+                                             two dropdowns writing the same plan. -->
+                                        <span
+                                            v-if="row.cells[tier].is_shared"
+                                            class="tabular-nums text-wot-dim/60"
+                                            :title="`${row.cells[tier].name} — shared with ${row.cells[tier].shared_with}, where it is planned.`"
+                                        >
+                                            {{ n(row.cells[tier].planned_xp) }}
+                                        </span>
+
+                                        <ModulePlanPicker v-else :cell="row.cells[tier]" />
+                                    </template>
+                                    <span v-else class="text-wot-muted">·</span>
+                                </td>
+
+                                <td class="sticky right-0 z-10 whitespace-nowrap border-s border-wot-border bg-wot-panel-solid px-4 py-2 text-right tabular-nums group-hover:bg-wot-sunken-solid"
+                                    :class="fxRowPlanned(row) ? 'text-wot-gold' : 'text-wot-muted'">
+                                    {{ n(fxRowPlanned(row)) }}
+                                </td>
+                            </tr>
+                        </tbody>
+
+                        <tfoot v-if="fxShownRows.length > 1" class="border-t-2 border-wot-border bg-wot-sunken">
+                            <tr>
+                                <th scope="row" class="sticky left-0 z-20 border-e border-wot-border bg-wot-sunken-solid px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Total</th>
+                                <td v-for="tier in fxShownTiers" :key="tier" class="px-3 py-3 text-right tabular-nums text-wot-muted">
+                                    {{ n(fxTierTotal(tier)) }}
+                                </td>
+                                <td class="sticky right-0 z-20 border-s border-wot-border bg-wot-sunken-solid px-4 py-3 text-right tabular-nums font-bold text-wot-heading">{{ n(fxGrandTotal) }}</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </template>
+        </section>
+
+        <!-- 3 & 5. Target-driven views ------------------------------------------>
         <section v-else class="mt-4" aria-labelledby="targets-heading">
             <h2 id="targets-heading" class="sr-only">{{ views.find((v) => v.key === view).label }}</h2>
 
@@ -698,10 +816,6 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
                             <template v-if="view === 'xp'">
                                 <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Required</th>
                                 <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Remaining</th>
-                            </template>
-                            <template v-else-if="view === 'freexp'">
-                                <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Free XP planned</th>
-                                <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">XP remaining</th>
                             </template>
                             <template v-else>
                                 <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Fragments</th>
@@ -725,10 +839,6 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
                                 <template v-if="view === 'xp'">
                                     <td class="px-4 py-2 text-right tabular-nums text-wot-muted">{{ n(t.xp_required) }}</td>
                                     <td class="px-4 py-2 text-right tabular-nums text-wot-heading">{{ n(t.xp_remaining) }}</td>
-                                </template>
-                                <template v-else-if="view === 'freexp'">
-                                    <td class="px-4 py-2 text-right tabular-nums text-wot-gold">{{ n(t.free_xp_planned) }}</td>
-                                    <td class="px-4 py-2 text-right tabular-nums text-wot-muted">{{ n(t.xp_remaining) }}</td>
                                 </template>
                                 <template v-else>
                                     <td class="px-4 py-2 text-right tabular-nums text-wot-gold">{{ t.blueprint_fragments }}</td>
@@ -757,7 +867,6 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
                                                 <th scope="col" class="py-1 text-right font-bold uppercase tracking-wider">Modules</th>
                                                 <th scope="col" class="py-1 text-right font-bold uppercase tracking-wider">Next tank XP</th>
                                                 <th scope="col" class="py-1 text-right font-bold uppercase tracking-wider">Banked</th>
-                                                <th scope="col" class="py-1 text-right font-bold uppercase tracking-wider">Free XP</th>
                                                 <th scope="col" class="py-1 text-right font-bold uppercase tracking-wider">Frags</th>
                                                 <th scope="col" class="py-1 text-right font-bold uppercase tracking-wider">Credits</th>
                                                 <th scope="col" class="py-1 text-right font-bold uppercase tracking-wider">Playing</th>
@@ -787,7 +896,6 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
                                                 </td>
                                                 <td class="py-1 text-right"><EditableNumber :step-id="s.id" field="research_xp_remaining" :model-value="s.research_xp_remaining ?? s.research_xp ?? 0" /></td>
                                                 <td class="py-1 text-right"><EditableNumber :step-id="s.id" field="banked_xp" :model-value="s.banked_xp" /></td>
-                                                <td class="py-1 text-right"><EditableNumber :step-id="s.id" field="free_xp_planned" :model-value="s.free_xp_planned" /></td>
                                                 <td class="py-1 text-right"><EditableNumber :step-id="s.id" field="blueprint_fragments" :model-value="s.blueprint_fragments" /></td>
                                                 <td class="py-1 text-right tabular-nums">{{ n(s.price_credit) }}</td>
                                                 <td class="py-1 text-right">
