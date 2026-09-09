@@ -2252,3 +2252,103 @@ it comes back as a JS module with the CSS as an escaped string on one line, so
 **Reading a class off the source does not mean it renders.** The claim that the
 price text "was already green" came from reading `:tone` rather than from what
 painted, and the AppShell rule above meant it never had been.
+
+## 2026-09-09 — Tanks to Purchase covers the whole tree, and shares are counted once
+
+Two changes that only make sense together: the board now reaches tier I, and a vehicle sitting on
+more than one line is billed — and editable — exactly once.
+
+### The floor, and why lowering it alone would have done nothing
+
+`$floor` was `min(purchase_min_tier, lowest tracked step tier)`, which evaluated to **7** on the
+live board. Tier VII cells were already being built. They never rendered, because `tiers()` dropped
+any tier whose cells were all purchased and backfilled ancestors default to owned — so the column
+was dropped, and a dropped column is one you cannot un-tick anything in. Lowering the floor by
+itself would have added no visible column at all.
+
+`$floor` is now the constant `PurchaseBoard::FLOOR_TIER = 1`. **This supersedes the "Two floors,
+not one" decision recorded above**, rather than reversing it by accident: that computation existed
+to answer "how low does any tracked line start?", which stops being a question once the answer is
+always the bottom of the tree. `config('wargaming.purchase_min_tier')` is untouched at 8 and still
+does its own separate job — gating which vehicles earn a row.
+
+### A latent double-count, fixed before it could bite
+
+Eight vehicles already appeared in two rows each. Nothing double-charged, but only by luck: every
+occurrence was purchased, and `credits_remaining` skips bought cells. Un-ticking any one of them
+would have billed it twice and rendered the same toggle twice on screen — the `6794af2` mid-path
+bug displaced from row heads to ancestor cells, which neither `$covered` nor `$subsumed` guards
+(both test candidate *heads* only).
+
+At floor 1 that goes from latent to structural: **167 shared cells across 76 vehicles** on the live
+board. The MS-1 alone sits on twelve lines.
+
+New `claimShared()` walks the rows in display order. The first row to show a vehicle keeps it as an
+editable cell and pays for it; later rows carry it as `is_shared` with `shared_with` naming the
+owner, and it contributes nothing to their `credits_remaining`. Row totals therefore still sum to
+the grand total.
+
+**Ordering is the whole trick, and it forced a resequence of `for()`.** "First" has to mean first
+*on screen*, so claiming runs after the sort — which meant `credits_remaining` could no longer be
+computed in `row()`, because that runs before anything is sorted. `row()` keeps `cells` and
+`is_bought_out`; `claimShared()` is now the single place the money is totalled. Bought-out rows are
+still rejected *before* claiming: a row nobody can see must not take a vehicle from a row they can,
+or the survivor would point at a line that is not on the board and nothing would pay for the tank.
+
+Verified against live data rather than reasoned about: the M2 Light appears in **4** rows, and
+un-ticking it moves `credits_required` by 3,400 once, not 13,600. Run inside a transaction and
+rolled back.
+
+### The board is now complete; the filter decides what you see
+
+`tiers()` became `tierColumns()` and no longer rejects anything — every tier holding a cell gets a
+column. A sibling `bought_tiers` names the tiers where nothing is still owed, and the client seeds
+`hiddenTiers` from it, so a settled tier's filter button renders but starts unselected. One
+mechanism instead of two.
+
+The settled predicate is `is_purchased || is_shared`, not just `is_purchased`. A shared duplicate
+costs nothing, so a column held open only by duplicates would be a column of zeroes — exactly what
+the original rule existed to keep off screen.
+
+That predicate is also load-bearing for something non-obvious. `shownRows` hides a row with nothing
+left to pay in the *visible* tiers, so hiding tiers by default could in principle hide rows. It
+cannot: a row owes at tier T only if it has a cell there that is neither purchased nor shared,
+which is precisely what stops T being in `bought_tiers`. Break that symmetry and the default filter
+starts silently removing rows.
+
+The seed is a one-time initialisation in `<script setup>`, never a watcher. Setup runs once per
+component instance and every purchase here is a partial reload that updates props on the existing
+instance, so it fires on a real visit and never while you click. A watcher would re-seed on every
+response and make a column vanish the instant you bought it out.
+
+### Sticky Line and Remaining columns
+
+Eleven tier columns do not fit, so the first and last columns pin while the tiers scroll between
+them. Three things this needed that are easy to miss:
+
+- **Opaque backgrounds.** `--color-wot-panel` and `--color-wot-sunken` are both translucent, so a
+  sticky cell painted with either lets the scrolling columns show through it. `panel-solid` already
+  existed; `--color-wot-sunken-solid: #0b161e` is new — sunken pre-composited over panel-solid,
+  because one element cannot stack two background colours.
+- **`border-collapse` fights sticky.** Preflight sets it on every table, and with collapsed borders
+  a sticky cell's border does not travel with it. The purchase table is now `border-separate
+  border-spacing-0`; the `divide-*` rules put their borders on rows, so they were unaffected.
+- **Row hover cannot paint through a cell with its own background**, hence `group` on the `<tr>` and
+  `group-hover:` on the two sticky cells.
+
+### Result and cost
+
+Live board: 48 rows (unchanged), **217 → 505 cells**, tiers `1–11`, `bought_tiers` `1–7`,
+`credits_required` unchanged at 440,980,000 — expected, since every current purchase record is tier
+VIII+, so no low-tier ancestor is un-ticked. Build **42 ms**.
+
+The real cost is payload, not CPU: `purchase.rows` roughly triples, and it ships on every purchase
+patch via `only: ['purchase', 'totals']`. Fine for one user; the lever, if it ever matters, is
+omitting `name`/`api_price` on purchased cells.
+
+**Not fixed here, and worth knowing:** `TechTree::predecessors()` keeps only the *cheapest*
+predecessor per vehicle, so the tree is modelled as single-parent chains. Real sharing is therefore
+under-reported — 76 vehicles is a lower bound, and a vehicle reachable from two lines is attributed
+to whichever unlocks it cheaper. The board is not authoritative on which lines share a vehicle.
+
+Suite: **187 passed, 1045 assertions.**

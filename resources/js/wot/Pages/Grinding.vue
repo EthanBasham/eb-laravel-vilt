@@ -155,7 +155,21 @@ const priceTone = (cell) => (cell.is_unlocked
  * was meant to be on. Deselections survive that; stale entries are harmless.
  */
 const hiddenNations = ref([]);
-const hiddenTiers = ref([]);
+
+/*
+ * Seeded once, at setup, from the tiers the server reports as settled — never
+ * watched. A column with nothing left to pay for is noise on arrival, but
+ * buying the last tank in a column while you are looking at it must not make
+ * the column vanish underneath you.
+ *
+ * Setup runs once per component instance, and every purchase on this tab is a
+ * partial reload that updates props on the existing instance, so this fires on
+ * a real visit and never again while you click. A watcher here would re-seed on
+ * every response and do exactly the disappearing act described above.
+ *
+ * Copied rather than aliased, so toggling a filter never writes to the prop.
+ */
+const hiddenTiers = ref([...(props.purchase.bought_tiers ?? [])]);
 
 const page = usePage();
 
@@ -177,7 +191,11 @@ const shownTiers = computed(() => props.purchase.tiers.filter((t) => !hiddenTier
 
 // Only cells in a visible column count. Hiding a tier takes its price off the
 // bill — otherwise the filter would change what you see but not what you owe.
-const cellCost = (cell) => (cell && !cell.is_purchased ? cell.price : 0);
+//
+// A shared cell costs this row nothing: the row that owns the vehicle is paying
+// for it, which is what keeps the row totals summing to the grand total and
+// agreeing with the server's credits_remaining cell for cell.
+const cellCost = (cell) => (cell && !cell.is_purchased && !cell.is_shared ? cell.price : 0);
 const rowRemaining = (row) => shownTiers.value.reduce((sum, t) => sum + cellCost(row.cells[t]), 0);
 
 // A line with nothing left to buy in the visible tiers is not a shopping list
@@ -384,32 +402,49 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
                 </p>
 
                 <div v-else class="overflow-x-auto border border-wot-border bg-wot-panel">
-                    <table class="min-w-full divide-y divide-wot-border text-sm">
+                    <table class="min-w-full border-separate border-spacing-0 divide-y divide-wot-border text-sm">
                         <thead class="bg-wot-sunken">
                             <tr>
-                                <th scope="col" class="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Line</th>
+                                <th scope="col" class="sticky left-0 z-20 whitespace-nowrap border-e border-wot-border bg-wot-sunken-solid px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Line</th>
                                 <th v-for="tier in shownTiers" :key="tier" scope="col"
                                     class="px-3 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">
                                     Tier {{ ROMAN[tier] }}
                                 </th>
-                                <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Remaining</th>
+                                <th scope="col" class="sticky right-0 z-20 whitespace-nowrap border-s border-wot-border bg-wot-sunken-solid px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Remaining</th>
                             </tr>
                         </thead>
 
                         <tbody class="divide-y divide-wot-border-soft">
-                            <tr v-for="row in shownRows" :key="row.key" class="hover:bg-wot-sunken">
-                                <td class="whitespace-nowrap px-4 py-2">
+                            <tr v-for="row in shownRows" :key="row.key" class="group hover:bg-wot-sunken">
+                                <td class="sticky left-0 z-10 whitespace-nowrap border-e border-wot-border bg-wot-panel-solid px-4 py-2 group-hover:bg-wot-sunken-solid">
                                     <NationFlag :nation="row.nation" class="me-2" />
                                     <span class="text-wot-heading">{{ row.name }}</span>
                                 </td>
 
                                 <td v-for="tier in shownTiers" :key="tier" class="px-3 py-2 text-right align-top">
                                     <template v-if="row.cells[tier]">
+                                        <!-- Shared with a line above, where it is the
+                                             editable one. Text rather than a control:
+                                             the same tank must never be two sets of
+                                             buttons, and only the row that owns it pays
+                                             for it.
+
+                                             Ahead of the bought branch deliberately — a
+                                             shared cell is read-only whatever its state,
+                                             and the MS-1 sits on twelve lines. -->
+                                        <span
+                                            v-if="row.cells[tier].is_shared"
+                                            class="tabular-nums text-wot-dim/60"
+                                            :title="`${row.cells[tier].name} — shared with ${row.cells[tier].shared_with}, where it is counted and edited.`"
+                                        >
+                                            {{ n(row.cells[tier].is_purchased ? 0 : row.cells[tier].price) }}
+                                        </span>
+
                                         <!-- Owned: nothing left to pay, so the cell
                                              reads zero rather than restating a price
                                              that is no longer owed. -->
                                         <button
-                                            v-if="row.cells[tier].is_purchased"
+                                            v-else-if="row.cells[tier].is_purchased"
                                             type="button"
                                             class="tabular-nums text-wot-dim hover:text-wot-muted"
                                             :title="`${row.cells[tier].name} — bought. Mark as not bought.`"
@@ -501,17 +536,17 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
                                 </template>
                             </td>
 
-                            <td class="px-4 py-2 text-right tabular-nums font-bold text-wot-heading">{{ n(rowRemaining(row)) }}</td>
+                            <td class="sticky right-0 z-10 border-s border-wot-border bg-wot-panel-solid px-4 py-2 text-right tabular-nums font-bold text-wot-heading group-hover:bg-wot-sunken-solid">{{ n(rowRemaining(row)) }}</td>
                         </tr>
                     </tbody>
 
                     <tfoot v-if="shownRows.length > 1" class="border-t-2 border-wot-border bg-wot-sunken">
                         <tr>
-                            <th scope="row" class="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Total</th>
+                            <th scope="row" class="sticky left-0 z-20 border-e border-wot-border bg-wot-sunken-solid px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Total</th>
                             <td v-for="tier in shownTiers" :key="tier" class="px-3 py-3 text-right tabular-nums text-wot-muted">
                                 {{ n(tierTotal(tier)) }}
                             </td>
-                            <td class="px-4 py-3 text-right tabular-nums font-bold text-wot-heading">{{ n(grandTotal) }}</td>
+                            <td class="sticky right-0 z-20 border-s border-wot-border bg-wot-sunken-solid px-4 py-3 text-right tabular-nums font-bold text-wot-heading">{{ n(grandTotal) }}</td>
                         </tr>
                     </tfoot>
                 </table>
@@ -523,6 +558,9 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
                 Prices come from the encyclopedia and can be typed over when a seasonal discount applies.
                 A line disappears once its last vehicle is bought, or once the visible tiers hold
                 nothing it still has to pay for. Hiding a tier takes it out of the totals.
+                Tiers you have already bought out start hidden — turn one back on to un-tick
+                something in it. A tank that sits on more than one line is counted, and edited,
+                only on the first line that shows it.
             </p>
         </section>
 

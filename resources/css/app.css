@@ -61,6 +61,14 @@
     --color-wot-panel: rgba(7, 21, 30, 0.9);
     --color-wot-panel-solid: #0e1c26;
     --color-wot-sunken: rgba(0, 0, 0, 0.2);
+    /*
+     * `--color-wot-sunken` pre-composited over `--color-wot-panel-solid`
+     * (0.8 x #0e1c26). A sticky table cell has to paint an opaque background of
+     * its own or the columns scroll straight through it, which costs it the
+     * translucent tint its neighbours get for free. One element cannot stack
+     * two background colours, so the blend is done here instead.
+     */
+    --color-wot-sunken-solid: #0b161e;
 
     --color-wot-border: #212c33;
     --color-wot-border-soft: #18222a;
