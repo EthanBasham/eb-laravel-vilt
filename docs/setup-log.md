@@ -995,3 +995,81 @@ clears the credential, and the *next* run succeeds without one — `account/info
 keeps accruing through an expired token; only credits/gold/free-XP go missing until the
 account is reconnected. That degradation was not designed deliberately, but it is the right
 behaviour and is worth keeping.
+
+---
+
+## 2026-09-09 — News & Events
+
+### RSS, not scraping, for the article list
+
+The news index HTML turned out to be a red herring. Buried in its inline JavaScript:
+
+```js
+URL_RSS_NEWS_INDEX = '/en/rss/news/',
+URL_RSS_NEWS_CATEGORY = '/en/rss/news/-FAKESLUG-/'
+```
+
+worldoftanks.com publishes **official RSS feeds**, overall and per category, each carrying
+title, link, description, `pubDate`, category and an image enclosure. That is an interface
+meant to be consumed: it survives site redesigns, provides a stable guid per item, and removes
+any question about whether parsing is welcome.
+
+Categories are followed individually rather than via the overall feed, because the overall one
+only carries the 20 most recent items across everything — quieter categories like
+`live-streams` would be permanently crowded out by patch notes. Six feeds, 20 items each, 120
+articles.
+
+`robots.txt` permits `/en/news/` and disallows two subpaths (`wot-assistant`, `wgc-client`).
+`NewsClient::mayFetch()` enforces that centrally rather than trusting each caller, and the
+User-Agent identifies this application instead of impersonating a browser, so the traffic is
+attributable and blockable if Wargaming ever objects.
+
+### Event extraction: two tiers, and nothing inferred from prose
+
+Sampling 19 real articles across every category first, rather than assuming:
+
+| signal | coverage | yields |
+|---|---|---|
+| `event-calendar` component | **1 / 19** | exact per-session start/end times, titles, rewards |
+| `data-timestamp` pair | **5 / 19** | one coarse overall window |
+| JSON-LD `Article` | 19 / 19 | title and publish date (already in the feed) |
+
+So roughly a third of articles produce a dated event, and only a small slice give per-day
+granularity. **Prose dates are deliberately not parsed.** Plenty of articles say "the event
+runs from 8 to 15 September" in a paragraph, and extracting that means brittle patterns or a
+language model — a calendar that is silently *wrong* is worse than one that is merely sparse.
+
+When an article has both a calendar and a timestamp pair, the calendar wins outright: emitting
+both would draw a duplicate month-long bar behind every session.
+
+### Parsing without a new dependency
+
+The site emits attributes with no separating whitespace —
+`data-accent="stream"data-date="2026-09-08"`. Verified up front that PHP's built-in
+`DOMDocument` handles it (libxml warns, then parses correctly), so no HTML-parsing package was
+added. The test fixture reproduces the run-together attributes exactly, because a parser that
+quietly stopped coping would produce an *empty* calendar rather than an error.
+
+Times come from `.local-date-ctw` / `.local-time-ctw` spans read positionally, and are UTC —
+those spans are what the site's own JavaScript rewrites into the viewer's timezone, so the
+served values are canonical.
+
+### Being a polite client
+
+Bodies are one request each against someone else's server, so: capped per run
+(`bodies_per_sync`, default 15), 700 ms between requests, and re-fetched only when the feed's
+`published_at` moves past `body_fetched_at`. A `body_hash` means an unchanged article is never
+re-parsed. Scheduled twice daily, which is ample for a news site.
+
+### A design problem the real data exposed
+
+The first working calendar put every event in every day it spanned — correct, and unusable.
+Battle Pass Season XXI runs 1 September to 24 November, so it filled **34 of 35 squares**,
+burying the stream sessions that are the entire reason to look at a calendar.
+
+Events spanning more than a week are now listed once above the grid as "running all month".
+The grid went from 34 busy days to 16, and the sessions with real times (`16:00–22:59`) are
+visible again. Worth noting the general lesson: this was only apparent with production data —
+the fixtures all looked fine.
+
+Suite: **107 passed, 344 assertions.**

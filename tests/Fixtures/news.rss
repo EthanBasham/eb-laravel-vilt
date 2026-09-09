@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+<title>World of Tanks news</title>
+<item>
+  <title>AMD OLS Token Store: Watch Season 7 for Great Rewards</title>
+  <link>https://worldoftanks.com/en/news/live-streams/token-store-september-2026/</link>
+  <description>&lt;div&gt;Tune in to all of the action on Twitch and earn Tokens.&lt;/div&gt;</description>
+  <guid>https://worldoftanks.com/en/news/live-streams/token-store-september-2026/</guid>
+  <pubDate>Mon, 07 Sep 2026 09:00:00 GMT</pubDate>
+  <category>Live Streams</category>
+  <enclosure url="https://example.test/image.jpg" type="image/jpeg" />
+</item>
+<item>
+  <title>Micropatch Release on September 4</title>
+  <link>https://worldoftanks.com/en/news/updates/micro-patch-040926/</link>
+  <description>A small patch.</description>
+  <guid>https://worldoftanks.com/en/news/updates/micro-patch-040926/</guid>
+  <pubDate>Thu, 04 Sep 2026 10:00:00 GMT</pubDate>
+  <category>Updates</category>
+</item>
+</channel></rss>

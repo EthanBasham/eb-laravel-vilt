@@ -24,3 +24,8 @@ Schedule::command('wot:snapshot')->hourly()->withoutOverlapping();
 // XVM regenerates expected values from server-wide statistics periodically.
 // Stale values skew every WN8 on the site, so this tracks them weekly.
 Schedule::command('wot:sync-expected-values')->weeklyOn(1, '03:30');
+
+// News feeds are cheap to poll; article bodies are one request each against
+// someone else's server, so the command caps how many it fetches per run and
+// picks up the rest next time. Twice a day is ample for a news site.
+Schedule::command('wot:sync-news')->twiceDaily(6, 18)->withoutOverlapping();

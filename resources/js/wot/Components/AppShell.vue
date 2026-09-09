@@ -19,6 +19,8 @@ const flash = computed(() => page.props.flash ?? {});
                 <nav class="flex items-center gap-5 text-sm" aria-label="Primary">
                     <Link href="/wot" class="text-wot-dim transition-colors hover:text-wot-gold-bright">Dashboard</Link>
                     <Link href="/wot/grinds" class="text-wot-dim transition-colors hover:text-wot-gold-bright">Grinds</Link>
+                    <Link href="/wot/news" class="text-wot-dim transition-colors hover:text-wot-gold-bright">News</Link>
+                    <Link href="/wot/calendar" class="text-wot-dim transition-colors hover:text-wot-gold-bright">Calendar</Link>
                     <span v-if="auth.wot" class="font-medium text-wot-gold">{{ auth.wot.nickname }}</span>
                     <!-- A plain <a>, not an Inertia <Link>: the rest of the site
                          is server-rendered Blade outside this SPA, so leaving it

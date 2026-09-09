@@ -4,8 +4,6 @@ namespace App\Http\Controllers\Wot;
 
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Inertia\Inertia;
-use Inertia\Response;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Wot\StoreGrindRequest;
 use App\Models\WotGrind;
@@ -13,6 +11,8 @@ use App\Models\WotVehicle;
 use App\Services\Wargaming\AccountDashboard;
 use App\Services\Wargaming\GrindTracker;
 use App\Services\Wargaming\WargamingException;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class GrindController extends Controller
 {
