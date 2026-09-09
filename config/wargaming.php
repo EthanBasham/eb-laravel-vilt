@@ -76,6 +76,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Lowest tier worth budgeting for
+    |--------------------------------------------------------------------------
+    |
+    | Tanks to Purchase lists everything one research step from a vehicle the
+    | account has played, which at the bottom of the tree means a long tail of
+    | tier II runabouts costing less than a single battle's profit. This is the
+    | floor for that list. Tracked grind lines are always shown in full, however
+    | low they start.
+    |
+    */
+
+    'purchase_min_tier' => 8,
+
+    /*
+    |--------------------------------------------------------------------------
     | HTTP behaviour
     |--------------------------------------------------------------------------
     */

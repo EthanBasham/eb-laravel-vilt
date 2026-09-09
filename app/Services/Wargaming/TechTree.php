@@ -84,6 +84,12 @@ class TechTree
         ], $chain, array_keys($chain)));
     }
 
+    /** The vehicle that unlocks this one, if anything does. */
+    public function predecessorOf(int $tankId): ?WotVehicle
+    {
+        return $this->predecessors()[$tankId]['vehicle'] ?? null;
+    }
+
     /**
      * The vehicles below one on its line, lowest tier first, stopping at a tier.
      *

@@ -221,7 +221,7 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
                     </thead>
 
                     <tbody class="divide-y divide-wot-border-soft">
-                        <tr v-for="row in purchase.rows" :key="row.id" class="hover:bg-wot-sunken">
+                        <tr v-for="row in purchase.rows" :key="row.key" class="hover:bg-wot-sunken">
                             <td class="whitespace-nowrap px-4 py-2">
                                 <NationFlag :nation="row.nation" class="me-2" />
                                 <span class="text-wot-heading">{{ row.name }}</span>

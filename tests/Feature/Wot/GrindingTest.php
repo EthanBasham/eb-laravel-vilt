@@ -655,3 +655,106 @@ it('fills in the tiers a line has already researched past', function () {
         ->where('purchase.rows.1.credits_remaining', 6_100_000),
     );
 });
+
+/** Marks a vehicle as played, which is how the board infers ownership. */
+function played(WotAccount $account, int $tankId): void
+{
+    WotVehicleSnapshot::create([
+        'wot_account_id' => $account->id, 'tank_id' => $tankId,
+        'captured_at' => now(), 'battles' => 10, 'statistics' => ['battles' => 10],
+    ]);
+}
+
+it('lists a buyable tank that has no tracked line', function () {
+    [$eight, $nine, $ten] = techLine();
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create();
+    played($account, $nine->tank_id);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->has('purchase.rows', 1)
+        ->where('purchase.rows.0.name', 'Target X')
+        // Keyed by vehicle, not by target — there is no target.
+        ->where('purchase.rows.0.key', 'v100')
+        // The tiers below it were researched through, so they read as bought
+        // and their columns drop.
+        ->where('purchase.tiers', [10])
+        ->where('purchase.rows.0.cells.9.is_purchased', true)
+        ->where('purchase.rows.0.cells.10.is_purchased', false)
+        ->where('purchase.rows.0.credits_remaining', 6_100_000),
+    );
+});
+
+it('leaves out a tank whose predecessor has never been played', function () {
+    techLine();
+    $user = User::factory()->create();
+    WotAccount::factory()->for($user)->create();
+
+    $this->actingAs($user)->get(route('wot.grinding'))
+        ->assertInertia(fn ($page) => $page->has('purchase.rows', 0));
+});
+
+it('leaves out a tank already in the garage', function () {
+    [$eight, $nine, $ten] = techLine();
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create();
+    played($account, $nine->tank_id);
+    played($account, $ten->tank_id);
+
+    $this->actingAs($user)->get(route('wot.grinding'))
+        ->assertInertia(fn ($page) => $page->has('purchase.rows', 0));
+});
+
+it('leaves out premiums, which sit outside the research tree', function () {
+    [$eight, $nine, $ten] = techLine();
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create();
+    played($account, $nine->tank_id);
+
+    WotVehicle::factory()->create(['tank_id' => 102, 'name' => 'Shop X', 'tier' => 10,
+        'is_premium' => true, 'price_credit' => 6_100_000, 'next_tanks' => null]);
+    $nine->update(['next_tanks' => [100 => 225_000, 102 => 225_000]]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->has('purchase.rows', 1)
+        ->where('purchase.rows.0.name', 'Target X'),
+    );
+});
+
+it('does not list a tracked target twice', function () {
+    $user = User::factory()->create();
+    [$account] = purchaseLine($user);
+    played($account, 90);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->has('purchase.rows', 1)
+        // The tracked line wins: it carries the steps, so it keeps its key.
+        ->where('purchase.rows.0.key', fn ($key) => str_starts_with($key, 't')),
+    );
+});
+
+it('honours the tier floor for untracked buyables', function () {
+    config()->set('wargaming.purchase_min_tier', 11);
+
+    [$eight, $nine, $ten] = techLine();
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create();
+    played($account, $nine->tank_id);
+
+    $this->actingAs($user)->get(route('wot.grinding'))
+        ->assertInertia(fn ($page) => $page->has('purchase.rows', 0));
+});
+
+/** A tracked line is shown in full even when it starts below the floor. */
+it('shows a tracked line that starts below the untracked floor', function () {
+    config()->set('wargaming.purchase_min_tier', 10);
+
+    $user = User::factory()->create();
+    purchaseLine($user);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->has('purchase.rows', 1)
+        ->where('purchase.rows.0.cells.8.tank_id', 80)
+        ->where('purchase.rows.0.credits_remaining', 9_500_000),
+    );
+});

@@ -1861,3 +1861,43 @@ on another line, which cannot happen: purchase state is per tank, not per line.
 The replacement gives the two lines genuinely different starting tiers instead.
 
 Suite: **171 passed, 817 assertions.**
+
+### Tanks to Purchase covers tanks with no tracked line
+
+Reported: "several tanks I don't own yet not listed on the board (e.g. E 50 M)".
+
+Not a staleness problem — `wot:snapshot` reported no new battles, and the
+vehicle data was hours old. The board simply built its rows from the 17 tracked
+grind targets, and the E 50 Ausf. M is not one. The account has played the E 50,
+so the E 50 M is a single research step away and is exactly the case the earlier
+instruction meant by "there may be a tank I can buy that I am not actively
+grinding" — under-implemented at the time as "not filtered to `is_active`".
+
+`PurchaseBoard` now emits two kinds of row:
+
+- **tracked lines**, keyed `t{target_id}`, built from their steps as before;
+- **untracked buyables**, keyed `v{tank_id}` — any non-premium vehicle the
+  account has not played whose immediate predecessor it *has* played, with its
+  lineage filled in from the tech tree.
+
+A tracked target is never also emitted as a candidate. Rows carry a string
+`key` now rather than a target id, since the two kinds share one list.
+
+`TechTree::predecessorOf()` was added for the "researchable now" test; using
+`ancestorsOf($id, $tier - 1)` for it would have worked by accident rather than
+by intent.
+
+**Two floors, not one.** Filling a line's lower tiers and deciding which
+untracked vehicles are worth listing were the same number in the first cut,
+which broke in a case the live data does not exercise: with no tracked targets
+at all there is no lowest step tier, and the board collapsed to tier XI only.
+They are now separate — `config('wargaming.purchase_min_tier')` (8) gates
+untracked rows, while columns reach down to whichever is lower of that and the
+lowest tier a tracked line starts at, so a tracked line is always shown in full
+however low it begins. Two tests pin both directions.
+
+Live board: 55 rows, 17 tracked and 38 untracked, tiers VIII–XI, built in
+~120 ms. Tier VII no longer has a column — its only untracked occupants were
+below the floor, and every remaining tier VII cell is owned.
+
+Suite: **178 passed, 893 assertions.**
