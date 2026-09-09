@@ -73,14 +73,16 @@ class NewsController extends Controller
         // existing row's pivot alone — so re-pinning has to update it.
         $request->user()->pinnedArticles()->updateExistingPivot($article->id, ['pinned_at' => now()]);
 
-        return back(fallback: route('wot.news.index'))->with('success', 'Pinned to the top of your feed.');
+        // No flash message: the card gains its pinned styling and jumps to the
+        // top of the list, which says it more directly than a banner would.
+        return back(fallback: route('wot.news.index'));
     }
 
     public function unpin(Request $request, WotArticle $article): RedirectResponse
     {
         $request->user()->pinnedArticles()->detach($article->id);
 
-        return back(fallback: route('wot.news.index'))->with('success', 'Unpinned.');
+        return back(fallback: route('wot.news.index'));
     }
 
     /**

@@ -14,7 +14,7 @@ it('pins an article and hoists it above newer ones', function () {
     $newest = WotArticle::factory()->create(['title' => 'Newest', 'published_at' => now()]);
     $older = WotArticle::factory()->create(['title' => 'Older', 'published_at' => now()->subWeek()]);
 
-    $this->actingAs($user)->post(route('wot.news.pin', $older))->assertSessionHas('success');
+    $this->actingAs($user)->post(route('wot.news.pin', $older))->assertRedirect();
 
     $this->actingAs($user)->get(route('wot.news.index'))->assertInertia(fn ($page) => $page
         // The older article now leads, purely because it is pinned.
@@ -46,7 +46,7 @@ it('unpins', function () {
     $article = WotArticle::factory()->create();
 
     $this->actingAs($user)->post(route('wot.news.pin', $article));
-    $this->actingAs($user)->delete(route('wot.news.unpin', $article))->assertSessionHas('success');
+    $this->actingAs($user)->delete(route('wot.news.unpin', $article))->assertRedirect();
 
     expect($user->pinnedArticles()->count())->toBe(0);
 });
@@ -64,7 +64,7 @@ it('re-pinning is idempotent and moves the article back to the top', function ()
     $this->travel(1)->minutes();
     $this->actingAs($user)->post(route('wot.news.pin', $second));
     $this->travel(1)->minutes();
-    $this->actingAs($user)->post(route('wot.news.pin', $first))->assertSessionHas('success');
+    $this->actingAs($user)->post(route('wot.news.pin', $first))->assertRedirect();
 
     expect($user->pinnedArticles()->count())->toBe(2);
 
@@ -150,4 +150,16 @@ it('orders tied publish dates deterministically across pages', function () {
 
     expect($seen)->toHaveCount(30)
         ->and($seen->unique())->toHaveCount(30);
+});
+
+/**
+ * Pinning is its own feedback — the card restyles and moves to the top — so a
+ * flash banner would be noise repeating what the list already shows.
+ */
+it('flashes no message, because the reordering is the feedback', function () {
+    $user = User::factory()->create();
+    $article = WotArticle::factory()->create();
+
+    $this->actingAs($user)->post(route('wot.news.pin', $article))->assertSessionMissing('success');
+    $this->actingAs($user)->delete(route('wot.news.unpin', $article))->assertSessionMissing('success');
 });

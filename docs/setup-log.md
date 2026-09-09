@@ -1125,3 +1125,15 @@ untouched, so the position would silently not refresh; an explicit `updateExisti
 follows it.
 
 Suite: **117 passed, 422 assertions.**
+
+### Follow-up: no flash message on pin
+
+Dropped the "Pinned to the top of your feed" / "Unpinned" banners. The card restyles and jumps
+to the top of the list, so a banner only restated what the list already showed — and a message
+that adds nothing still costs the reader a glance. A test asserts the absence rather than
+merely not asserting the presence, so the intent survives someone later "fixing" the missing
+feedback.
+
+The flash messages kept elsewhere are the ones where nothing else says what happened:
+connecting an account reports *which* nickname was linked, and the grind actions confirm a
+target that isn't otherwise restated.
