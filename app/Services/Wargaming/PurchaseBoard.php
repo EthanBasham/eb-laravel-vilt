@@ -20,7 +20,10 @@ use App\Models\WotVehicle;
  */
 class PurchaseBoard
 {
-    public function __construct(private readonly TechTreeLines $lines) {}
+    public function __construct(
+        private readonly TechTreeLines $lines,
+        private readonly LineOwnership $ownership,
+    ) {}
 
     /**
      * The whole tech tree as one row per line.
@@ -90,48 +93,19 @@ class PurchaseBoard
      */
     private function row(array $line, Collection $purchases, Collection $played): array
     {
+        // Ownership is read per vehicle and then inferred down the line, which
+        // is what makes a line you finished read as finished and a line you
+        // have never touched cost full price. LineOwnership owns that rule, so
+        // this board and XP Remaining can never disagree about it.
+        $owned = $this->ownership->along($line['vehicles'], $purchases, $played);
+
         $cells = $line['vehicles']
             ->map(fn (WotVehicle $v): array => $this->cell(
                 $v,
                 $purchases->get($v->tank_id),
-                $played->has($v->tank_id),
+                $owned[$v->tank_id],
             ))
-            // Lowest tier first, which is the order the back-fill below walks.
             ->sortBy('tier')
-            ->values();
-
-        /*
-         * Anything below a vehicle you have *played* was researched through to
-         * reach it, so it was owned too.
-         *
-         * It needs saying because "played" means in the garage with battles:
-         * sell a tank after moving up the line and every trace of having owned
-         * it goes with it, which left a researched-past tier IX reading as
-         * still to buy under a tier X you have battles in.
-         *
-         * The trigger is deliberately play history and nothing else. Inferring
-         * from is_purchased instead would make the rule contagious — ticking a
-         * tier IX as bought would silently mark the VIII beneath it bought and
-         * researched as well, which is a statement about the VIII that you did
-         * not make. Tanks get sold, and saying so has to stay possible after
-         * the initial state is worked out.
-         *
-         * An explicit purchase record wins over the inference either way.
-         */
-        $owned = false;
-        $cells = $cells
-            ->reverse()
-            ->map(function (array $cell) use (&$owned, $purchases, $played): array {
-                if ($owned && ! $purchases->has($cell['tank_id'])) {
-                    $cell['is_purchased'] = true;
-                    $cell['is_unlocked'] = true;
-                }
-
-                $owned = $owned || $played->has($cell['tank_id']);
-
-                return $cell;
-            })
-            ->reverse()
             ->values();
 
         return [
@@ -144,12 +118,11 @@ class PurchaseBoard
     }
 
     /**
+     * @param  array{is_purchased: bool, is_unlocked: bool}  $owned
      * @return array<string, mixed>
      */
-    private function cell(WotVehicle $vehicle, ?WotTankPurchase $purchase, bool $ownedByDefault): array
+    private function cell(WotVehicle $vehicle, ?WotTankPurchase $purchase, array $owned): array
     {
-        $purchased = $purchase?->is_purchased ?? $ownedByDefault;
-
         return [
             'tank_id' => $vehicle->tank_id,
             'name' => $vehicle->name,
@@ -161,9 +134,8 @@ class PurchaseBoard
             'api_price' => $vehicle->price_credit === null ? null : (int) $vehicle->price_credit,
             'is_discounted' => $purchase?->price_credit !== null
                 && (int) $purchase->price_credit !== (int) $vehicle->price_credit,
-            'is_purchased' => $purchased,
-            // Buying implies researching, whatever the stored flag says.
-            'is_unlocked' => $purchased || ($purchase?->is_unlocked ?? false),
+            'is_purchased' => $owned['is_purchased'],
+            'is_unlocked' => $owned['is_unlocked'],
             /*
              * Filled in by claimShared() once the rows are named and sorted.
              * Seeded here so every cell has the same shape whether it ends up
