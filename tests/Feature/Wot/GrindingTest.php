@@ -509,6 +509,32 @@ it('treats a bought tank as researched even if it was never unlocked', function 
     expect(WotTankPurchase::where('tank_id', 90)->first()->is_unlocked)->toBeTrue();
 });
 
+/**
+ * The mirror of the rule above, and the one that actually bit: tier VIII reads
+ * as bought because it is in the garage, so there is no stored is_unlocked
+ * behind it to fall back on. Un-buying used to write is_purchased false and
+ * leave is_unlocked at its default, dropping the cell two steps to unresearched
+ * instead of one to researched-but-unbought.
+ */
+it('leaves a tank researched when it is marked as not bought', function () {
+    $user = User::factory()->create();
+    purchaseLine($user);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('purchase.rows.0.cells.8.is_purchased', true)
+        ->where('purchase.rows.0.cells.8.is_unlocked', true),
+    );
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 80), ['is_purchased' => false]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('purchase.rows.0.cells.8.is_purchased', false)
+        ->where('purchase.rows.0.cells.8.is_unlocked', true),
+    );
+
+    expect(WotTankPurchase::where('tank_id', 80)->first()->is_unlocked)->toBeTrue();
+});
+
 it('drops a line once its last vehicle is bought', function () {
     $user = User::factory()->create();
     purchaseLine($user);

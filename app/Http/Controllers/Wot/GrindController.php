@@ -133,11 +133,31 @@ class GrindController extends Controller
             'tank_id' => $tankId,
         ]);
 
+        $unbought = $request->has('is_purchased') && ! $request->boolean('is_purchased');
+
         $purchase->fill($request->validated());
 
         // Buying a tank researches it, whatever order the buttons were pressed
         // in — the reverse is not true.
         if ($purchase->is_purchased) {
+            $purchase->is_unlocked = true;
+        }
+
+        /*
+         * And un-buying hands back the researched state rather than dropping two
+         * steps at once: you cannot have owned a vehicle without researching it
+         * first.
+         *
+         * This is what a vehicle that reads as bought only because it sits in
+         * the garage depends on. PurchaseBoard resolves that cell's is_unlocked
+         * from `$purchased` rather than from a stored flag, so there is nothing
+         * behind it to fall back on — leaving the flag alone writes false and
+         * the cell lands on unresearched.
+         *
+         * An explicit is_unlocked in the same request still wins; this only
+         * fills in a value the caller did not give.
+         */
+        if ($unbought && ! $request->has('is_unlocked')) {
             $purchase->is_unlocked = true;
         }
 
