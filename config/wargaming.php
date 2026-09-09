@@ -82,12 +82,13 @@ return [
     | Tanks to Purchase lists everything one research step from a vehicle the
     | account has played, which at the bottom of the tree means a long tail of
     | tier II runabouts costing less than a single battle's profit. This is the
-    | floor for that list. Tracked grind lines are always shown in full, however
-    | low they start.
+    | floor for which branch tops earn a row of their own, on both the purchase
+    | and Free XP boards. Every row that clears it still shows its whole line,
+    | however low that line starts.
     |
     */
 
-    'purchase_min_tier' => 8,
+    'line_min_tier' => 8,
 
     /*
     |--------------------------------------------------------------------------

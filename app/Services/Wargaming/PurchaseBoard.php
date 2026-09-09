@@ -15,39 +15,12 @@ use App\Models\WotVehicle;
  * still have to pay, and for what" — so no XP, modules or banked figures reach
  * it, and a line whose last vehicle is bought drops out entirely.
  *
- * Rows are not limited to tracked grind targets. Anything one research step
- * from a vehicle the account has played is something it could buy, whether or
- * not a plan was ever written down for it.
+ * Rows are not limited to tracked grind targets. Which lines exist is
+ * TechTreeLines' question; this class only decorates them with prices.
  */
 class PurchaseBoard
 {
-    /** Tier XI sits above the tech tree's old ceiling; paths stop at X. */
-    private const TOP_TIER = 11;
-
-    /**
-     * The tier a row is named after.
-     *
-     * A branch is known by its tier X in game and in every community tool, so
-     * that is the name the row carries whatever tier it was entered at.
-     */
-    private const NAMED_TIER = 10;
-
-    /**
-     * The tier a row's cells reach down to.
-     *
-     * Distinct from config('wargaming.purchase_min_tier'), which decides what
-     * earns a row of its own. Nothing below that gets a row; every row shows
-     * its whole line regardless, so a tier III you do not actually own has
-     * somewhere to appear and something to un-tick.
-     *
-     * This supersedes the earlier "two floors" arrangement, where the column
-     * range was min(that config, the lowest tier any tracked line started at).
-     * That computation existed to answer "how low does any line start?", which
-     * stops being a question once the answer is always the bottom of the tree.
-     */
-    private const FLOOR_TIER = 1;
-
-    public function __construct(private readonly TechTree $tree) {}
+    public function __construct(private readonly TechTreeLines $lines) {}
 
     /**
      * The whole tech tree as one row per line.
@@ -66,16 +39,12 @@ class PurchaseBoard
         // Below this a line is pocket change rather than something a budget is
         // planned around, and the tree's low tiers are littered with dead ends
         // that unlock nothing and are not lines in any useful sense.
-        $minTier = (int) config('wargaming.purchase_min_tier');
+        $minTier = (int) config('wargaming.line_min_tier');
 
-        $rows = $this->claimShared(
-            $this->lineRows($minTier, $purchases, $played)
-                // Same tech-tree nation order as every other vehicle list here.
-                // Sorted before claiming, so the row that owns a shared vehicle
-                // is the one you meet first reading down the board.
-                ->sortBy(fn (array $r): array => [WotVehicle::rankOf($r['nation']), -$r['tier'], $r['name']])
-                ->values()
-        );
+        // Claimed in display order, so the row that owns a shared vehicle is
+        // the one you meet first reading down the board. TechTreeLines already
+        // sorts, which is why nothing re-sorts here.
+        $rows = $this->claimShared($this->lineRows($minTier, $purchases, $played));
 
         return [
             'rows' => $rows->all(),
@@ -96,17 +65,7 @@ class PurchaseBoard
     }
 
     /**
-     * One row per line in the tech tree.
-     *
-     * A line is a branch top — a vehicle nothing else researches from — with
-     * its whole lineage behind it. That is the board: the tree itself, not a
-     * projection of what you happen to be grinding. Which of it you look at is
-     * the filters' job.
-     *
-     * The tier floor keeps out the low-tier dead ends. 159 vehicles unlock
-     * nothing, but 86 of them are tier II–VII oddities that are not lines in
-     * any useful sense; the rest are the tier X and XI the tree actually ends
-     * at.
+     * One row per line, each vehicle decorated with what it still costs.
      *
      * Ownership is read per vehicle rather than assumed by position: a cell is
      * owned if it has been played. Everything below something owned is filled
@@ -119,52 +78,27 @@ class PurchaseBoard
      */
     private function lineRows(int $minTier, Collection $purchases, Collection $played): Collection
     {
-        return $this->tree->vehicles()
-            ->reject(fn (WotVehicle $v): bool => $v->is_premium
-                || $v->tier < $minTier
-                || $v->tier > self::TOP_TIER
-                || $this->successorOf($v) !== null
-                // Nothing researches into a collector's vehicle, so it has no
-                // line to head — the 113, both AMX 30s, the Jagdpanther II and
-                // the T-62A all sit in the tree with neither a predecessor nor
-                // a successor. They are bought outright rather than researched,
-                // which is a different question from what to grind towards, and
-                // as rows they were a single cell with no path behind them.
-                //
-                // Checked on the predecessor rather than on a flag because the
-                // encyclopedia does not publish one: is_premium is false for
-                // all of them, and is_gift was dropped as unused.
-                || $this->tree->predecessorOf($v->tank_id) === null)
-            ->map(function (WotVehicle $v) use ($purchases, $played): array {
-                $cells = collect($this->tree->ancestorsOf($v->tank_id, self::FLOOR_TIER))
-                    ->push($v)
-                    ->map(fn (WotVehicle $c): ?array => $this->cell(
-                        $c,
-                        $purchases->get($c->tank_id),
-                        $played->has($c->tank_id),
-                    ));
-
-                return $this->row("l{$v->tank_id}", $v->tank_id, $cells, $purchases, $played);
-            })
-            ->values();
+        return $this->lines->lines($minTier)
+            ->map(fn (array $line): array => $this->row($line, $purchases, $played));
     }
 
     /**
-     * @param  Collection<int, array<string, mixed>|null>  $cells
+     * @param  array<string, mixed>  $line
      * @param  Collection<int, WotTankPurchase>  $purchases
      * @param  Collection<int, int>  $played
      * @return array<string, mixed>
      */
-    private function row(
-        string $key,
-        int $topTankId,
-        Collection $cells,
-        Collection $purchases,
-        Collection $played,
-    ): array {
-        $top = $this->tree->vehicles()->get($topTankId);
-
-        $cells = $cells->filter()->values();
+    private function row(array $line, Collection $purchases, Collection $played): array
+    {
+        $cells = $line['vehicles']
+            ->map(fn (WotVehicle $v): array => $this->cell(
+                $v,
+                $purchases->get($v->tank_id),
+                $played->has($v->tank_id),
+            ))
+            // Lowest tier first, which is the order the back-fill below walks.
+            ->sortBy('tier')
+            ->values();
 
         /*
          * Anything below a vehicle you have *played* was researched through to
@@ -200,48 +134,20 @@ class PurchaseBoard
             ->reverse()
             ->values();
 
-        /*
-         * Rows reach this board from two directions — a tracked target, whose
-         * top may be a IX or an XI, and a researchable candidate, which can be
-         * any tier — so naming each after its own entry point put the same
-         * branch on screen under different names. The tier X is the constant.
-         *
-         * Falls back to the row's top for a line that never reaches X, which is
-         * the best name available rather than a deliberate second choice.
-         */
-        $named = $cells->firstWhere('tier', self::NAMED_TIER);
-        $namedBy = $named ? $this->tree->vehicles()->get($named['tank_id']) : $top;
-
         return [
-            'key' => $key,
-            'tank_id' => $topTankId,
-            /*
-             * short_name, not name: the encyclopedia ships both, and the short
-             * form is the one written down — "Obj. 279 (e)" against "Object 279
-             * early". Of the 122 tier X vehicles synced, 55 differ from their
-             * long form and none are null; the column is nullable all the same,
-             * so name stays as a fallback.
-             */
-            'name' => $namedBy?->short_name ?? $namedBy?->name ?? "Tank {$topTankId}",
-            'nation' => $top?->nation,
-            'tier' => $top?->tier,
-            'type' => $namedBy?->type,
+            ...collect($line)->except('vehicles')->all(),
             'cells' => $cells->keyBy('tier')->all(),
             // credits_remaining is not set here: it depends on which cells this
-            // row actually pays for, which is not known until rows are sorted
-            // and shared vehicles claimed. claimShared() adds it.
+            // row actually pays for, which is not known until shared vehicles
+            // are claimed. claimShared() adds it.
         ];
     }
 
     /**
-     * @return array<string, mixed>|null
+     * @return array<string, mixed>
      */
-    private function cell(?WotVehicle $vehicle, ?WotTankPurchase $purchase, bool $ownedByDefault): ?array
+    private function cell(WotVehicle $vehicle, ?WotTankPurchase $purchase, bool $ownedByDefault): array
     {
-        if (! $vehicle) {
-            return null;
-        }
-
         $purchased = $purchase?->is_purchased ?? $ownedByDefault;
 
         return [
@@ -267,24 +173,6 @@ class PurchaseBoard
             'is_shared' => false,
             'shared_with' => null,
         ];
-    }
-
-    /** The vehicle a line unlocks beyond its top, where one exists. */
-    private function successorOf(?WotVehicle $top): ?WotVehicle
-    {
-        if (! $top) {
-            return null;
-        }
-
-        // Cheapest first: a tier X can branch, and the plan should show the one
-        // that is actually next rather than an arbitrary sibling.
-        return collect(array_keys((array) ($top->next_tanks ?? [])))
-            ->map(fn ($id): ?WotVehicle => $this->tree->vehicles()->get((int) $id))
-            ->filter(fn (?WotVehicle $v): bool => $v !== null
-                && $v->tier > $top->tier
-                && $v->tier <= self::TOP_TIER)
-            ->sortBy('price_credit')
-            ->first();
     }
 
     /**

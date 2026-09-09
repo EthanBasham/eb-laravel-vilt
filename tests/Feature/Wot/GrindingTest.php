@@ -928,7 +928,7 @@ it('leaves out premiums, which sit outside the research tree', function () {
  * in the technical sense.
  */
 it('honours the tier floor when deciding what is a line', function () {
-    config()->set('wargaming.purchase_min_tier', 11);
+    config()->set('wargaming.line_min_tier', 11);
 
     techLine();
     $user = User::factory()->create();
