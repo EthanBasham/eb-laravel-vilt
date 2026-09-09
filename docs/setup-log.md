@@ -873,3 +873,87 @@ Pint also re-appended an import out of order in `PeriodStats` (`WotVehicle` afte
   which they obtain by crawling.
 
 Suite: **83 passed, 239 assertions.**
+
+---
+
+## 2026-09-09 — Grind tracker
+
+### What the API does and doesn't expose
+
+Established first, because it dictates the whole design:
+
+| wanted | available? |
+|---|---|
+| Lifetime XP earned per vehicle | **yes** — `tanks/stats.all.xp`, already stored |
+| Average XP per battle per vehicle | **yes** — `battle_avg_xp` |
+| The research tree | **yes** — `encyclopedia/vehicles.next_tanks` and `.modules_tree`, each carrying `price_xp` |
+| Account free XP | **yes** — private block |
+| **Unspent XP banked on a vehicle** | **no** |
+| **Which modules are already researched** | **no** |
+
+The private block is `credits`, `gold`, `free_xp`, `bonds`, `battle_life_time`, premium and ban
+status — checked directly against a live token. There is no per-vehicle XP pool and no elite
+flag anywhere in the public API.
+
+Coverage from the encyclopedia sync: 1,028 vehicles, of which 507 are premium (no research
+line) and **362 have a `next_tanks` entry** — the whole tech tree. All 1,028 carry a
+`modules_tree`.
+
+### The consequence, and the design that follows from it
+
+Because there is no unspent-XP figure to read, a grind cannot be *inferred* — it has to be
+**declared**. `wot_grinds.baseline_xp` stores the vehicle's lifetime XP at the moment the
+grind starts, and everything after is measured forward from that point.
+
+This is stated on the page itself rather than hidden: anything earned before the grind was
+added isn't counted, so a new grind reads pessimistically until its first unlock. A user who
+doesn't know that would reasonably conclude the numbers are broken.
+
+### The rate, which is the actually useful part
+
+A vehicle's lifetime average XP is a poor predictor — it includes every battle since the
+account was new, in a stock configuration, years ago. The snapshot history from the previous
+entry gives something much better: XP actually earned in that vehicle over the last 14 days.
+
+`GrindTracker` prefers the observed recent rate and falls back to the lifetime average,
+**labelling which one it used** (`rate_source`). Day estimates are projected *only* from an
+observed rate — a lifetime average says nothing about how often the vehicle is currently
+played, so turning it into "days remaining" would be inventing information.
+
+### Two bugs, both caught by tests, both quiet
+
+**Counting a lifetime total as recent activity.** When no snapshot existed from before the
+14-day window, the baseline fell through to zero — so `latest.xp - 0` treated the vehicle's
+entire career as if it happened in a fortnight. A vehicle with 477k lifetime XP reported ~917
+XP/battle instead of 500. Fixed by falling back to the *earliest capture on record* rather
+than zero: a snapshot's `xp` is a lifetime total, so the only valid baseline is another
+snapshot.
+
+**A partial select breaking `Model::is()`.** The rate query selected
+`['tank_id', 'captured_at', 'battles', 'statistics']` — no `id`. Every model therefore
+hydrated with a null primary key, and `Model::is()` compares keys, so it reported two
+completely different rows as the same one. The guard meant to skip vehicles with only a single
+capture instead skipped *every* vehicle, and the whole feature silently fell back to lifetime
+averages with no error anywhere. Worth remembering: **`is()` on partially-hydrated models
+without the key returns true.**
+
+### Verified live
+
+The grinds page offers **303 owned vehicles** that have research targets. Declaring
+M24 Chaffee → T37 produced: target 28,100 XP (the real cost from the tree), 0 earned (baseline
+is current XP, as designed), ~71 battles at 397 XP/battle labelled `lifetime`, and
+`days_remaining: null` — correctly, because one snapshot is not an interval. The test grind was
+removed afterwards; the account is left as it was found.
+
+Suite: **93 passed, 307 assertions.**
+
+### A mistake worth recording
+
+While debugging the period stats, a script run through `php artisan tinker` called
+`WotAccount::factory()`. **Tinker runs against the development database**, not an in-memory
+one, so it created a fake user and linked account in real data. It also caused a confusing
+symptom: `WotAccount::first()` returned the fake row (Postgres does not guarantee order without
+an `ORDER BY`), so a live API probe reported an expired token that was in fact fine.
+
+Removed, and the real account verified intact. Factories belong in tests; tinker against a real
+database should be read-only.
