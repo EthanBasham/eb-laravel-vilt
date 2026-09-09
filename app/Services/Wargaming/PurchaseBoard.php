@@ -22,6 +22,8 @@ class PurchaseBoard
     /** Tier XI sits above the tech tree's old ceiling; paths stop at X. */
     private const TOP_TIER = 11;
 
+    public function __construct(private readonly TechTree $tree) {}
+
     /**
      * @param  Collection<int, WotGrindTarget>  $targets
      * @return array<string, mixed>
@@ -38,6 +40,15 @@ class PurchaseBoard
         $successors = $this->successors($targets, $vehicles);
         $vehicles = $vehicles->union($successors);
 
+        // The lowest tier any line starts at. Lines that start higher get their
+        // missing lower tiers filled in down to here — no further, since a tier
+        // no line reaches would only produce a column of zeroes that the rule
+        // below immediately drops.
+        $floor = (int) ($targets->flatMap->steps->min('tier') ?? 0);
+
+        $ancestors = $this->ancestors($targets, $floor);
+        $vehicles = $vehicles->union($ancestors->flatten()->keyBy('tank_id'));
+
         $purchases = $account->tankPurchases()->get()->keyBy('tank_id');
 
         // A vehicle the account has battles in is one it owns, or owned. That
@@ -46,7 +57,7 @@ class PurchaseBoard
         $played = $account->vehicleSnapshots()->distinct()->pluck('tank_id')->flip();
 
         $rows = $targets
-            ->map(fn (WotGrindTarget $t): array => $this->row($t, $vehicles, $successors, $purchases, $played))
+            ->map(fn (WotGrindTarget $t): array => $this->row($t, $vehicles, $successors, $ancestors, $purchases, $played))
             // A line you have finished buying is not a shopping list.
             ->reject(fn (array $row): bool => $row['is_bought_out'])
             ->values();
@@ -78,12 +89,22 @@ class PurchaseBoard
         WotGrindTarget $target,
         Collection $vehicles,
         Collection $successors,
+        Collection $ancestors,
         Collection $purchases,
         Collection $played,
     ): array {
         $steps = $target->steps->sortBy('position')->values();
 
-        $cells = $steps->map(fn (WotGrindStep $s, int $i): array => $this->cell(
+        // Everything under the vehicle being played was researched through to
+        // get there, so it is owned whether or not it is still in the garage.
+        $cells = collect($ancestors->get($target->id, []))
+            ->map(fn (WotVehicle $v): ?array => $this->cell(
+                $v, $v->tank_id, $v->tier, $purchases->get($v->tank_id), true,
+            ))
+            ->filter()
+            ->values();
+
+        $cells = $cells->concat($steps->map(fn (WotGrindStep $s, int $i): array => $this->cell(
             $vehicles->get($s->tank_id),
             $s->tank_id,
             $s->tier,
@@ -91,7 +112,7 @@ class PurchaseBoard
             // Position zero is the vehicle the line is being ground in; a path
             // is truncated to start where the player already is.
             $played->has($s->tank_id) || $i === 0,
-        ))->filter()->values();
+        ))->filter())->values();
 
         if ($next = $successors->get($target->tank_id)) {
             $cells->push($this->cell(
@@ -192,14 +213,41 @@ class PurchaseBoard
     }
 
     /**
-     * The tier columns to render — only those a line actually reaches.
+     * The tier columns to render.
+     *
+     * A tier every visible line has already bought is dropped: the column would
+     * be a wall of zeroes saying nothing about what is left to spend. Cells at
+     * a dropped tier stay in the payload and simply go unrendered.
      *
      * @param  Collection<int, array<string, mixed>>  $rows
      * @return list<int>
      */
     private function tiers(Collection $rows): array
     {
-        return $rows->flatMap(fn (array $r): array => array_keys($r['cells']))
-            ->unique()->sort()->values()->all();
+        return $rows->flatMap(fn (array $r): array => array_values($r['cells']))
+            ->groupBy('tier')
+            ->reject(fn (Collection $cells): bool => $cells->every('is_purchased'))
+            ->keys()
+            ->map(fn ($tier): int => (int) $tier)
+            ->sort()->values()->all();
+    }
+
+    /**
+     * The vehicles below each line's starting tier, keyed by target id.
+     *
+     * @param  Collection<int, WotGrindTarget>  $targets
+     * @return Collection<int, list<WotVehicle>>
+     */
+    private function ancestors(Collection $targets, int $floor): Collection
+    {
+        return $targets->mapWithKeys(function (WotGrindTarget $t) use ($floor): array {
+            $first = $t->steps->sortBy('position')->first();
+
+            if (! $first || $first->tier <= $floor) {
+                return [$t->id => []];
+            }
+
+            return [$t->id => $this->tree->ancestorsOf($first->tank_id, $floor)];
+        });
     }
 }

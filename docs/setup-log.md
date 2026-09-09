@@ -1830,3 +1830,34 @@ so un-ticking the vehicle you are grinding in puts its price back on the bill
 instead of leaving a Buy button over a cost nothing counts.
 
 Suite: **169 passed, 779 assertions.**
+
+### Purchase board: empty cells, and columns that have outlived their use
+
+Two follow-ups.
+
+**Tiers below a line's start were blank, not zero.** `TechTree::pathTo()`
+truncates a path at the vehicle being played, so a line starting at tier IX has
+no tier VIII step — and the matrix rendered that as an empty cell, reading as
+"nothing here" when it means "bought long ago". You cannot reach a tier IX
+without researching the VIII, so those vehicles are owned whether or not they
+are still in the garage.
+
+New `TechTree::ancestorsOf($tankId, $downToTier)` walks the predecessor map
+downwards; `PurchaseBoard` prepends the result as cells that default to bought.
+The floor is the lowest tier any line actually starts at — going lower would
+only manufacture columns the next rule immediately drops.
+
+**A tier every line has bought is no longer a column.** `tiers()` now rejects
+any tier whose cells are all purchased. Those cells stay in the payload and
+simply go unrendered, so nothing is lost if one is later un-ticked. On the live
+board this drops tier VII entirely and leaves VIII–XI.
+
+Together these answer the same complaint from both ends: CS-63's tier VIII now
+reads `0` instead of blank, and tier VII — which was all zeroes — is gone.
+
+One test fixture had to be rewritten rather than patched. It marked a tier VIII
+unbought to keep that column alive while asserting the same tank read as bought
+on another line, which cannot happen: purchase state is per tank, not per line.
+The replacement gives the two lines genuinely different starting tiers instead.
+
+Suite: **171 passed, 817 assertions.**

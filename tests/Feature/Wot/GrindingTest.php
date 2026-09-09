@@ -463,9 +463,11 @@ it('lays the purchase board out as one column per tier', function () {
     purchaseLine($user);
 
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
-        ->where('purchase.tiers', [8, 9, 10])
+        // Tier VIII is the vehicle being ground in and the only one at that
+        // tier, so the whole column has been bought and does not render.
+        ->where('purchase.tiers', [9, 10])
         ->has('purchase.rows', 1)
-        // Position zero is the vehicle the line is ground in, so it is owned.
+        // The cell is still in the payload, just not in a column.
         ->where('purchase.rows.0.cells.8.is_purchased', true)
         ->where('purchase.rows.0.cells.9.is_purchased', false)
         ->where('purchase.rows.0.cells.9.is_unlocked', false)
@@ -556,7 +558,7 @@ it('adds the tier XI above a target without touching the research path', functio
     $ten->update(['next_tanks' => [$eleven->tank_id => 325_000]]);
 
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
-        ->where('purchase.tiers', [8, 9, 10, 11])
+        ->where('purchase.tiers', [9, 10, 11])
         ->where('purchase.rows.0.cells.11.name', 'Top XI')
         ->where('purchase.rows.0.credits_remaining', 16_900_000)
         // The grind path is untouched: still three steps, same XP.
@@ -584,4 +586,72 @@ it('rejects a tank the encyclopedia has never heard of', function () {
 
     $this->actingAs($user)->patch(route('wot.grinding.purchase', 999999), ['is_purchased' => true])
         ->assertNotFound();
+});
+
+it('drops a tier column once every line has bought that tier', function () {
+    $user = User::factory()->create();
+    purchaseLine($user);
+
+    $this->actingAs($user)->get(route('wot.grinding'))
+        ->assertInertia(fn ($page) => $page->where('purchase.tiers', [9, 10]));
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['is_purchased' => true]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('purchase.tiers', [10])
+        // Dropping the column must not drop the money: the tier X is still owed.
+        ->where('totals.credits_required', 6_100_000),
+    );
+});
+
+/**
+ * A path is truncated at the vehicle being played, so the tiers below it are
+ * absent from its steps. They are not absent from the player's history — you
+ * cannot reach a tier IX without researching the VIII — so they belong in the
+ * matrix as bought, not as empty cells.
+ */
+it('fills in the tiers a line has already researched past', function () {
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create();
+
+    $ten = WotVehicle::factory()->create(['tank_id' => 100, 'name' => 'Long X', 'tier' => 10,
+        'nation' => 'ussr', 'price_credit' => 6_100_000, 'next_tanks' => null]);
+    $otherTen = WotVehicle::factory()->create(['tank_id' => 101, 'name' => 'Short X', 'tier' => 10,
+        'nation' => 'ussr', 'price_credit' => 6_100_000, 'next_tanks' => null]);
+    $nine = WotVehicle::factory()->create(['tank_id' => 90, 'tier' => 9, 'nation' => 'ussr',
+        'price_credit' => 3_400_000, 'next_tanks' => [100 => 225_000, 101 => 225_000]]);
+    $eight = WotVehicle::factory()->create(['tank_id' => 80, 'tier' => 8, 'nation' => 'ussr',
+        'price_credit' => 2_400_000, 'next_tanks' => [90 => 149_400]]);
+    WotVehicle::factory()->create(['tank_id' => 70, 'tier' => 7, 'nation' => 'ussr',
+        'price_credit' => 1_400_000, 'next_tanks' => [80 => 98_000]]);
+
+    // The long line starts at tier VII, so its tier VIII is a step still to be
+    // bought — which is what keeps that column on the board at all.
+    $long = WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => 100]);
+    foreach ([[70, 7, 0], [80, 8, 1], [90, 9, 2], [100, 10, 3]] as [$tank, $tier, $position]) {
+        WotGrindStep::create(['wot_grind_target_id' => $long->id, 'tank_id' => $tank,
+            'tier' => $tier, 'position' => $position]);
+    }
+
+    // The short line branches off the same tier IX and has no steps below it.
+    $short = WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => 101]);
+    foreach ([[90, 9, 0], [101, 10, 1]] as [$tank, $tier, $position]) {
+        WotGrindStep::create(['wot_grind_target_id' => $short->id, 'tank_id' => $tank,
+            'tier' => $tier, 'position' => $position]);
+    }
+
+    // Same nation and tier, so rows come back in name order: Long X, Short X.
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        // Tier VII is owned on both lines and drops; tier VIII survives on the
+        // strength of the long line alone.
+        ->where('purchase.tiers', [8, 9, 10])
+        ->where('purchase.rows.0.name', 'Long X')
+        ->where('purchase.rows.0.cells.8.is_purchased', false)
+        ->where('purchase.rows.1.name', 'Short X')
+        // Never a step on this line; filled from the tree and read as bought.
+        ->where('purchase.rows.1.cells.8.tank_id', 80)
+        ->where('purchase.rows.1.cells.8.is_purchased', true)
+        // Filled-in tiers are already paid for and add nothing to the bill.
+        ->where('purchase.rows.1.credits_remaining', 6_100_000),
+    );
 });

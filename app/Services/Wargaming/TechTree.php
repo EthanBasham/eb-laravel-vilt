@@ -85,6 +85,37 @@ class TechTree
     }
 
     /**
+     * The vehicles below one on its line, lowest tier first, stopping at a tier.
+     *
+     * pathTo() truncates at the vehicle being played, so the tiers under it are
+     * absent from a plan's steps even though the player demonstrably researched
+     * through them to get there. The purchase board fills those back in, where
+     * a missing cell would otherwise read as "nothing here" rather than "long
+     * since bought".
+     *
+     * @return list<WotVehicle>
+     */
+    public function ancestorsOf(int $tankId, int $downToTier): array
+    {
+        $chain = [];
+        $current = $this->vehicles()->get($tankId);
+
+        // Same guard as pathTo: a cyclic tree must not hang the request.
+        for ($i = 0; $i < 12 && $current; $i++) {
+            $link = $this->predecessors()[$current->tank_id] ?? null;
+
+            if (! $link || $link['vehicle']->tier < $downToTier) {
+                break;
+            }
+
+            array_unshift($chain, $link['vehicle']);
+            $current = $link['vehicle'];
+        }
+
+        return $chain;
+    }
+
+    /**
      * @return Collection<int, WotVehicle>
      */
     public function vehicles(): Collection
