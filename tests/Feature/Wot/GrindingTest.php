@@ -1431,6 +1431,27 @@ it('picks the dearer chain when two guns both end a branch', function () {
     );
 });
 
+/**
+ * The KV-4's case: its 107 mm unlocks a turret, and that turret unlocks the
+ * 122 mm. A one-hop test sees no gun after the 107 mm and calls it the top.
+ */
+it('looks past a module of another kind to find the real top gun', function () {
+    $user = User::factory()->create();
+    gunChainTank($user);
+
+    // Mid gun -> turret -> a further gun, so the mid gun is not terminal.
+    WotVehicleModule::where('tank_id', 90)->where('module_id', 102)->update(['next_modules' => json_encode([104])]);
+    WotVehicleModule::where('tank_id', 90)->where('module_id', 104)->update(['next_modules' => json_encode([103])]);
+    WotVehicleModule::where('tank_id', 90)->where('module_id', 103)->update(['next_modules' => null]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('freexp.rows.0.cells.9.top_gun.name', 'Top Gun')
+        // The turret is on the way this time, so it is part of the chain.
+        ->where('freexp.rows.0.cells.9.top_gun.module_ids', [102, 104, 103])
+        ->where('freexp.rows.0.cells.9.top_gun.xp', 88_000),
+    );
+});
+
 it('will not let one account plan another account top gun', function () {
     $owner = User::factory()->create();
     $account = gunChainTank($owner);

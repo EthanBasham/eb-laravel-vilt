@@ -40,9 +40,15 @@ class ModuleTree
         $terminals = $modules
             ->where('type', 'vehicleGun')
             ->where('is_default', false)
-            // A gun that leads on to another gun is a step, not the top.
-            ->reject(fn (WotVehicleModule $g): bool => collect($g->next_modules ?? [])
-                ->contains(fn (int $id): bool => $gunIds->has($id)));
+            /*
+             * A gun with another gun anywhere downstream is a step, not the
+             * top — and "downstream" has to mean the whole graph rather than
+             * one hop, because a gun can lead to the next one through a module
+             * of a different kind. The KV-4 is exactly that: its 107 mm ZiS-24
+             * unlocks the KV-4-5 turret, which unlocks the 122 mm D-25T, so a
+             * one-hop test called the 107 mm a top gun.
+             */
+            ->reject(fn (WotVehicleModule $g): bool => $this->reaches($g->module_id, $gunIds, $byId));
 
         if ($terminals->isEmpty()) {
             return null;
@@ -63,6 +69,39 @@ class ModuleTree
             // tie is at least stable between requests.
             ->sortByDesc(fn (array $c): array => [$c['xp'], $byId->get($c['module_id'])->price_xp, $c['name']])
             ->first();
+    }
+
+    /**
+     * Whether any of the given modules sits downstream of this one.
+     *
+     * @param  Collection<int, int>  $targets  module ids, flipped to keys
+     * @param  Collection<int, WotVehicleModule>  $byId
+     */
+    private function reaches(int $from, Collection $targets, Collection $byId): bool
+    {
+        $seen = [$from => true];
+        $queue = $byId->get($from)?->next_modules ?? [];
+
+        // Same guarded breadth-first walk as chainTo, in the other direction.
+        while ($queue) {
+            $id = array_shift($queue);
+
+            if (isset($seen[$id])) {
+                continue;
+            }
+
+            $seen[$id] = true;
+
+            if ($targets->has($id)) {
+                return true;
+            }
+
+            foreach ($byId->get($id)?->next_modules ?? [] as $next) {
+                $queue[] = $next;
+            }
+        }
+
+        return false;
     }
 
     /**
