@@ -19,6 +19,7 @@ const props = defineProps({
     purchase: { type: Object, required: true },
     freexp: { type: Object, required: true },
     xp: { type: Object, required: true },
+    blueprints: { type: Object, required: true },
     options: { type: Array, default: () => [] },
 });
 
@@ -333,6 +334,55 @@ const xpTierTotal = (tier) => xpShownRows.value.reduce((sum, r) => sum + xpCellX
 const xpGrandTotal = computed(() => xpShownRows.value.reduce((sum, r) => sum + xpRowRemaining(r), 0));
 
 /*
+ * Blueprint filters.
+ *
+ * Fragments only discount something you have yet to research, so the Lines
+ * checkbox is XP Remaining's rather than Free XP's — a finished line is one
+ * they cannot help, and hiding it by default is the same judgement.
+ */
+const {
+    hiddenNations: bpHiddenNations,
+    hiddenTiers: bpHiddenTiers,
+    hide_done: bpHideDone,
+    toggleNation: bpToggleNation,
+    toggleTier: bpToggleTier,
+    clearNations: bpClearNations,
+    clearTiers: bpClearTiers,
+} = useBoardFilters('blueprints', props.settings.blueprints_filters, {
+    extra: { hide_done: true },
+});
+
+const blueprintNations = computed(() => nationsOf(props.blueprints.rows));
+
+const bpShownTiers = computed(() => props.blueprints.tiers.filter((t) => !bpHiddenTiers.value.includes(t)));
+
+// A shared cell is held and edited on the row that owns it, which keeps the row
+// totals summing to the grand total.
+const bpCellFragments = (cell) => (cell && !cell.is_shared ? cell.fragments : 0);
+const bpRowFragments = (row) => bpShownTiers.value.reduce((sum, t) => sum + bpCellFragments(row.cells[t]), 0);
+
+/*
+ * "Done" is about research, not about fragments: a line you have finished is
+ * one blueprints cannot help, however many you happen to hold against it. So
+ * this reads the XP board's rows rather than its own — the two boards are the
+ * same 67 lines in the same order, keyed the same way.
+ */
+const xpRowByKey = computed(() => Object.fromEntries(props.xp.rows.map((r) => [r.key, r])));
+
+// Every tier, not the visible ones: xpRowRemaining reads the XP tab's own tier
+// filter, and hiding a column over there must not decide what this tab shows.
+const bpLineDone = (row) => Object.values(xpRowByKey.value[row.key]?.cells ?? {})
+    .every((cell) => xpCellXp(cell) === 0);
+
+const bpHasDoneLines = computed(() => props.blueprints.rows.some(bpLineDone));
+
+const bpShownRows = computed(() => props.blueprints.rows.filter(
+    (r) => !bpHiddenNations.value.includes(r.nation) && !(bpHideDone.value && bpLineDone(r)),
+));
+const bpTierTotal = (tier) => bpShownRows.value.reduce((sum, r) => sum + bpCellFragments(r.cells[tier]), 0);
+const bpGrandTotal = computed(() => bpShownRows.value.reduce((sum, r) => sum + bpRowFragments(r), 0));
+
+/*
  * Credits shortfall is the number that decides whether a plan is realistic, so
  * it follows the board rather than the server's total.
  *
@@ -468,6 +518,92 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
                             </td>
                         </tr>
                     </tfoot>
+                </table>
+            </div>
+
+            <!-- The tracked targets, and what each path still needs.
+                 
+                 They live on this tab because it is the one about what you are
+                 actually doing: the other four are the tech tree, and a target
+                 is a plan laid over it rather than part of it.
+
+                 The per-step controls are down to banked XP and Playing. Module
+                 research, next-tank XP, fragments and credits all moved onto
+                 tree boards, keyed by tank rather than by step, and leaving
+                 second copies here would have been two ways to write one figure.
+            -->
+            <h3 class="mt-8 text-base">Targets</h3>
+
+            <div class="mt-2 overflow-x-auto border border-wot-border bg-wot-panel">
+                <table class="min-w-full divide-y divide-wot-border text-sm">
+                    <thead class="bg-wot-sunken">
+                        <tr>
+                            <th scope="col" class="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Target</th>
+                            <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">XP remaining</th>
+                            <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Steps</th>
+                            <th scope="col" class="w-24 px-4 py-3" />
+                        </tr>
+                    </thead>
+
+                    <tbody class="divide-y divide-wot-border-soft">
+                        <template v-for="t in targets" :key="t.id">
+                            <tr class="cursor-pointer hover:bg-wot-sunken" :class="t.is_complete ? 'opacity-50' : ''" @click="toggle(t.id)">
+                                <td class="px-4 py-2">
+                                    <span aria-hidden="true" class="me-1 inline-block w-3 text-wot-dim">{{ expanded.includes(t.id) ? '▾' : '▸' }}</span>
+                                    <NationFlag :nation="t.nation" class="me-2" />
+                                    <span class="text-wot-heading">{{ t.name }}</span>
+                                    <span class="ms-2 text-xs text-wot-dim">T{{ t.tier }}</span>
+                                </td>
+                                <td class="px-4 py-2 text-right tabular-nums text-wot-muted">{{ n(t.xp_remaining) }}</td>
+                                <td class="px-4 py-2 text-right tabular-nums text-wot-dim">{{ t.steps.length }}</td>
+                                <td class="px-4 py-2 text-right" @click.stop>
+                                    <button type="button" class="text-xs uppercase tracking-wider text-wot-dim hover:text-wot-good" @click="toggleComplete(t)">
+                                        {{ t.is_complete ? 'Reopen' : 'Done' }}
+                                    </button>
+                                    <button type="button" class="ms-2 text-xs uppercase tracking-wider text-wot-dim hover:text-wot-bad" @click="removeTarget(t)">
+                                        Remove
+                                    </button>
+                                </td>
+                            </tr>
+
+                            <tr v-if="expanded.includes(t.id)">
+                                <td colspan="4" class="bg-wot-sunken/60 px-4 py-3">
+                                    <table class="min-w-full text-xs">
+                                        <thead>
+                                            <tr class="text-wot-dim">
+                                                <th scope="col" class="py-1 text-left font-bold uppercase tracking-wider">Step</th>
+                                                <th scope="col" class="py-1 text-right font-bold uppercase tracking-wider">Banked</th>
+                                                <th scope="col" class="py-1 text-right font-bold uppercase tracking-wider">Playing</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr v-for="s in t.steps" :key="s.id" class="text-wot-muted">
+                                                <td class="py-1">
+                                                    <span class="text-wot-text">T{{ s.tier }} {{ s.name }}</span>
+                                                </td>
+                                                <td class="py-1 text-right"><EditableNumber :step-id="s.id" field="banked_xp" :model-value="s.banked_xp" /></td>
+                                                <td class="py-1 text-right">
+                                                    <input
+                                                        type="checkbox"
+                                                        class="border"
+                                                        :checked="s.is_active"
+                                                        :aria-label="`Currently playing ${s.name}`"
+                                                        @change="router.patch(`/wot/grinding/steps/${s.id}`, { is_active: $event.target.checked }, { preserveScroll: true, only: ['active', 'targets', 'totals'] })"
+                                                    >
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </td>
+                            </tr>
+                        </template>
+
+                        <tr v-if="!targets.length">
+                            <td colspan="4" class="px-4 py-8 text-center text-wot-dim">
+                                No targets yet. Add one below, or run <code>php artisan wot:import-grind-sheet</code>.
+                            </td>
+                        </tr>
+                    </tbody>
                 </table>
             </div>
         </section>
@@ -1079,113 +1215,149 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
         </section>
 
         <!-- 5. Blueprints -------------------------------------------------------
-             The last view still built from tracked targets rather than from the
-             tree, because fragments are held per vehicle and there is nothing in
-             the encyclopedia to lay them out against.
+             Fragments held, and nothing else. The simplest of the four boards:
+             one typed number per vehicle, because the encyclopedia publishes
+             neither the fragments a tank needs nor the discount they buy. What
+             they actually reduce the cost to is recorded on XP Remaining.
         -->
-        <section v-else class="mt-4" aria-labelledby="targets-heading">
-            <h2 id="targets-heading" class="sr-only">Blueprints</h2>
+        <section v-else class="mt-4" aria-labelledby="blueprints-heading">
+            <h2 id="blueprints-heading" class="sr-only">Blueprints</h2>
 
-            <div class="overflow-x-auto border border-wot-border bg-wot-panel">
-                <table class="min-w-full divide-y divide-wot-border text-sm">
+            <div class="mb-3 space-y-2 border border-wot-border bg-wot-panel p-3">
+                <div class="flex flex-wrap items-center gap-1.5">
+                    <span class="w-12 shrink-0 text-xs font-bold uppercase tracking-wider text-wot-dim">Nation</span>
+                    <button
+                        v-for="nation in blueprintNations"
+                        :key="nation"
+                        type="button"
+                        class="border p-1 leading-none transition-colors"
+                        :class="bpHiddenNations.includes(nation)
+                            ? 'border-wot-border opacity-30 hover:opacity-70'
+                            : 'border-wot-gold'"
+                        :aria-pressed="!bpHiddenNations.includes(nation)"
+                        @click="bpToggleNation(nation)"
+                    >
+                        <NationFlag :nation="nation" />
+                    </button>
+                    <button v-if="bpHiddenNations.length" type="button"
+                            class="ms-1 text-xs uppercase tracking-wider text-wot-dim hover:text-wot-text"
+                            @click="bpClearNations">
+                        All
+                    </button>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-1.5">
+                    <span class="w-12 shrink-0 text-xs font-bold uppercase tracking-wider text-wot-dim">Tier</span>
+                    <button
+                        v-for="tier in blueprints.tiers"
+                        :key="tier"
+                        type="button"
+                        class="min-w-9 border px-2 py-0.5 text-xs font-bold tracking-wider transition-colors"
+                        :class="bpHiddenTiers.includes(tier)
+                            ? 'border-wot-border text-wot-dim hover:text-wot-text'
+                            : 'border-wot-gold text-wot-gold'"
+                        :aria-pressed="!bpHiddenTiers.includes(tier)"
+                        :aria-label="`Tier ${ROMAN[tier]}`"
+                        @click="bpToggleTier(tier)"
+                    >
+                        {{ ROMAN[tier] }}
+                    </button>
+                    <button v-if="bpHiddenTiers.length" type="button"
+                            class="ms-1 text-xs uppercase tracking-wider text-wot-dim hover:text-wot-text"
+                            @click="bpClearTiers">
+                        All
+                    </button>
+                </div>
+
+                <!-- Fragments only discount something you have yet to research,
+                     so a line you have finished is a line they cannot help. Same
+                     polarity as XP Remaining's checkbox, and on by default for
+                     the same reason. -->
+                <div v-if="bpHasDoneLines" class="flex flex-wrap items-center gap-1.5">
+                    <span class="w-12 shrink-0 text-xs font-bold uppercase tracking-wider text-wot-dim">Lines</span>
+                    <label class="flex items-center gap-2 text-xs text-wot-text">
+                        <input v-model="bpHideDone" type="checkbox" class="border">
+                        Hide lines with nothing left to research
+                    </label>
+                </div>
+            </div>
+
+            <p v-if="!bpShownRows.length" class="border border-dashed border-wot-border p-8 text-center text-sm text-wot-dim">
+                {{ bpHideDone ? 'Nothing left to research in the selected nations and tiers.' : 'No lines in the selected nations and tiers.' }}
+            </p>
+
+            <div v-else class="overflow-x-auto border border-wot-border bg-wot-panel">
+                <table class="min-w-full border-separate border-spacing-0 divide-y divide-wot-border text-sm">
                     <thead class="bg-wot-sunken">
                         <tr>
-                            <th scope="col" class="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Target</th>
-                            <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Fragments</th>
-                            <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Full research XP</th>
-                            <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Steps</th>
-                            <th scope="col" class="w-24 px-4 py-3" />
+                            <th scope="col" class="sticky left-0 z-20 whitespace-nowrap border-e border-wot-border bg-wot-sunken-solid px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Line</th>
+                            <th v-for="tier in bpShownTiers" :key="tier" scope="col"
+                                class="px-3 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">
+                                Tier {{ ROMAN[tier] }}
+                            </th>
+                            <th scope="col" class="sticky right-0 z-20 whitespace-nowrap border-s border-wot-border bg-wot-sunken-solid px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Held</th>
                         </tr>
                     </thead>
 
                     <tbody class="divide-y divide-wot-border-soft">
-                        <template v-for="t in targets" :key="t.id">
-                            <tr class="cursor-pointer hover:bg-wot-sunken" :class="t.is_complete ? 'opacity-50' : ''" @click="toggle(t.id)">
-                                <td class="px-4 py-2">
-                                    <span aria-hidden="true" class="me-1 inline-block w-3 text-wot-dim">{{ expanded.includes(t.id) ? '▾' : '▸' }}</span>
-                                    <NationFlag :nation="t.nation" class="me-2" />
-                                    <span class="text-wot-heading">{{ t.name }}</span>
-                                    <span class="ms-2 text-xs text-wot-dim">T{{ t.tier }}</span>
-                                </td>
+                        <tr v-for="row in bpShownRows" :key="row.key" class="group hover:bg-wot-sunken">
+                            <td class="sticky left-0 z-10 whitespace-nowrap border-e border-wot-border bg-wot-panel-solid px-4 py-2 group-hover:bg-wot-sunken-solid">
+                                <NationFlag :nation="row.nation" class="me-2" />
+                                <span class="text-wot-heading">{{ row.name }}</span>
+                                <VehicleTypeIcon :type="row.type" class="ms-2 text-wot-dim" />
+                            </td>
 
-                                <td class="px-4 py-2 text-right tabular-nums text-wot-gold">{{ t.blueprint_fragments }}</td>
-                                <td class="px-4 py-2 text-right tabular-nums text-wot-muted">
-                                    {{ n(t.steps.filter((s) => s.research_xp).slice(-1)[0]?.research_xp) }}
-                                </td>
+                            <td v-for="tier in bpShownTiers" :key="tier" class="px-3 py-2 text-right align-top">
+                                <template v-if="row.cells[tier]">
+                                    <!-- A starter vehicle is researched from
+                                         nothing, so fragments have nothing to
+                                         discount. -->
+                                    <span
+                                        v-if="!row.cells[tier].is_researchable"
+                                        class="text-wot-muted"
+                                        :title="`${row.cells[tier].name} — the start of the line, nothing to research`"
+                                    >—</span>
 
-                                <td class="px-4 py-2 text-right tabular-nums text-wot-dim">{{ t.steps.length }}</td>
-                                <td class="px-4 py-2 text-right" @click.stop>
-                                    <button type="button" class="text-xs uppercase tracking-wider text-wot-dim hover:text-wot-good" @click="toggleComplete(t)">
-                                        {{ t.is_complete ? 'Reopen' : 'Done' }}
-                                    </button>
-                                    <button type="button" class="ms-2 text-xs uppercase tracking-wider text-wot-dim hover:text-wot-bad" @click="removeTarget(t)">
-                                        Remove
-                                    </button>
-                                </td>
-                            </tr>
+                                    <!-- Shared with a line above, where it is
+                                         the editable one. -->
+                                    <span
+                                        v-else-if="row.cells[tier].is_shared"
+                                        class="tabular-nums text-wot-dim/60"
+                                        :title="`${row.cells[tier].name} — counted and edited on ${row.cells[tier].shared_with}.`"
+                                    >
+                                        {{ n(row.cells[tier].fragments) }}
+                                    </span>
 
-                            <tr v-if="expanded.includes(t.id)">
-                                <td colspan="5" class="bg-wot-sunken/60 px-4 py-3">
-                                    <table class="min-w-full text-xs">
-                                        <thead>
-                                            <tr class="text-wot-dim">
-                                                <th scope="col" class="py-1 text-left font-bold uppercase tracking-wider">Step</th>
-                                                <th scope="col" class="py-1 text-right font-bold uppercase tracking-wider">Modules</th>
-                                                <th scope="col" class="py-1 text-right font-bold uppercase tracking-wider">Next tank XP</th>
-                                                <th scope="col" class="py-1 text-right font-bold uppercase tracking-wider">Banked</th>
-                                                <th scope="col" class="py-1 text-right font-bold uppercase tracking-wider">Frags</th>
-                                                <th scope="col" class="py-1 text-right font-bold uppercase tracking-wider">Credits</th>
-                                                <th scope="col" class="py-1 text-right font-bold uppercase tracking-wider">Playing</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <tr v-for="s in t.steps" :key="s.id" class="text-wot-muted">
-                                                <td class="py-1">
-                                                    <span class="text-wot-text">T{{ s.tier }} {{ s.name }}</span>
-                                                    <!-- The API's undiscounted price, shown when a
-                                                         blueprint-discounted figure has been entered. -->
-                                                    <span v-if="s.research_xp && s.research_xp_remaining !== null && s.research_xp !== s.research_xp_remaining"
-                                                          class="ms-2 text-wot-dim">full {{ n(s.research_xp) }}</span>
-                                                </td>
-                                                <td class="py-1 text-right">
-                                                    <!-- Editable only where the encyclopedia has no
-                                                         modules for this vehicle; otherwise the total
-                                                         is a consequence of the ticks, and typing over
-                                                         it would be undone by the next one. -->
-                                                    <ModulePicker
-                                                        v-if="s.modules.length"
-                                                        :step-id="s.id"
-                                                        :modules="s.modules"
-                                                        :outstanding="s.module_xp_remaining"
-                                                    />
-                                                    <EditableNumber v-else :step-id="s.id" field="module_xp_remaining" :model-value="s.module_xp_remaining" />
-                                                </td>
-                                                <td class="py-1 text-right"><EditableNumber :step-id="s.id" field="research_xp_remaining" :model-value="s.research_xp_remaining ?? s.research_xp ?? 0" /></td>
-                                                <td class="py-1 text-right"><EditableNumber :step-id="s.id" field="banked_xp" :model-value="s.banked_xp" /></td>
-                                                <td class="py-1 text-right"><EditableNumber :step-id="s.id" field="blueprint_fragments" :model-value="s.blueprint_fragments" /></td>
-                                                <td class="py-1 text-right tabular-nums">{{ n(s.price_credit) }}</td>
-                                                <td class="py-1 text-right">
-                                                    <input
-                                                        type="checkbox"
-                                                        class="border"
-                                                        :checked="s.is_active"
-                                                        :aria-label="`Currently playing ${s.name}`"
-                                                        @change="router.patch(`/wot/grinding/steps/${s.id}`, { is_active: $event.target.checked }, { preserveScroll: true, only: ['active', 'targets', 'totals'] })"
-                                                    >
-                                                </td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </td>
-                            </tr>
-                        </template>
+                                    <EditableNumber
+                                        v-else
+                                        :field="'blueprint_fragments'"
+                                        :model-value="row.cells[tier].fragments"
+                                        :url="`/wot/grinding/purchases/${row.cells[tier].tank_id}`"
+                                        :only="['blueprints', 'totals']"
+                                        :tone="row.cells[tier].is_unlocked
+                                            ? 'border-wot-border bg-wot-sunken text-wot-dim/50'
+                                            : 'border-wot-border bg-wot-sunken text-wot-text'"
+                                    />
+                                </template>
+                                <span v-else class="text-wot-muted">·</span>
+                            </td>
 
-                        <tr v-if="!targets.length">
-                            <td colspan="5" class="px-4 py-8 text-center text-wot-dim">
-                                No targets yet. Add one below, or run <code>php artisan wot:import-grind-sheet</code>.
+                            <td class="sticky right-0 z-10 whitespace-nowrap border-s border-wot-border bg-wot-panel-solid px-4 py-2 text-right tabular-nums group-hover:bg-wot-sunken-solid"
+                                :class="bpRowFragments(row) ? 'text-wot-gold' : 'text-wot-dim'">
+                                {{ n(bpRowFragments(row)) }}
                             </td>
                         </tr>
                     </tbody>
+
+                    <tfoot v-if="bpShownRows.length > 1" class="border-t-2 border-wot-border bg-wot-sunken">
+                        <tr>
+                            <th scope="row" class="sticky left-0 z-20 border-e border-wot-border bg-wot-sunken-solid px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Total</th>
+                            <td v-for="tier in bpShownTiers" :key="tier" class="px-3 py-3 text-right tabular-nums text-wot-muted">
+                                {{ n(bpTierTotal(tier)) }}
+                            </td>
+                            <td class="sticky right-0 z-20 border-s border-wot-border bg-wot-sunken-solid px-4 py-3 text-right tabular-nums font-bold text-wot-heading">{{ n(bpGrandTotal) }}</td>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
         </section>

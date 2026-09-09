@@ -24,6 +24,9 @@ class UpdateTankPurchaseRequest extends FormRequest
             // Nullable so clearing the field restores the encyclopedia price
             // rather than recording that the tank is free.
             'price_credit' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:100000000'],
+            // Reference only — what you hold, not what it buys. The ceiling is
+            // headroom rather than a game rule.
+            'blueprint_fragments' => ['sometimes', 'integer', 'min:0', 'max:2000'],
         ];
     }
 }

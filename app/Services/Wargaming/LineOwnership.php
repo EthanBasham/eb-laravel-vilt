@@ -52,7 +52,14 @@ class LineOwnership
             $purchase = $purchases->get($vehicle->tank_id);
             $purchased = $purchase?->is_purchased ?? $played->has($vehicle->tank_id);
 
-            if ($owned && ! $purchases->has($vehicle->tank_id)) {
+            /*
+             * Suppressed by a stated ownership, not by a row.
+             *
+             * The row also carries a blueprint-discounted research cost and a
+             * fragment count, and typing either says nothing about whether you
+             * own the tank — so is_purchased is null until something does.
+             */
+            if ($owned && $purchase?->is_purchased === null) {
                 $purchased = true;
             }
 

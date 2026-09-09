@@ -197,7 +197,6 @@ it('rejects nonsense on the manual fields', function (array $payload) {
     $this->actingAs($user)->patch(route('wot.grinding.step', $step), $payload)->assertSessionHasErrors();
 })->with([
     'negative banked' => [['banked_xp' => -1]],
-    'too many fragments' => [['blueprint_fragments' => 5000]],
 ]);
 
 it('offers only researchable vehicles as new targets', function () {
@@ -1111,7 +1110,7 @@ it('refuses filters for a board that does not exist', function () {
     $user = User::factory()->create();
     WotAccount::factory()->for($user)->create();
 
-    $this->actingAs($user)->patch(route('wot.grinding.filters'), ['board' => 'blueprints', 'hide_owned' => true])
+    $this->actingAs($user)->patch(route('wot.grinding.filters'), ['board' => 'active', 'hide_owned' => true])
         ->assertSessionHasErrors('board');
 });
 
@@ -1797,4 +1796,146 @@ it('leaves the top gun button nothing to add once the line is assumed finished',
     $this->actingAs($user)->patch(route('wot.grinding.top-gun', 90))->assertRedirect();
 
     expect(WotTankModule::where('wot_account_id', $account->id)->count())->toBe(0);
+});
+
+it('lays the Blueprints board out as fragments per vehicle', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('blueprints.tiers', [8, 9, 10])
+        ->has('blueprints.rows', 1)
+        // The bottom of the line is researched from nothing, so fragments have
+        // nothing to discount there.
+        ->where('blueprints.rows.0.cells.8.is_researchable', false)
+        ->where('blueprints.rows.0.cells.9.is_researchable', true)
+        ->where('blueprints.rows.0.cells.9.fragments', 0)
+        ->where('blueprints.rows.0.fragments', 0)
+        ->where('totals.blueprint_fragments', 0),
+    );
+});
+
+it('records fragments against a vehicle', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['blueprint_fragments' => 42])
+        ->assertRedirect();
+
+    expect(WotTankPurchase::where('wot_account_id', $account->id)->where('tank_id', 90)->first()->blueprint_fragments)
+        ->toBe(42);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('blueprints.rows.0.cells.9.fragments', 42)
+        ->where('blueprints.rows.0.fragments', 42)
+        ->where('blueprints.blueprint_fragments', 42)
+        ->where('totals.blueprint_fragments', 42),
+    );
+});
+
+/**
+ * Fragments are held against a tank, so a tank on two lines holds one pile.
+ */
+it('counts a shared vehicle fragments on one row only', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $nation = WotVehicle::where('tank_id', 100)->value('nation');
+    WotVehicle::factory()->create(['tank_id' => 101, 'name' => 'Other X', 'short_name' => 'Oth X', 'tier' => 10, 'nation' => $nation, 'next_tanks' => null]);
+    WotVehicle::where('tank_id', 90)->update(['next_tanks' => json_encode([100 => 225_000, 101 => 240_000])]);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['blueprint_fragments' => 12]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->has('blueprints.rows', 2)
+        ->where('blueprints.rows.0.cells.9.is_shared', false)
+        ->where('blueprints.rows.0.fragments', 12)
+        ->where('blueprints.rows.1.cells.9.is_shared', true)
+        ->where('blueprints.rows.1.cells.9.shared_with', 'Oth X')
+        ->where('blueprints.rows.1.fragments', 0)
+        ->where('totals.blueprint_fragments', 12),
+    );
+});
+
+/**
+ * A researched vehicle still shows what was held — it is a record worth keeping
+ * — but the board greys it, because fragments buy nothing there any more.
+ */
+it('still reports fragments on a vehicle already researched', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+    played($account, 100);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['blueprint_fragments' => 7]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('blueprints.rows.0.cells.9.is_unlocked', true)
+        ->where('blueprints.rows.0.cells.9.fragments', 7),
+    );
+});
+
+it('rejects a fragment count the board could never produce', function (array $payload) {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), $payload)->assertSessionHasErrors();
+})->with([
+    'negative' => [['blueprint_fragments' => -1]],
+    'absurd' => [['blueprint_fragments' => 5000]],
+]);
+
+it('remembers the Blueprints filters under their own board key', function () {
+    $user = User::factory()->create();
+    WotAccount::factory()->for($user)->create();
+
+    $this->actingAs($user)->patch(route('wot.grinding.filters'), [
+        'board' => 'blueprints', 'hidden_nations' => ['china'], 'hide_done' => false,
+    ])->assertNoContent();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('settings.blueprints_filters.hidden_nations', ['china'])
+        ->where('settings.blueprints_filters.hide_done', false)
+        ->where('settings.xp_filters', null),
+    );
+});
+
+/**
+ * wot_tank_purchases holds three unrelated things about a vehicle now, and only
+ * one of them is a claim about ownership. Recording a discount or a fragment
+ * count must not stop the play-history back-fill settling the tank.
+ */
+it('does not un-own a tank by recording a figure against it', function (string $field, int $value) {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+    played($account, 100);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(
+        fn ($page) => $page->where('purchase.rows.0.cells.9.is_purchased', true),
+    );
+
+    $route = $field === 'research_xp' ? 'wot.grinding.research-xp' : 'wot.grinding.purchase';
+    $this->actingAs($user)->patch(route($route, 90), [$field => $value])->assertRedirect();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        // Still settled, on both boards that ask.
+        ->where('purchase.rows.0.cells.9.is_purchased', true)
+        ->where('xp.rows.0.cells.8.unlocks.is_unlocked', true),
+    );
+})->with([
+    'a blueprint discount' => ['research_xp', 60_000],
+    'a fragment count' => ['blueprint_fragments', 12],
+]);
+
+it('still lets an explicit un-tick beat the back-fill', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+    played($account, 100);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['is_purchased' => false]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('purchase.rows.0.cells.9.is_purchased', false)
+        // Un-buying hands back the researched state rather than dropping both.
+        ->where('purchase.rows.0.cells.9.is_unlocked', true),
+    );
 });

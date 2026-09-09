@@ -17,7 +17,7 @@ use Illuminate\Support\Collection;
  */
 #[Fillable([
     'wot_grind_target_id', 'tank_id', 'tier', 'position', 'research_xp', 'research_xp_remaining',
-    'module_xp_remaining', 'banked_xp', 'blueprint_fragments', 'price_credit', 'is_active',
+    'module_xp_remaining', 'banked_xp', 'price_credit', 'is_active',
     'researched_modules',
 ])]
 class WotGrindStep extends Model
@@ -37,7 +37,6 @@ class WotGrindStep extends Model
             'research_xp_remaining' => 'integer',
             'module_xp_remaining' => 'integer',
             'banked_xp' => 'integer',
-            'blueprint_fragments' => 'integer',
             'price_credit' => 'integer',
             'is_active' => 'boolean',
             'researched_modules' => 'array',

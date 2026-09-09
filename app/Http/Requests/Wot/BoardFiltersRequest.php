@@ -29,7 +29,7 @@ class BoardFiltersRequest extends FormRequest
              * the common case — "nothing hidden" — rather than a missing value.
              * present, not required, for that reason.
              */
-            'board' => ['required', Rule::in(['purchase', 'freexp', 'xp'])],
+            'board' => ['required', Rule::in(['purchase', 'freexp', 'xp', 'blueprints'])],
             'hidden_nations' => ['sometimes', 'present', 'array', 'max:50'],
             'hidden_nations.*' => [Rule::in(array_keys((array) config('wargaming.nations')))],
             'hidden_tiers' => ['sometimes', 'present', 'array', 'max:20'],

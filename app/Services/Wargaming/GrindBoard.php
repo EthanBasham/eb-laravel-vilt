@@ -22,6 +22,7 @@ class GrindBoard
         private readonly PurchaseBoard $purchases,
         private readonly FreeXpBoard $freeXp,
         private readonly XpBoard $xp,
+        private readonly BlueprintBoard $blueprints,
     ) {}
 
     /**
@@ -56,12 +57,14 @@ class GrindBoard
         $purchase = $this->purchases->for($account);
         $freexp = $this->freeXp->for($account);
         $xp = $this->xp->for($account);
+        $blueprints = $this->blueprints->for($account);
 
         return [
             'active' => $this->active($activeSteps, $targets, $vehicles),
             'purchase' => $purchase,
             'freexp' => $freexp,
             'xp' => $xp,
+            'blueprints' => $blueprints,
             'targets' => $targets->map(fn (WotGrindTarget $t): array => $this->target($t, $vehicles))->values()->all(),
             'settings' => [
                 'credits_available' => (int) $settings->credits_available,
@@ -74,6 +77,7 @@ class GrindBoard
                 'purchase_filters' => $settings->purchase_filters,
                 'freexp_filters' => $settings->freexp_filters,
                 'xp_filters' => $settings->xp_filters,
+                'blueprints_filters' => $settings->blueprints_filters,
             ],
             'totals' => $this->totals(
                 $targets,
@@ -81,6 +85,7 @@ class GrindBoard
                 $purchase['credits_required'],
                 $freexp['free_xp_planned'],
                 $xp['xp_remaining'],
+                $blueprints['blueprint_fragments'],
             ),
         ];
     }
@@ -158,7 +163,6 @@ class GrindBoard
             'notes' => $target->notes,
             'xp_required' => $target->steps->sum(fn (WotGrindStep $s): int => $s->xpRequired()),
             'xp_remaining' => $target->xpRemaining(),
-            'blueprint_fragments' => (int) $target->steps->sum('blueprint_fragments'),
             'steps' => $target->steps->map(fn (WotGrindStep $s): array => [
                 'id' => $s->id,
                 'tank_id' => $s->tank_id,
@@ -170,7 +174,6 @@ class GrindBoard
                 'research_cost' => $s->researchCost(),
                 'module_xp_remaining' => $s->module_xp_remaining,
                 'banked_xp' => $s->banked_xp,
-                'blueprint_fragments' => $s->blueprint_fragments,
                 'price_credit' => $s->price_credit,
                 'is_active' => $s->is_active,
                 'xp_required' => $s->xpRequired(),
@@ -192,6 +195,7 @@ class GrindBoard
         int $creditsRequired,
         int $freeXpPlanned,
         int $xpRemaining,
+        int $blueprintFragments,
     ): array {
         $open = $targets->where('is_complete', false);
 
@@ -213,7 +217,7 @@ class GrindBoard
             'xp_remaining' => $xpRemaining,
             'free_xp_planned' => $freeXpPlanned,
             'credits_required' => $creditsRequired,
-            'blueprint_fragments' => (int) $targets->flatMap->steps->sum('blueprint_fragments'),
+            'blueprint_fragments' => $blueprintFragments,
             'banked_xp' => (int) $targets->flatMap->steps->sum('banked_xp'),
         ];
     }
