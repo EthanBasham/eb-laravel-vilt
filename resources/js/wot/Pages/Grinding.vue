@@ -1190,12 +1190,15 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
             </div>
         </section>
 
-        <!-- The purchase board is a shopping list, and both forms below ask
-             questions that belong to the grind rather than to the list. Note the
-             consequence: credits_available is only editable from another tab,
-             even though the shortfall under Credits needed is measured against
-             it here. -->
-        <div v-if="view !== 'purchase'" class="mt-8 grid gap-6 lg:grid-cols-2">
+        <!-- Active Grinding only. The other four tabs are the tech tree laid
+             out one way or another, and neither adding a grind target nor
+             typing a credit balance is a question you ask of the tree — they
+             belong to what you are playing now, which is what this tab is.
+
+             Note the consequence: credits_available is only editable here, even
+             though the shortfall under Credits needed is measured against it on
+             every tab. -->
+        <div v-if="view === 'active'" class="mt-8 grid gap-6 lg:grid-cols-2">
             <form class="border border-wot-border bg-wot-panel p-4" @submit.prevent="addTarget">
                 <h2 class="text-base">Add a target</h2>
                 <p class="mt-1 text-xs text-wot-dim">The path is built from the tech tree, starting at the last vehicle you've played.</p>
