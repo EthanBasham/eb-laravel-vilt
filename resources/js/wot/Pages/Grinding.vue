@@ -6,6 +6,7 @@ import AppShell from '../Components/AppShell.vue';
 import EditableNumber from '../Components/EditableNumber.vue';
 import ModulePicker from '../Components/ModulePicker.vue';
 import NationFlag from '../Components/NationFlag.vue';
+import VehicleTypeIcon from '../Components/VehicleTypeIcon.vue';
 
 const props = defineProps({
     active: { type: Array, default: () => [] },
@@ -419,6 +420,7 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
                                 <td class="sticky left-0 z-10 whitespace-nowrap border-e border-wot-border bg-wot-panel-solid px-4 py-2 group-hover:bg-wot-sunken-solid">
                                     <NationFlag :nation="row.nation" class="me-2" />
                                     <span class="text-wot-heading">{{ row.name }}</span>
+                                    <VehicleTypeIcon :type="row.type" class="ms-2 text-wot-dim" />
                                 </td>
 
                                 <td v-for="tier in shownTiers" :key="tier" class="px-3 py-2 text-right align-top">

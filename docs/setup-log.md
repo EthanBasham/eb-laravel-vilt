@@ -2253,6 +2253,98 @@ it comes back as a JS module with the CSS as an escaped string on one line, so
 price text "was already green" came from reading `:tone` rather than from what
 painted, and the AppShell rule above meant it never had been.
 
+## 2026-09-09 — Vehicle-type art self-hosted for the Blueprints/Grinding icons
+
+User wanted icons for the five WoT vehicle classes (`lightTank`, `mediumTank`, `heavyTank`,
+`AT-SPG`, `SPG` — the values `WotVehicle.type` actually holds) to use on the Grinding page.
+No icon library, generic or WoT-specific, has these — "light tank" isn't a shape anyone but
+Wargaming draws, so a Tabler/Lucide/etc. set can only offer role metaphors (crosshair for a
+TD, shield for a heavy), not the real symbol. Compared that option against pulling
+Wargaming's own art; user chose WG's art, same call as "Nation flags replace nation
+slugs" above.
+
+Found via the public tankopedia page's network requests, not documented anywhere:
+
+    https://na-wotp.wgcdn.co/static/6.16.0_bbf399/wotp_static/img/tankopedia_new/
+      frontend/scss/tankopedia-main/img/{lighttank,mediumtank,heavytank,at-spg,spg}.png
+
+Same CDN host and same stale build hash (`6.16.0_bbf399`) as the nation flags, different
+path underneath — confirms the hash is pinned per static deploy rather than per asset type,
+so this path will 404 whenever WG's next frontend deploy rotates it, exactly like the flags.
+All five returned 200, 194×132 PNGs, 4–8 KB each. Self-hosted under
+`public/images/vehicle-types/` (not `.gitignore`d, same as `public/images/nations/`) rather
+than hot-linked, for that reason.
+
+**These are full painted illustrations of a representative tank per class, not a compact
+badge** — each carries the small in-game class glyph (diamond, chevron, etc.) floating above
+the vehicle, but only baked into this composite art; no standalone badge asset was found
+anywhere on WG's CDN. Fine for a legend or a larger "what is this class" callout; too
+detailed to drop inline into a table row at icon size — that still wants a decision before
+wiring into `Grinding.vue`.
+
+No Nazi-flag-style content in any of the five (unlike `germany.png` — see "Nation flags
+replace nation slugs" above) — checked all five by eye before committing them.
+
+### Wired into Tanks to Purchase
+
+User wanted the icon inline after all, at the size the illustrations were flagged above as
+too detailed for. Wired it in as-is rather than cropping or re-picking icons — it reads fine
+scaled to `NationFlag`-sized (16×24px) in practice, so the earlier concern didn't hold up once
+tried on screen.
+
+- `WotVehicle.type` (`lightTank`/`mediumTank`/`heavyTank`/`AT-SPG`/`SPG`, the API's own
+  values, already a column) is now surfaced on `PurchaseBoard`'s row payload as `type`,
+  read off `$namedBy` — the same vehicle the row's own `name` comes from — rather than the
+  row's tier-VIII floor, so the icon always matches the name next to it.
+- New `VehicleTypeIcon.vue`, mirroring `NationFlag.vue`'s shape: a local map from API value
+  to filename/label (no `HandleInertiaRequests` sharing needed here, unlike nations — these
+  five values are fixed by the game's own rules, not something a future patch adds to).
+  Renders nothing for an unrecognised type rather than falling back to text, since the name
+  and tier already carry the row on their own.
+- Placed right of the row name in the Tanks to Purchase table only (`Grinding.vue`'s other
+  tank-name row, on the Active Grinding tab, was left alone — not asked for).
+- `techLine()`'s tier X fixture gained an explicit `type: 'mediumTank'` (it was random via
+  the factory before) so the new assertion in "lays the purchase board out as one column per
+  tier" isn't flaky. **51 passed, 429 assertions.**
+
+## 2026-09-09 — The tankopedia illustrations were the wrong asset; the real icon was CSS-only
+
+User flagged the icons wired in above as wrong on sight. They were: `tankopedia-main/img/
+{type}.png` is real WG art, correctly named, but it's a full painted tank illustration meant
+for a landing-page filter *button*, not a compact badge. At 16×24px five different tan/green
+paint jobs collapse into indistinguishable blobs — confirmed by actually resizing one and
+looking, which should have happened before wiring it in rather than after.
+
+The icon actually shown in the tech-tree nav (`ico-vehicle-type ico-vehicle-type__lighttank`,
+per the user pointing at the class name directly) isn't a separate file at all. It's an inline
+base64 SVG baked into a `background` rule inside WG's compiled `main.css`
+(`na-wotp.wgcdn.co/static/6.16.0_bbf399/wotp_static/css/main.css`, 2 MB, one line) — a static
+scan of the page's `<img>`/asset references was never going to find it, because it isn't one.
+Decoding `.ico-vehicle-type__{lighttank,mediumtank,heavytank,at-spg,spg}` turned up five tiny
+single-path shapes matching the game's real class glyphs: a diamond for light, a stacked
+double-diamond for medium, a triple-chevron for heavy, a downward triangle for a tank
+destroyer, a square for SPG — the actual small badges the composite illustrations had been
+carrying (unusably tiny) in their corner the whole time.
+
+**Fixed:**
+- `public/images/vehicle-types/*.svg` replaced with the five decoded SVGs (a few hundred
+  bytes each, vs. 4–8 KB PNGs), `fill` changed from WG's tan (`#DFD9B7`) to `currentColor`.
+- `VehicleTypeIcon.vue` no longer renders an `<img src>` — an external SVG referenced that way
+  can't inherit `currentColor` in any browser, so the shapes are now inlined directly in the
+  component's template (path data + viewBox per type, copied from the decoded files) and
+  colored via a wrapping `text-wot-dim` class, matching how every other muted label on the row
+  (the tier suffix, dim text) already gets its color. The files under `public/images/
+  vehicle-types/` are kept anyway, as a record of where the shapes came from, same spirit as
+  keeping `germany.png` as a committed asset rather than only in a generator script.
+- No backend or test change — `type` was already the right field, only the art was wrong.
+
+**Lesson:** a name like `ico-vehicle-type` or a filename like `at-spg.png` reads as "the
+thing," but WG's frontend serves the same semantic label from more than one asset shaped for
+different jobs (landing-page filter vs. inline badge). Confirm by rendering at the actual
+target size before wiring in, not after — the same "reading a class off the source does not
+mean it renders" trap as above, one asset pipeline over.
+
+
 ## 2026-09-09 — Tanks to Purchase covers the whole tree, and shares are counted once
 
 Two changes that only make sense together: the board now reaches tier I, and a vehicle sitting on
