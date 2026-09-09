@@ -1926,6 +1926,12 @@ the same time: with nothing hidden they sum to the figure the server computed
 independently (12,730,000 + 49,870,000 + 244,000,000 + 192,400,000 =
 499,000,000), which is the check that the client arithmetic matches PurchaseBoard.
 
+A row is hidden once the visible tiers hold nothing it still has to pay for —
+the same rule the server already applies to a bought-out line, applied to the
+tiers on screen rather than to all of them. Deselecting tier XI takes the live
+board from 55 rows to 42; selecting tier XI alone leaves 26. With every tier on
+the count is unchanged at 55, so nothing is hidden at rest.
+
 The headline "Credits needed" card deliberately does *not* follow the filters —
 it is a page-level summary rendered on all five tabs, and a tab-local filter
 should not silently rewrite it.

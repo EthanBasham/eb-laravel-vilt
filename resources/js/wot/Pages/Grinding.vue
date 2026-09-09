@@ -93,12 +93,18 @@ const purchaseNations = computed(() => {
 });
 
 const shownTiers = computed(() => props.purchase.tiers.filter((t) => !hiddenTiers.value.includes(t)));
-const shownRows = computed(() => props.purchase.rows.filter((r) => !hiddenNations.value.includes(r.nation)));
 
 // Only cells in a visible column count. Hiding a tier takes its price off the
 // bill — otherwise the filter would change what you see but not what you owe.
 const cellCost = (cell) => (cell && !cell.is_purchased ? cell.price : 0);
 const rowRemaining = (row) => shownTiers.value.reduce((sum, t) => sum + cellCost(row.cells[t]), 0);
+
+// A line with nothing left to buy in the visible tiers is not a shopping list
+// row — the same rule the server applies to a line that has been bought out,
+// applied to the tiers on screen rather than to all of them.
+const shownRows = computed(() => props.purchase.rows.filter(
+    (r) => !hiddenNations.value.includes(r.nation) && rowRemaining(r) > 0,
+));
 const tierTotal = (tier) => shownRows.value.reduce((sum, r) => sum + cellCost(r.cells[tier]), 0);
 const grandTotal = computed(() => shownRows.value.reduce((sum, r) => sum + rowRemaining(r), 0));
 const short = (v) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : n(v));
@@ -293,7 +299,7 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
                 </div>
 
                 <p v-if="!shownRows.length" class="border border-dashed border-wot-border p-8 text-center text-sm text-wot-dim">
-                    No lines match the selected nations.
+                    Nothing left to buy in the selected nations and tiers.
                 </p>
 
                 <div v-else class="overflow-x-auto border border-wot-border bg-wot-panel">
@@ -391,7 +397,8 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
 
             <p class="mt-3 text-xs text-wot-dim">
                 Prices come from the encyclopedia and can be typed over when a seasonal discount applies.
-                A line disappears once its last vehicle is bought. Hiding a tier takes it out of the totals.
+                A line disappears once its last vehicle is bought, or once the visible tiers hold
+                nothing it still has to pay for. Hiding a tier takes it out of the totals.
             </p>
         </section>
 
