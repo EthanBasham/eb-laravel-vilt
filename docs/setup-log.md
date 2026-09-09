@@ -1587,3 +1587,24 @@ blur and reloads only the board props, never the rest of the page.
 no spreadsheet-reading dependency ships for a one-off import.
 
 Suite: **147 passed, 592 assertions.**
+
+---
+
+## 2026-09-09 — Editable cells are plain text, not number inputs
+
+The spinner arrows read as noise on a dense table, and arrow keys silently
+nudging a figure is the wrong affordance for numbers transcribed from the game
+rather than adjusted by feel.
+
+`type="text"` with `inputmode="numeric"`, so touch devices still get the numeric
+keypad. Non-digits are stripped on input rather than validated on submit, so a
+stray character never sits in the field looking accepted. Values are grouped with
+separators while idle and bare while editing — seven-figure numbers are hard to
+read unseparated, but separators in a field you're typing into fight the cursor.
+
+Applied to the shared component rather than only the Active Grinding table: the
+same cells appear in every expanded step row, and leaving those as steppers would
+have made one table behave unlike the rest.
+
+The two planning inputs (credits available, vacant slots) are still `type="number"`
+— a different form, filled in rarely, where the stepper does no harm.
