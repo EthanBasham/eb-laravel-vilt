@@ -1,0 +1,151 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  # Unlike CI, an in-flight deploy is allowed to finish rather than being
+  # cancelled — it writes to a real box, and half a release is worse than a
+  # slightly stale one.
+  group: deploy-eb-laravel-vilt
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, xml, curl, zip, bcmath, intl, pgsql
+          coverage: none
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: deploy-composer-${{ hashFiles('composer.lock') }}
+          restore-keys: deploy-composer-
+
+      # --no-dev, unlike CI: Pest, Pint and Boost have no business in a release.
+      - name: Install PHP dependencies
+        run: composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Build assets
+        run: |
+          npm ci
+          npm run build
+
+      # Assets are built here and shipped; the box has no Node. If this silently
+      # produced nothing, every page would 500 on a missing Vite manifest.
+      - name: Verify the build produced a manifest
+        run: |
+          test -f public/build/manifest.json || {
+            echo "::error::public/build/manifest.json missing — vite build produced nothing"
+            exit 1
+          }
+          for entry in resources/css/app.css resources/sass/app.scss resources/js/app.js resources/js/wot/app.js; do
+            grep -q "\"$entry\"" public/build/manifest.json || {
+              echo "::error::$entry missing from the Vite manifest"
+              exit 1
+            }
+          done
+
+      - name: Set release timestamp
+        id: release
+        run: echo "ts=$(date -u +%Y%m%d%H%M%S)" >> "$GITHUB_OUTPUT"
+
+      - name: Install deploy SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      # Port 22 is allow-listed to the developer's home IP, and GitHub-hosted
+      # runners have dynamic egress addresses that cannot be registered ahead of
+      # time. The runner opens a hole for its own /32 and closes it again below.
+      # AWS credentials are scoped to these two steps only — the build steps
+      # above never see them.
+      - name: Open SSH for this runner
+        id: sshhole
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          SG: ${{ secrets.DEPLOY_SG_ID }}
+        run: |
+          set -euo pipefail
+
+          # Self-heal: drop any tcp/22 rule a previous run failed to clean up.
+          # Matched by description prefix, so the home-IP rule can never be hit.
+          stale=$(aws ec2 describe-security-groups --group-ids "$SG" \
+            --query "SecurityGroups[0].IpPermissions[?FromPort==\`22\` && ToPort==\`22\` && IpProtocol=='tcp'].IpRanges[?starts_with(Description, 'gha-deploy-vilt')].CidrIp" \
+            --output text | tr '\t' '\n' | grep -v '^$' || true)
+          for cidr in $stale; do
+            echo "revoking stale rule for $cidr"
+            aws ec2 revoke-security-group-ingress --group-id "$SG" \
+              --protocol tcp --port 22 --cidr "$cidr" || true
+          done
+
+          ip=$(curl -fsS --retry 3 https://checkip.amazonaws.com | tr -d '[:space:]')
+          [[ "$ip" =~ ^[0-9.]+$ ]] || { echo "::error::could not determine runner IP"; exit 1; }
+          echo "cidr=${ip}/32" >> "$GITHUB_OUTPUT"
+
+          aws ec2 authorize-security-group-ingress --group-id "$SG" \
+            --ip-permissions "IpProtocol=tcp,FromPort=22,ToPort=22,IpRanges=[{CidrIp=${ip}/32,Description='gha-deploy-vilt run ${GITHUB_RUN_ID}'}]"
+          echo "opened 22 for ${ip}/32"
+
+      # rrsync remaps its confined root as the client's root, so the remote path
+      # is relative to /projects — "/laravel-vilt/..." is really
+      # "/projects/laravel-vilt/...". Prefixing /projects yourself doubles it.
+      #
+      # No --delete: the server's authorized_keys pins `rrsync -no-del`, and the
+      # target is a brand-new release directory each time, so there is nothing
+      # to orphan.
+      - name: Rsync release
+        run: |
+          rsync -az \
+            -e "ssh -o StrictHostKeyChecking=accept-new" \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='node_modules' \
+            --exclude='.env' \
+            --exclude='/storage/' \
+            --exclude='/tests/' \
+            --exclude='/docs/' \
+            ./ deploy@${{ secrets.DEPLOY_HOST }}:/laravel-vilt/releases/${{ steps.release.outputs.ts }}/
+
+      # Must be the last rsync of the job: the box's systemd path unit fires the
+      # instant .trigger changes, so the release has to have fully landed first.
+      - name: Trigger the deploy
+        run: |
+          printf '%s' "${{ steps.release.outputs.ts }}" > trigger
+          rsync -a -e "ssh -o StrictHostKeyChecking=accept-new" \
+            trigger deploy@${{ secrets.DEPLOY_HOST }}:/laravel-vilt/.trigger
+
+      # always(): the hole must close even if the rsync or trigger step failed.
+      - name: Close SSH for this runner
+        if: always() && steps.sshhole.outputs.cidr != ''
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          SG: ${{ secrets.DEPLOY_SG_ID }}
+        run: |
+          aws ec2 revoke-security-group-ingress --group-id "$SG" \
+            --protocol tcp --port 22 --cidr "${{ steps.sshhole.outputs.cidr }}"
+          echo "closed 22 for ${{ steps.sshhole.outputs.cidr }}"
