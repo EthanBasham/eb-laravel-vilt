@@ -1,0 +1,9 @@
+Keeps tests/Unit/ in version control while it holds no tests.
+
+phpunit.xml declares a "Unit" testsuite pointing here, and PHPUnit exits with an
+error if the directory is missing. Git does not track empty directories, so
+without this file a fresh clone — CI included — fails before running a single
+test, while a working copy that still has the directory on disk passes. That is
+exactly what happened on this project's first CI run.
+
+Delete this once a real unit test lives here.
