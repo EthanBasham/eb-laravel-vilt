@@ -48,7 +48,7 @@ const n = (v) => new Intl.NumberFormat().format(v ?? 0);
             v-else
             type="button"
             class="tabular-nums transition-colors"
-            :class="cell.module_xp ? 'text-wot-text hover:text-wot-gold' : 'text-wot-good'"
+            :class="cell.module_xp ? 'text-wot-text hover:text-wot-gold' : 'text-wot-dim/50 hover:text-wot-text'"
             :aria-expanded="open"
             :title="`${cell.name} — ${done} of ${cell.modules.length} modules researched, ${n(cell.module_xp)} XP left of ${n(cell.module_xp_total)}`"
             @click="open = !open"

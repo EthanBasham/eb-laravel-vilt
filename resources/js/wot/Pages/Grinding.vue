@@ -592,7 +592,7 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
                                                 :size="14"
                                                 stroke-width="2"
                                                 class="shrink-0"
-                                                :class="row.cells[tier].module_xp ? 'text-wot-dim' : 'text-wot-good'"
+                                                :class="row.cells[tier].module_xp ? 'text-wot-dim' : 'text-wot-dim/50'"
                                                 aria-hidden="true"
                                             />
                                             <span
@@ -609,7 +609,7 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
                                                 :size="14"
                                                 stroke-width="2"
                                                 class="shrink-0"
-                                                :class="row.cells[tier].unlocks.is_unlocked ? 'text-wot-good' : 'text-wot-dim'"
+                                                :class="row.cells[tier].unlocks.is_unlocked ? 'text-wot-dim/50' : 'text-wot-dim'"
                                                 aria-hidden="true"
                                             />
 
@@ -617,7 +617,7 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
                                                  owed however much it lists at. -->
                                             <span
                                                 v-if="row.cells[tier].unlocks.is_unlocked"
-                                                class="tabular-nums text-wot-good"
+                                                class="tabular-nums text-wot-dim/50"
                                                 :title="`${row.cells[tier].unlocks.name} — already researched`"
                                             >
                                                 0
@@ -663,7 +663,7 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
                             </td>
 
                             <td class="sticky right-0 z-10 whitespace-nowrap border-s border-wot-border bg-wot-panel-solid px-4 py-2 text-right tabular-nums group-hover:bg-wot-sunken-solid"
-                                :class="xpRowRemaining(row) ? 'text-wot-heading' : 'text-wot-good'">
+                                :class="xpRowRemaining(row) ? 'text-wot-heading' : 'text-wot-dim'">
                                 {{ n(xpRowRemaining(row)) }}
                             </td>
                         </tr>
