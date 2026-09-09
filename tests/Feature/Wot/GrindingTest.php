@@ -1256,8 +1256,16 @@ it('counts a shared vehicle on one row only', function () {
     $user = User::factory()->create();
     $account = freeXpLine($user);
 
-    // A second tier X off the same tier IX, so the VIII and IX sit on both.
-    WotVehicle::factory()->create(['tank_id' => 101, 'name' => 'Other X', 'short_name' => 'Oth X', 'tier' => 10, 'type' => 'heavyTank', 'next_tanks' => null]);
+    /*
+     * A second tier X off the same tier IX, so the VIII and IX sit on both.
+     *
+     * Same nation as the first, deliberately: rows sort by nation before name,
+     * and WotVehicleFactory picks a nation at random, so leaving it to the
+     * factory made which row came first a coin flip. Pinned, the order is
+     * decided by name, which is what this test is about.
+     */
+    $nation = WotVehicle::where('tank_id', 100)->value('nation');
+    WotVehicle::factory()->create(['tank_id' => 101, 'name' => 'Other X', 'short_name' => 'Oth X', 'tier' => 10, 'type' => 'heavyTank', 'nation' => $nation, 'next_tanks' => null]);
     WotVehicle::where('tank_id', 90)->update(['next_tanks' => json_encode([100 => 225_000, 101 => 240_000])]);
 
     $this->actingAs($user)->patch(route('wot.grinding.module-plan', 90), ['module_id' => 200, 'planned' => true]);
