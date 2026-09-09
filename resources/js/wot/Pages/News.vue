@@ -44,8 +44,23 @@ const asDate = (iso) => new Date(iso).toLocaleDateString(undefined, { dateStyle:
         <div class="flex flex-wrap items-end justify-between gap-4 border-b border-wot-border pb-5">
             <div>
                 <h1 class="text-3xl">News</h1>
-                <p class="mt-1 text-sm text-wot-dim">
+                <p class="mt-1 flex items-center gap-1.5 text-sm text-wot-dim">
                     From the official worldoftanks.com feeds.
+
+                    <a
+                        href="https://worldoftanks.com/en/news/"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="inline-flex text-wot-dim transition-colors hover:text-wot-gold"
+                    >
+                        <!-- The icon is decorative; the link's accessible name
+                             comes from the visually-hidden text beside it. -->
+                        <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5" />
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M14.25 3h6.75v6.75M21 3l-9 9" />
+                        </svg>
+                        <span class="sr-only">Open the World of Tanks news site in a new tab</span>
+                    </a>
                 </p>
             </div>
 
