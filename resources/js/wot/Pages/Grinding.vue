@@ -538,12 +538,12 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
                      discoverable by hovering. -->
                 <div class="flex flex-wrap items-center gap-4 border-t border-wot-border-soft pt-2 text-xs text-wot-dim">
                     <span class="inline-flex items-center gap-1.5">
-                        <IconTank :size="15" stroke-width="2" aria-hidden="true" />
-                        XP to unlock the next tank
-                    </span>
-                    <span class="inline-flex items-center gap-1.5">
                         <IconEngine :size="15" stroke-width="2" aria-hidden="true" />
                         XP for this tank's modules
+                    </span>
+                    <span class="inline-flex items-center gap-1.5">
+                        <IconTank :size="15" stroke-width="2" aria-hidden="true" />
+                        XP to unlock the next tank
                     </span>
                 </div>
             </div>
@@ -575,13 +575,35 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
 
                             <td v-for="tier in xpShownTiers" :key="tier" class="px-3 py-2 text-right align-top">
                                 <template v-if="row.cells[tier]">
-                                    <!-- The two halves are shared independently.
+                                    <!-- Modules above the unlock, in the order
+                                         the grind actually happens: you research
+                                         a tank's modules on the way to affording
+                                         the next tank.
+
+                                         The two halves are shared independently.
                                          A vehicle's modules are researched once,
                                          so a shared cell shows them as text; but
                                          two lines diverging from that vehicle owe
                                          two different unlocks, so the unlock can
                                          still be this row's to edit. -->
                                     <div class="space-y-1">
+                                        <div class="flex items-center justify-end gap-1.5">
+                                            <IconEngine
+                                                :size="14"
+                                                stroke-width="2"
+                                                class="shrink-0"
+                                                :class="row.cells[tier].module_xp ? 'text-wot-dim' : 'text-wot-good'"
+                                                aria-hidden="true"
+                                            />
+                                            <span
+                                                v-if="row.cells[tier].is_shared"
+                                                class="tabular-nums text-wot-dim/60"
+                                                :title="`${row.cells[tier].name} — modules counted and ticked on ${row.cells[tier].shared_with}.`"
+                                            >
+                                                {{ n(row.cells[tier].module_xp) }}
+                                            </span>
+                                            <ModuleResearchPicker v-else :cell="row.cells[tier]" />
+                                        </div>
                                         <div v-if="row.cells[tier].unlocks" class="flex items-center justify-end gap-1.5">
                                             <IconTank
                                                 :size="14"
@@ -635,23 +657,6 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
                                             </template>
                                         </div>
 
-                                        <div class="flex items-center justify-end gap-1.5">
-                                            <IconEngine
-                                                :size="14"
-                                                stroke-width="2"
-                                                class="shrink-0"
-                                                :class="row.cells[tier].module_xp ? 'text-wot-dim' : 'text-wot-good'"
-                                                aria-hidden="true"
-                                            />
-                                            <span
-                                                v-if="row.cells[tier].is_shared"
-                                                class="tabular-nums text-wot-dim/60"
-                                                :title="`${row.cells[tier].name} — modules counted and ticked on ${row.cells[tier].shared_with}.`"
-                                            >
-                                                {{ n(row.cells[tier].module_xp) }}
-                                            </span>
-                                            <ModuleResearchPicker v-else :cell="row.cells[tier]" />
-                                        </div>
                                     </div>
                                 </template>
                                 <span v-else class="text-wot-muted">·</span>
