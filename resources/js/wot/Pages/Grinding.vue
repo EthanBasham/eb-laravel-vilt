@@ -1,11 +1,12 @@
 <script setup>
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
-import { IconLock, IconLockOpen, IconShoppingCart } from '@tabler/icons-vue';
+import { IconEngine, IconLock, IconLockOpen, IconShoppingCart, IconTank } from '@tabler/icons-vue';
 import { computed, ref } from 'vue';
 import AppShell from '../Components/AppShell.vue';
 import EditableNumber from '../Components/EditableNumber.vue';
 import ModulePicker from '../Components/ModulePicker.vue';
 import ModulePlanPicker from '../Components/ModulePlanPicker.vue';
+import ModuleResearchPicker from '../Components/ModuleResearchPicker.vue';
 import NationFlag from '../Components/NationFlag.vue';
 import VehicleTypeIcon from '../Components/VehicleTypeIcon.vue';
 import { useBoardFilters } from '../composables/useBoardFilters';
@@ -17,6 +18,7 @@ const props = defineProps({
     totals: { type: Object, required: true },
     purchase: { type: Object, required: true },
     freexp: { type: Object, required: true },
+    xp: { type: Object, required: true },
     options: { type: Array, default: () => [] },
 });
 
@@ -271,6 +273,66 @@ const fxTierTotal = (tier) => fxShownRows.value.reduce((sum, r) => sum + fxCellX
 const fxGrandTotal = computed(() => fxShownRows.value.reduce((sum, r) => sum + fxRowPlanned(r), 0));
 
 /*
+ * XP Remaining filters.
+ *
+ * The Lines checkbox matches the purchase board's rather than the Free XP
+ * board's: a line with nothing left to research is settled in the same sense a
+ * bought-out line is, so hiding it by default is the same judgement.
+ */
+const {
+    hiddenNations: xpHiddenNations,
+    hiddenTiers: xpHiddenTiers,
+    hide_done: hideDone,
+    toggleNation: xpToggleNation,
+    toggleTier: xpToggleTier,
+    clearNations: xpClearNations,
+    clearTiers: xpClearTiers,
+} = useBoardFilters('xp', props.settings.xp_filters, {
+    extra: { hide_done: true },
+});
+
+const xpNations = computed(() => nationsOf(props.xp.rows));
+
+// Clearing the override hands the cell back to the encyclopedia's figure, so it
+// is a null rather than a zero — a tank you hold fragments enough to unlock
+// outright is a real, different state.
+const resetResearchXp = (tankId) => router.patch(`/wot/grinding/research/${tankId}`, { research_xp: null }, {
+    preserveScroll: true,
+    only: ['xp', 'totals'],
+});
+
+const xpShownTiers = computed(() => props.xp.tiers.filter((t) => !xpHiddenTiers.value.includes(t)));
+
+/*
+ * What one cell still owes: the unlock ahead of it, plus its own modules.
+ *
+ * Mirrors XpBoard::cellXp so the footer and the server's row figure cannot
+ * drift — the client's job is only to re-total the cells a filter leaves
+ * visible.
+ */
+const xpCellXp = (cell) => {
+    if (!cell) {
+        return 0;
+    }
+
+    // Shared separately: a vehicle's modules are researched once, but two lines
+    // diverging from it owe two different unlocks, so the two halves of a cell
+    // can belong to different rows.
+    const unlock = cell.unlocks && !cell.unlocks.is_shared && !cell.unlocks.is_unlocked ? cell.unlocks.xp : 0;
+
+    return unlock + (cell.is_shared ? 0 : cell.module_xp);
+};
+
+const xpRowRemaining = (row) => xpShownTiers.value.reduce((sum, t) => sum + xpCellXp(row.cells[t]), 0);
+
+const xpShownRows = computed(() => props.xp.rows.filter(
+    (r) => !xpHiddenNations.value.includes(r.nation) && !(hideDone.value && xpRowRemaining(r) === 0),
+));
+const xpHasDoneLines = computed(() => props.xp.rows.some((r) => xpRowRemaining(r) === 0));
+const xpTierTotal = (tier) => xpShownRows.value.reduce((sum, r) => sum + xpCellXp(r.cells[tier]), 0);
+const xpGrandTotal = computed(() => xpShownRows.value.reduce((sum, r) => sum + xpRowRemaining(r), 0));
+
+/*
  * Credits shortfall is the number that decides whether a plan is realistic, so
  * it follows the board rather than the server's total.
  *
@@ -292,8 +354,7 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
             <div>
                 <h1 class="text-3xl">Grinding</h1>
                 <p class="mt-1 text-sm text-wot-dim">
-                    {{ totals.open }} open {{ totals.open === 1 ? 'target' : 'targets' }} ·
-                    {{ n(totals.xp_remaining) }} XP still to earn
+                    {{ totals.open }} open {{ totals.open === 1 ? 'target' : 'targets' }}
                 </p>
             </div>
         </div>
@@ -301,7 +362,10 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
         <dl class="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div class="border border-wot-border bg-wot-panel p-3">
                 <dt class="text-xs uppercase tracking-wider text-wot-dim">XP remaining</dt>
-                <dd class="mt-1 text-xl tabular-nums text-wot-heading">{{ n(totals.xp_remaining) }}</dd>
+                <!-- The filtered board's figure, like Credits needed below it:
+                     the server bills the whole tree, and narrowing to a nation
+                     is what turns that into a number worth reading. -->
+                <dd class="mt-1 text-xl tabular-nums text-wot-heading">{{ short(xpGrandTotal) }}</dd>
             </div>
             <div class="border border-wot-border bg-wot-panel p-3">
                 <dt class="text-xs uppercase tracking-wider text-wot-dim">Banked XP</dt>
@@ -408,7 +472,212 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
             </div>
         </section>
 
-        <!-- 2. Tanks to Purchase ------------------------------------------------>
+        <!-- 2. XP Remaining ------------------------------------------------------
+             Research XP, and nothing else. Two figures per cell, each behind its
+             own icon: the tank ahead of you, and the modules under you.
+        -->
+        <section v-else-if="view === 'xp'" class="mt-4" aria-labelledby="xp-heading">
+            <h2 id="xp-heading" class="sr-only">XP remaining</h2>
+
+            <div class="mb-3 space-y-2 border border-wot-border bg-wot-panel p-3">
+                <div class="flex flex-wrap items-center gap-1.5">
+                    <span class="w-12 shrink-0 text-xs font-bold uppercase tracking-wider text-wot-dim">Nation</span>
+                    <button
+                        v-for="nation in xpNations"
+                        :key="nation"
+                        type="button"
+                        class="border p-1 leading-none transition-colors"
+                        :class="xpHiddenNations.includes(nation)
+                            ? 'border-wot-border opacity-30 hover:opacity-70'
+                            : 'border-wot-gold'"
+                        :aria-pressed="!xpHiddenNations.includes(nation)"
+                        @click="xpToggleNation(nation)"
+                    >
+                        <NationFlag :nation="nation" />
+                    </button>
+                    <button v-if="xpHiddenNations.length" type="button"
+                            class="ms-1 text-xs uppercase tracking-wider text-wot-dim hover:text-wot-text"
+                            @click="xpClearNations">
+                        All
+                    </button>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-1.5">
+                    <span class="w-12 shrink-0 text-xs font-bold uppercase tracking-wider text-wot-dim">Tier</span>
+                    <button
+                        v-for="tier in xp.tiers"
+                        :key="tier"
+                        type="button"
+                        class="min-w-9 border px-2 py-0.5 text-xs font-bold tracking-wider transition-colors"
+                        :class="xpHiddenTiers.includes(tier)
+                            ? 'border-wot-border text-wot-dim hover:text-wot-text'
+                            : 'border-wot-gold text-wot-gold'"
+                        :aria-pressed="!xpHiddenTiers.includes(tier)"
+                        :aria-label="`Tier ${ROMAN[tier]}`"
+                        @click="xpToggleTier(tier)"
+                    >
+                        {{ ROMAN[tier] }}
+                    </button>
+                    <button v-if="xpHiddenTiers.length" type="button"
+                            class="ms-1 text-xs uppercase tracking-wider text-wot-dim hover:text-wot-text"
+                            @click="xpClearTiers">
+                        All
+                    </button>
+                </div>
+
+                <div v-if="xpHasDoneLines" class="flex flex-wrap items-center gap-1.5">
+                    <span class="w-12 shrink-0 text-xs font-bold uppercase tracking-wider text-wot-dim">Lines</span>
+                    <label class="flex items-center gap-2 text-xs text-wot-text">
+                        <input v-model="hideDone" type="checkbox" class="border">
+                        Hide lines with nothing left to research
+                    </label>
+                </div>
+
+                <!-- The legend earns its place because the two figures in a cell
+                     are both bare numbers, and which is which is otherwise only
+                     discoverable by hovering. -->
+                <div class="flex flex-wrap items-center gap-4 border-t border-wot-border-soft pt-2 text-xs text-wot-dim">
+                    <span class="inline-flex items-center gap-1.5">
+                        <IconTank :size="15" stroke-width="2" aria-hidden="true" />
+                        XP to unlock the next tank
+                    </span>
+                    <span class="inline-flex items-center gap-1.5">
+                        <IconEngine :size="15" stroke-width="2" aria-hidden="true" />
+                        XP for this tank's modules
+                    </span>
+                </div>
+            </div>
+
+            <p v-if="!xpShownRows.length" class="border border-dashed border-wot-border p-8 text-center text-sm text-wot-dim">
+                {{ hideDone ? 'Nothing left to research in the selected nations and tiers.' : 'No lines in the selected nations and tiers.' }}
+            </p>
+
+            <div v-else class="overflow-x-auto border border-wot-border bg-wot-panel">
+                <table class="min-w-full border-separate border-spacing-0 divide-y divide-wot-border text-sm">
+                    <thead class="bg-wot-sunken">
+                        <tr>
+                            <th scope="col" class="sticky left-0 z-20 whitespace-nowrap border-e border-wot-border bg-wot-sunken-solid px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Line</th>
+                            <th v-for="tier in xpShownTiers" :key="tier" scope="col"
+                                class="px-3 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">
+                                Tier {{ ROMAN[tier] }}
+                            </th>
+                            <th scope="col" class="sticky right-0 z-20 whitespace-nowrap border-s border-wot-border bg-wot-sunken-solid px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Remaining</th>
+                        </tr>
+                    </thead>
+
+                    <tbody class="divide-y divide-wot-border-soft">
+                        <tr v-for="row in xpShownRows" :key="row.key" class="group hover:bg-wot-sunken">
+                            <td class="sticky left-0 z-10 whitespace-nowrap border-e border-wot-border bg-wot-panel-solid px-4 py-2 group-hover:bg-wot-sunken-solid">
+                                <NationFlag :nation="row.nation" class="me-2" />
+                                <span class="text-wot-heading">{{ row.name }}</span>
+                                <VehicleTypeIcon :type="row.type" class="ms-2 text-wot-dim" />
+                            </td>
+
+                            <td v-for="tier in xpShownTiers" :key="tier" class="px-3 py-2 text-right align-top">
+                                <template v-if="row.cells[tier]">
+                                    <!-- The two halves are shared independently.
+                                         A vehicle's modules are researched once,
+                                         so a shared cell shows them as text; but
+                                         two lines diverging from that vehicle owe
+                                         two different unlocks, so the unlock can
+                                         still be this row's to edit. -->
+                                    <div class="space-y-1">
+                                        <div v-if="row.cells[tier].unlocks" class="flex items-center justify-end gap-1.5">
+                                            <IconTank
+                                                :size="14"
+                                                stroke-width="2"
+                                                class="shrink-0"
+                                                :class="row.cells[tier].unlocks.is_unlocked ? 'text-wot-good' : 'text-wot-dim'"
+                                                aria-hidden="true"
+                                            />
+
+                                            <!-- Already researched, so nothing is
+                                                 owed however much it lists at. -->
+                                            <span
+                                                v-if="row.cells[tier].unlocks.is_unlocked"
+                                                class="tabular-nums text-wot-good"
+                                                :title="`${row.cells[tier].unlocks.name} — already researched`"
+                                            >
+                                                0
+                                            </span>
+
+                                            <span
+                                                v-else-if="row.cells[tier].unlocks.is_shared"
+                                                class="tabular-nums text-wot-dim/60"
+                                                :title="`${row.cells[tier].unlocks.name} — counted and edited on ${row.cells[tier].shared_with ?? 'another line'}.`"
+                                            >
+                                                {{ n(row.cells[tier].unlocks.xp) }}
+                                            </span>
+
+                                            <template v-else>
+                                                <EditableNumber
+                                                    :field="'research_xp'"
+                                                    :model-value="row.cells[tier].unlocks.xp"
+                                                    :url="`/wot/grinding/research/${row.cells[tier].unlocks.tank_id}`"
+                                                    :only="['xp', 'totals']"
+                                                    :tone="row.cells[tier].unlocks.is_discounted
+                                                        ? 'border-wot-gold/50 bg-wot-sunken text-wot-gold'
+                                                        : 'border-wot-border bg-wot-sunken text-wot-text'"
+                                                />
+                                                <!-- Only offered once the figure
+                                                     has been typed over; there is
+                                                     nothing to reset back to
+                                                     otherwise. -->
+                                                <button
+                                                    v-if="row.cells[tier].unlocks.is_discounted"
+                                                    type="button"
+                                                    class="inline-flex shrink-0 items-center justify-center border border-wot-border p-1 text-xs leading-none text-wot-dim transition-colors hover:text-wot-bad"
+                                                    :title="`Reset to the ${n(row.cells[tier].unlocks.full_xp)} full cost of the ${row.cells[tier].unlocks.name}`"
+                                                    @click="resetResearchXp(row.cells[tier].unlocks.tank_id)"
+                                                >
+                                                    &times;
+                                                </button>
+                                            </template>
+                                        </div>
+
+                                        <div class="flex items-center justify-end gap-1.5">
+                                            <IconEngine
+                                                :size="14"
+                                                stroke-width="2"
+                                                class="shrink-0"
+                                                :class="row.cells[tier].module_xp ? 'text-wot-dim' : 'text-wot-good'"
+                                                aria-hidden="true"
+                                            />
+                                            <span
+                                                v-if="row.cells[tier].is_shared"
+                                                class="tabular-nums text-wot-dim/60"
+                                                :title="`${row.cells[tier].name} — modules counted and ticked on ${row.cells[tier].shared_with}.`"
+                                            >
+                                                {{ n(row.cells[tier].module_xp) }}
+                                            </span>
+                                            <ModuleResearchPicker v-else :cell="row.cells[tier]" />
+                                        </div>
+                                    </div>
+                                </template>
+                                <span v-else class="text-wot-muted">·</span>
+                            </td>
+
+                            <td class="sticky right-0 z-10 whitespace-nowrap border-s border-wot-border bg-wot-panel-solid px-4 py-2 text-right tabular-nums group-hover:bg-wot-sunken-solid"
+                                :class="xpRowRemaining(row) ? 'text-wot-heading' : 'text-wot-good'">
+                                {{ n(xpRowRemaining(row)) }}
+                            </td>
+                        </tr>
+                    </tbody>
+
+                    <tfoot v-if="xpShownRows.length > 1" class="border-t-2 border-wot-border bg-wot-sunken">
+                        <tr>
+                            <th scope="row" class="sticky left-0 z-20 border-e border-wot-border bg-wot-sunken-solid px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Total</th>
+                            <td v-for="tier in xpShownTiers" :key="tier" class="px-3 py-3 text-right tabular-nums text-wot-muted">
+                                {{ n(xpTierTotal(tier)) }}
+                            </td>
+                            <td class="sticky right-0 z-20 border-s border-wot-border bg-wot-sunken-solid px-4 py-3 text-right tabular-nums font-bold text-wot-heading">{{ n(xpGrandTotal) }}</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </section>
+
+        <!-- 3. Tanks to Purchase ------------------------------------------------>
         <!--
             Credits only. Every other figure on this page belongs to a different
             question, and a shopping list that also quotes XP is a shopping list
@@ -804,23 +1073,21 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
             </template>
         </section>
 
-        <!-- 3 & 5. Target-driven views ------------------------------------------>
+        <!-- 5. Blueprints -------------------------------------------------------
+             The last view still built from tracked targets rather than from the
+             tree, because fragments are held per vehicle and there is nothing in
+             the encyclopedia to lay them out against.
+        -->
         <section v-else class="mt-4" aria-labelledby="targets-heading">
-            <h2 id="targets-heading" class="sr-only">{{ views.find((v) => v.key === view).label }}</h2>
+            <h2 id="targets-heading" class="sr-only">Blueprints</h2>
 
             <div class="overflow-x-auto border border-wot-border bg-wot-panel">
                 <table class="min-w-full divide-y divide-wot-border text-sm">
                     <thead class="bg-wot-sunken">
                         <tr>
                             <th scope="col" class="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Target</th>
-                            <template v-if="view === 'xp'">
-                                <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Required</th>
-                                <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Remaining</th>
-                            </template>
-                            <template v-else>
-                                <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Fragments</th>
-                                <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Full research XP</th>
-                            </template>
+                            <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Fragments</th>
+                            <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Full research XP</th>
                             <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Steps</th>
                             <th scope="col" class="w-24 px-4 py-3" />
                         </tr>
@@ -836,16 +1103,10 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
                                     <span class="ms-2 text-xs text-wot-dim">T{{ t.tier }}</span>
                                 </td>
 
-                                <template v-if="view === 'xp'">
-                                    <td class="px-4 py-2 text-right tabular-nums text-wot-muted">{{ n(t.xp_required) }}</td>
-                                    <td class="px-4 py-2 text-right tabular-nums text-wot-heading">{{ n(t.xp_remaining) }}</td>
-                                </template>
-                                <template v-else>
-                                    <td class="px-4 py-2 text-right tabular-nums text-wot-gold">{{ t.blueprint_fragments }}</td>
-                                    <td class="px-4 py-2 text-right tabular-nums text-wot-muted">
-                                        {{ n(t.steps.filter((s) => s.research_xp).slice(-1)[0]?.research_xp) }}
-                                    </td>
-                                </template>
+                                <td class="px-4 py-2 text-right tabular-nums text-wot-gold">{{ t.blueprint_fragments }}</td>
+                                <td class="px-4 py-2 text-right tabular-nums text-wot-muted">
+                                    {{ n(t.steps.filter((s) => s.research_xp).slice(-1)[0]?.research_xp) }}
+                                </td>
 
                                 <td class="px-4 py-2 text-right tabular-nums text-wot-dim">{{ t.steps.length }}</td>
                                 <td class="px-4 py-2 text-right" @click.stop>

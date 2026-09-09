@@ -4,7 +4,7 @@ namespace App\Services\Wargaming;
 
 use Illuminate\Support\Collection;
 use App\Models\WotAccount;
-use App\Models\WotModulePlan;
+use App\Models\WotTankModule;
 use App\Models\WotVehicleModule;
 
 /**
@@ -81,7 +81,7 @@ class FreeXpBoard
                     $v->name,
                     $v->tier,
                     $modules->get($v->tank_id) ?? collect(),
-                    $plans->get($v->tank_id)?->module_ids ?? [],
+                    $plans->get($v->tank_id)?->planned_module_ids ?? [],
                 ))
                 ->sortBy('tier')
                 ->values();
@@ -232,10 +232,10 @@ class FreeXpBoard
     }
 
     /**
-     * @return Collection<int, WotModulePlan>
+     * @return Collection<int, WotTankModule>
      */
     private function plans(WotAccount $account): Collection
     {
-        return WotModulePlan::where('wot_account_id', $account->id)->get()->keyBy('tank_id');
+        return WotTankModule::where('wot_account_id', $account->id)->get()->keyBy('tank_id');
     }
 }

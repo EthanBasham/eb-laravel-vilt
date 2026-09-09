@@ -10,11 +10,13 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Wot\BoardFiltersRequest;
 use App\Http\Requests\Wot\UpdateGrindStepRequest;
 use App\Http\Requests\Wot\UpdateModulePlanRequest;
+use App\Http\Requests\Wot\UpdateModuleResearchRequest;
+use App\Http\Requests\Wot\UpdateResearchXpRequest;
 use App\Http\Requests\Wot\UpdateTankPurchaseRequest;
 use App\Models\WotGrindSetting;
 use App\Models\WotGrindStep;
 use App\Models\WotGrindTarget;
-use App\Models\WotModulePlan;
+use App\Models\WotTankModule;
 use App\Models\WotTankPurchase;
 use App\Models\WotVehicle;
 use App\Models\WotVehicleModule;
@@ -189,7 +191,7 @@ class GrindController extends Controller
         abort_unless($account, 404);
         abort_unless(WotVehicle::where('tank_id', $tankId)->exists(), 404);
 
-        $plan = WotModulePlan::firstOrNew([
+        $plan = WotTankModule::firstOrNew([
             'wot_account_id' => $account->id,
             'tank_id' => $tankId,
         ]);
@@ -220,10 +222,55 @@ class GrindController extends Controller
 
         abort_unless($chain, 404);
 
-        WotModulePlan::firstOrNew([
+        WotTankModule::firstOrNew([
             'wot_account_id' => $account->id,
             'tank_id' => $tankId,
         ])->planModules($chain['module_ids']);
+
+        return back(fallback: route('wot.grinding'));
+    }
+
+    /**
+     * Marks a module researched on a vehicle, or un-marks it.
+     *
+     * The XP Remaining counterpart to updateModulePlan(), and keyed the same
+     * way — on the tank, not on a grind step, because the board is the whole
+     * tree. The model drops the module from the Free XP plan when it is
+     * researched; nothing here needs to know that.
+     */
+    public function updateModuleResearch(UpdateModuleResearchRequest $request, int $tankId): RedirectResponse
+    {
+        $account = $request->user()->wotAccount;
+
+        abort_unless($account, 404);
+        abort_unless(WotVehicle::where('tank_id', $tankId)->exists(), 404);
+
+        WotTankModule::firstOrNew([
+            'wot_account_id' => $account->id,
+            'tank_id' => $tankId,
+        ])->setModuleResearched($request->integer('module_id'), $request->boolean('researched'));
+
+        return back(fallback: route('wot.grinding'));
+    }
+
+    /**
+     * Records what a vehicle actually costs to unlock after blueprints.
+     *
+     * On the vehicle being unlocked, matching where price_credit lives, so two
+     * lines converging on one tank share the figure. Null clears the override
+     * and hands the cell back to the encyclopedia's full price.
+     */
+    public function updateResearchXp(UpdateResearchXpRequest $request, int $tankId): RedirectResponse
+    {
+        $account = $request->user()->wotAccount;
+
+        abort_unless($account, 404);
+        abort_unless(WotVehicle::where('tank_id', $tankId)->exists(), 404);
+
+        WotTankPurchase::updateOrCreate(
+            ['wot_account_id' => $account->id, 'tank_id' => $tankId],
+            ['research_xp' => $request->input('research_xp')],
+        );
 
         return back(fallback: route('wot.grinding'));
     }

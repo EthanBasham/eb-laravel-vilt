@@ -5,7 +5,7 @@ use App\Models\WotAccount;
 use App\Models\WotGrindSetting;
 use App\Models\WotGrindStep;
 use App\Models\WotGrindTarget;
-use App\Models\WotModulePlan;
+use App\Models\WotTankModule;
 use App\Models\WotVehicle;
 use App\Models\WotVehicleSnapshot;
 use App\Models\WotVehicleModule;
@@ -170,7 +170,10 @@ it('excludes completed targets from the outstanding totals', function () {
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
         ->where('totals.targets', 1)
         ->where('totals.open', 0)
-        ->where('totals.xp_remaining', 0),
+        // xp_required, not xp_remaining: the latter is the whole tree's figure
+        // now, the way credits_required already was, so a completed target no
+        // longer moves it.
+        ->where('totals.xp_required', 0),
     );
 });
 
@@ -1183,7 +1186,7 @@ it('plans a module and totals what it costs', function () {
         'module_id' => 200, 'planned' => true,
     ])->assertRedirect();
 
-    expect(WotModulePlan::where('wot_account_id', $account->id)->first()->module_ids)->toBe([200]);
+    expect(WotTankModule::where('wot_account_id', $account->id)->first()->planned_module_ids)->toBe([200]);
 
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
         ->where('freexp.rows.0.cells.9.planned_xp', 90_000)
@@ -1202,7 +1205,7 @@ it('takes a module back off the plan', function () {
     $this->actingAs($user)->patch(route('wot.grinding.module-plan', 90), ['module_id' => 201, 'planned' => true]);
     $this->actingAs($user)->patch(route('wot.grinding.module-plan', 90), ['module_id' => 200, 'planned' => false]);
 
-    expect(WotModulePlan::where('wot_account_id', $account->id)->first()->module_ids)->toBe([201]);
+    expect(WotTankModule::where('wot_account_id', $account->id)->first()->planned_module_ids)->toBe([201]);
 });
 
 /**
@@ -1218,7 +1221,7 @@ it('refuses to plan a module that is not an upgrade on that vehicle', function (
         'module_id' => $moduleId, 'planned' => true,
     ])->assertRedirect();
 
-    expect(WotModulePlan::where('wot_account_id', $account->id)->count())->toBe(0);
+    expect(WotTankModule::where('wot_account_id', $account->id)->count())->toBe(0);
 })->with([
     'stock module' => [90, 202],
     'a module on another tank' => [90, 100],
@@ -1245,7 +1248,7 @@ it('will not let one account plan another account modules', function () {
         'module_id' => 200, 'planned' => true,
     ])->assertRedirect();
 
-    expect(WotModulePlan::where('wot_account_id', $account->id)->count())->toBe(0);
+    expect(WotTankModule::where('wot_account_id', $account->id)->count())->toBe(0);
 });
 
 /**
@@ -1353,7 +1356,7 @@ it('plans the whole top gun chain in one click', function () {
 
     $this->actingAs($user)->patch(route('wot.grinding.top-gun', 90))->assertRedirect();
 
-    expect(WotModulePlan::where('wot_account_id', $account->id)->first()->module_ids)->toBe([102, 103]);
+    expect(WotTankModule::where('wot_account_id', $account->id)->first()->planned_module_ids)->toBe([102, 103]);
 
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
         ->where('freexp.rows.0.cells.9.planned_xp', 66_000)
@@ -1375,7 +1378,7 @@ it('adds to the plan rather than replacing it', function () {
     $this->actingAs($user)->patch(route('wot.grinding.module-plan', 90), ['module_id' => 105, 'planned' => true]);
     $this->actingAs($user)->patch(route('wot.grinding.top-gun', 90));
 
-    expect(WotModulePlan::where('wot_account_id', $account->id)->first()->module_ids)->toBe([102, 103, 105]);
+    expect(WotTankModule::where('wot_account_id', $account->id)->first()->planned_module_ids)->toBe([102, 103, 105]);
 });
 
 it('counts only what the chain still needs', function () {
@@ -1461,5 +1464,221 @@ it('will not let one account plan another account top gun', function () {
 
     $this->actingAs($intruder)->patch(route('wot.grinding.top-gun', 90))->assertRedirect();
 
-    expect(WotModulePlan::where('wot_account_id', $account->id)->count())->toBe(0);
+    expect(WotTankModule::where('wot_account_id', $account->id)->count())->toBe(0);
+});
+
+it('lays the XP board out as unlock XP and module XP per cell', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('xp.tiers', [8, 9, 10])
+        ->has('xp.rows', 1)
+        // Each cell points at the next tank on its own line.
+        ->where('xp.rows.0.cells.8.unlocks.tank_id', 90)
+        ->where('xp.rows.0.cells.8.unlocks.xp', 149_400)
+        ->where('xp.rows.0.cells.8.module_xp', 50_000)
+        ->where('xp.rows.0.cells.9.unlocks.xp', 225_000)
+        ->where('xp.rows.0.cells.9.module_xp', 100_000)
+        // The top of the line unlocks nothing further.
+        ->where('xp.rows.0.cells.10.unlocks', null)
+        ->where('xp.rows.0.cells.10.module_xp', 160_000)
+        ->where('xp.rows.0.xp_remaining', 684_400)
+        ->where('xp.xp_remaining', 684_400)
+        ->where('totals.xp_remaining', 684_400),
+    );
+});
+
+/**
+ * An unlock is settled once the vehicle it leads to is researched, and that has
+ * to be the same judgement the purchase board makes or one tab would call a
+ * tank bought while the other still charged for researching it.
+ */
+it('settles an unlock once the next tank is researched', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['is_unlocked' => true])->assertRedirect();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('xp.rows.0.cells.8.unlocks.is_unlocked', true)
+        // The unlock drops out; the tier VIII's own modules do not.
+        ->where('xp.rows.0.xp_remaining', 535_000),
+    );
+});
+
+/**
+ * Play history settles everything below it, the same back-fill the purchase
+ * board uses — a tier IX researched past and then sold still counts.
+ */
+it('settles the unlocks below a vehicle that has been played', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+    played($account, 100);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('xp.rows.0.cells.8.unlocks.is_unlocked', true)
+        ->where('xp.rows.0.cells.9.unlocks.is_unlocked', true)
+        // Only module XP is left across the whole line.
+        ->where('xp.rows.0.xp_remaining', 310_000),
+    );
+});
+
+it('records a blueprint discount and gives it back', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.research-xp', 90), ['research_xp' => 60_000])
+        ->assertRedirect();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('xp.rows.0.cells.8.unlocks.xp', 60_000)
+        ->where('xp.rows.0.cells.8.unlocks.full_xp', 149_400)
+        ->where('xp.rows.0.cells.8.unlocks.is_discounted', true)
+        ->where('xp.rows.0.xp_remaining', 595_000),
+    );
+
+    // Null, not zero: clearing restores the encyclopedia figure, where zero
+    // would record a tank you can unlock outright.
+    $this->actingAs($user)->patch(route('wot.grinding.research-xp', 90), ['research_xp' => null]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('xp.rows.0.cells.8.unlocks.xp', 149_400)
+        ->where('xp.rows.0.cells.8.unlocks.is_discounted', false),
+    );
+
+    expect(WotTankPurchase::where('wot_account_id', $account->id)->where('tank_id', 90)->first()->research_xp)
+        ->toBeNull();
+});
+
+it('keeps a recorded zero apart from no discount at all', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.research-xp', 90), ['research_xp' => 0]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('xp.rows.0.cells.8.unlocks.xp', 0)
+        // Fragments enough to unlock outright is a discount, not an absence.
+        ->where('xp.rows.0.cells.8.unlocks.is_discounted', true),
+    );
+});
+
+it('drops module XP as modules are ticked researched', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.research-module', 90), [
+        'module_id' => 200, 'researched' => true,
+    ])->assertRedirect();
+
+    expect(WotTankModule::where('wot_account_id', $account->id)->first()->researched_module_ids)->toBe([200]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('xp.rows.0.cells.9.module_xp', 10_000)
+        ->where('xp.rows.0.cells.9.module_xp_total', 100_000),
+    );
+});
+
+/**
+ * A researched module has nothing left to spend Free XP on, so it comes off the
+ * plan — otherwise the Free XP board would keep charging for it.
+ */
+it('takes a researched module off the Free XP plan', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.module-plan', 90), ['module_id' => 200, 'planned' => true]);
+    $this->actingAs($user)->patch(route('wot.grinding.research-module', 90), ['module_id' => 200, 'researched' => true]);
+
+    $row = WotTankModule::where('wot_account_id', $account->id)->first();
+
+    expect($row->planned_module_ids)->toBe([])
+        ->and($row->researched_module_ids)->toBe([200]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(
+        fn ($page) => $page->where('totals.free_xp_planned', 0),
+    );
+});
+
+it('refuses to plan Free XP for a module already researched', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.research-module', 90), ['module_id' => 200, 'researched' => true]);
+    $this->actingAs($user)->patch(route('wot.grinding.module-plan', 90), ['module_id' => 200, 'planned' => true]);
+
+    expect(WotTankModule::where('wot_account_id', $account->id)->first()->planned_module_ids ?? [])->toBe([]);
+});
+
+it('counts a shared vehicle on one XP row only', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $nation = WotVehicle::where('tank_id', 100)->value('nation');
+    WotVehicle::factory()->create(['tank_id' => 101, 'name' => 'Other X', 'short_name' => 'Oth X', 'tier' => 10, 'nation' => $nation, 'next_tanks' => null]);
+    WotVehicle::where('tank_id', 90)->update(['next_tanks' => json_encode([100 => 225_000, 101 => 240_000])]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->has('xp.rows', 2)
+        ->where('xp.rows.0.name', 'Oth X')
+        ->where('xp.rows.0.cells.9.is_shared', false)
+        // Each row's tier IX cell points at that row's own tier X.
+        ->where('xp.rows.0.cells.9.unlocks.tank_id', 101)
+        ->where('xp.rows.1.cells.9.is_shared', true)
+        ->where('xp.rows.1.cells.9.shared_with', 'Oth X')
+        /*
+         * The tier IX is shared, but the two unlocks off it are not: this row
+         * still owes the 225,000 to reach its own tier X, while its module XP
+         * is the other row's to count.
+         *
+         * Row 0: 149,400 + 50,000 (T8) + 240,000 + 100,000 (T9) = 539,400
+         * Row 1: 225,000 (T9's unlock only) + 160,000 (T10 modules) = 385,000
+         */
+        ->where('xp.rows.1.cells.9.unlocks.is_shared', false)
+        ->where('xp.rows.1.cells.9.unlocks.xp', 225_000)
+        ->where('xp.rows.0.xp_remaining', 539_400)
+        ->where('xp.rows.1.xp_remaining', 385_000)
+        ->where('xp.xp_remaining', 924_400),
+    );
+});
+
+it('rejects a research figure the board could never produce', function (array $payload) {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.research-xp', 90), $payload)->assertSessionHasErrors();
+})->with([
+    'negative' => [['research_xp' => -1]],
+    'absurd' => [['research_xp' => 99_999_999]],
+    'missing' => [[]],
+]);
+
+it('will not let one account record another account research', function () {
+    $owner = User::factory()->create();
+    $account = freeXpLine($owner);
+
+    $intruder = User::factory()->create();
+    WotAccount::factory()->for($intruder)->create(['account_id' => 999_999]);
+
+    $this->actingAs($intruder)->patch(route('wot.grinding.research-xp', 90), ['research_xp' => 1]);
+    $this->actingAs($intruder)->patch(route('wot.grinding.research-module', 90), ['module_id' => 200, 'researched' => true]);
+
+    expect(WotTankPurchase::where('wot_account_id', $account->id)->count())->toBe(0)
+        ->and(WotTankModule::where('wot_account_id', $account->id)->count())->toBe(0);
+});
+
+it('remembers the XP filters under their own board key', function () {
+    $user = User::factory()->create();
+    WotAccount::factory()->for($user)->create();
+
+    $this->actingAs($user)->patch(route('wot.grinding.filters'), [
+        'board' => 'xp', 'hidden_tiers' => [1, 2], 'hide_done' => false,
+    ])->assertNoContent();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('settings.xp_filters.hidden_tiers', [1, 2])
+        ->where('settings.xp_filters.hide_done', false)
+        ->where('settings.purchase_filters', null),
+    );
 });

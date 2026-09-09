@@ -11,8 +11,8 @@ use Illuminate\Validation\Rule;
  * Serves both grids. `board` picks which column the payload lands in; the rest
  * of the keys are `sometimes`, so a client sends only what changed and a
  * partial payload never clears the rest. hide_owned belongs to the purchase
- * board and only_planned to Free XP, but neither is rejected on the other —
- * a key a board never sends is simply a key it never stores.
+ * board, only_planned to Free XP and hide_done to XP Remaining, but none is
+ * rejected on another — a key a board never sends is simply one it never stores.
  */
 class BoardFiltersRequest extends FormRequest
 {
@@ -29,7 +29,7 @@ class BoardFiltersRequest extends FormRequest
              * the common case — "nothing hidden" — rather than a missing value.
              * present, not required, for that reason.
              */
-            'board' => ['required', Rule::in(['purchase', 'freexp'])],
+            'board' => ['required', Rule::in(['purchase', 'freexp', 'xp'])],
             'hidden_nations' => ['sometimes', 'present', 'array', 'max:50'],
             'hidden_nations.*' => [Rule::in(array_keys((array) config('wargaming.nations')))],
             'hidden_tiers' => ['sometimes', 'present', 'array', 'max:20'],
@@ -38,6 +38,7 @@ class BoardFiltersRequest extends FormRequest
             'hide_owned' => ['sometimes', 'boolean'],
             'show_sale' => ['sometimes', 'boolean'],
             'only_planned' => ['sometimes', 'boolean'],
+            'hide_done' => ['sometimes', 'boolean'],
         ];
     }
 }

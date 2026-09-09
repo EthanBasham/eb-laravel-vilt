@@ -21,6 +21,7 @@ class GrindBoard
     public function __construct(
         private readonly PurchaseBoard $purchases,
         private readonly FreeXpBoard $freeXp,
+        private readonly XpBoard $xp,
     ) {}
 
     /**
@@ -54,11 +55,13 @@ class GrindBoard
         // never quote different figures.
         $purchase = $this->purchases->for($account);
         $freexp = $this->freeXp->for($account);
+        $xp = $this->xp->for($account);
 
         return [
             'active' => $this->active($activeSteps, $targets, $vehicles),
             'purchase' => $purchase,
             'freexp' => $freexp,
+            'xp' => $xp,
             'targets' => $targets->map(fn (WotGrindTarget $t): array => $this->target($t, $vehicles))->values()->all(),
             'settings' => [
                 'credits_available' => (int) $settings->credits_available,
@@ -70,8 +73,15 @@ class GrindBoard
                  */
                 'purchase_filters' => $settings->purchase_filters,
                 'freexp_filters' => $settings->freexp_filters,
+                'xp_filters' => $settings->xp_filters,
             ],
-            'totals' => $this->totals($targets, $activeSteps, $purchase['credits_required'], $freexp['free_xp_planned']),
+            'totals' => $this->totals(
+                $targets,
+                $activeSteps,
+                $purchase['credits_required'],
+                $freexp['free_xp_planned'],
+                $xp['xp_remaining'],
+            ),
         ];
     }
 
@@ -181,6 +191,7 @@ class GrindBoard
         Collection $activeSteps,
         int $creditsRequired,
         int $freeXpPlanned,
+        int $xpRemaining,
     ): array {
         $open = $targets->where('is_complete', false);
 
@@ -193,7 +204,13 @@ class GrindBoard
             'targets' => $targets->count(),
             'open' => $open->count(),
             'xp_required' => (int) $open->sum(fn (WotGrindTarget $t): int => $t->steps->sum(fn (WotGrindStep $s): int => $s->xpRequired())),
-            'xp_remaining' => (int) $open->sum(fn (WotGrindTarget $t): int => $t->xpRemaining()),
+            /*
+             * The tree's figure, not the tracked targets' — the same move the
+             * credits total made. A board that shows the whole tree and a card
+             * that totals a handful of targets were two answers to one
+             * question, and the card is the one people read.
+             */
+            'xp_remaining' => $xpRemaining,
             'free_xp_planned' => $freeXpPlanned,
             'credits_required' => $creditsRequired,
             'blueprint_fragments' => (int) $targets->flatMap->steps->sum('blueprint_fragments'),

@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * Board-wide state that belongs to no single target: the two planning
  * figures, and where each board's filter row was left.
  */
-#[Fillable(['wot_account_id', 'credits_available', 'garage_slots_vacant', 'purchase_filters', 'freexp_filters'])]
+#[Fillable(['wot_account_id', 'credits_available', 'garage_slots_vacant', 'purchase_filters', 'freexp_filters', 'xp_filters'])]
 class WotGrindSetting extends Model
 {
     /**
@@ -25,6 +25,7 @@ class WotGrindSetting extends Model
             'garage_slots_vacant' => 'integer',
             'purchase_filters' => 'array',
             'freexp_filters' => 'array',
+            'xp_filters' => 'array',
         ];
     }
 

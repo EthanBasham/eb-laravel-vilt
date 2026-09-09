@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * else falls back to defaults derived from what the account has played. See
  * PurchaseBoard.
  */
-#[Fillable(['wot_account_id', 'tank_id', 'is_unlocked', 'is_purchased', 'price_credit'])]
+#[Fillable(['wot_account_id', 'tank_id', 'is_unlocked', 'is_purchased', 'price_credit', 'research_xp'])]
 class WotTankPurchase extends Model
 {
     /**
@@ -28,6 +28,7 @@ class WotTankPurchase extends Model
             'tank_id' => 'integer',
             'is_unlocked' => 'boolean',
             'is_purchased' => 'boolean',
+            'research_xp' => 'integer',
             'price_credit' => 'integer',
         ];
     }
