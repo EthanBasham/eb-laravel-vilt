@@ -101,13 +101,22 @@ body:has(.wot) {
  * Form controls default to a light-mode palette that is unreadable here, and
  * there are enough of them in the garage filters to be worth setting once
  * rather than repeating utilities on each.
+ *
+ * In @layer base because these are defaults, and that is the only thing that
+ * lets a component override one. Cascade layers outrank specificity: an
+ * unlayered rule beats every Tailwind utility no matter how specific, because
+ * utilities live in @layer utilities. Left unlayered, this silently won against
+ * any bg-*, border-* or text-* a component set on its own field — including
+ * focus:border-wot-gold, which never painted.
  */
-.wot input[type='text'],
-.wot input[type='search'],
-.wot select {
-    background-color: var(--color-wot-sunken);
-    border-color: var(--color-wot-border);
-    color: var(--color-wot-text);
+@layer base {
+    .wot input[type='text'],
+    .wot input[type='search'],
+    .wot select {
+        background-color: var(--color-wot-sunken);
+        border-color: var(--color-wot-border);
+        color: var(--color-wot-text);
+    }
 }
 
 .wot input::placeholder {
