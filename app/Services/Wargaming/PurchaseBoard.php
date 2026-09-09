@@ -167,29 +167,33 @@ class PurchaseBoard
         $cells = $cells->filter()->values();
 
         /*
-         * Anything below a vehicle you own was researched through to reach it,
-         * so it was owned too — the same reason the backfilled ancestors above
-         * default to owned.
+         * Anything below a vehicle you have *played* was researched through to
+         * reach it, so it was owned too.
          *
-         * It needs saying at the row level because "played" means in the garage
-         * with battles: sell a tank after moving up the line and every trace of
-         * having owned it goes with it. That is what left a researched-past
-         * tier IX reading as still to buy under a tier X you own.
+         * It needs saying because "played" means in the garage with battles:
+         * sell a tank after moving up the line and every trace of having owned
+         * it goes with it, which left a researched-past tier IX reading as
+         * still to buy under a tier X you have battles in.
          *
-         * An explicit purchase record still wins, so un-ticking one to say you
-         * sold it and want it back keeps working. Only cells with nothing
-         * stored about them are inferred.
+         * The trigger is deliberately play history and nothing else. Inferring
+         * from is_purchased instead would make the rule contagious — ticking a
+         * tier IX as bought would silently mark the VIII beneath it bought and
+         * researched as well, which is a statement about the VIII that you did
+         * not make. Tanks get sold, and saying so has to stay possible after
+         * the initial state is worked out.
+         *
+         * An explicit purchase record wins over the inference either way.
          */
         $owned = false;
         $cells = $cells
             ->reverse()
-            ->map(function (array $cell) use (&$owned, $purchases): array {
+            ->map(function (array $cell) use (&$owned, $purchases, $played): array {
                 if ($owned && ! $purchases->has($cell['tank_id'])) {
                     $cell['is_purchased'] = true;
                     $cell['is_unlocked'] = true;
                 }
 
-                $owned = $owned || $cell['is_purchased'];
+                $owned = $owned || $played->has($cell['tank_id']);
 
                 return $cell;
             })

@@ -2612,3 +2612,32 @@ which state looks active, which is what prompted the question. Checked now means
 control and the flag it sets read the same way round.
 
 Suite: **183 passed, 1023 assertions.**
+
+
+## 2026-09-09 — Ticking a tank bought no longer speaks for the ones beneath it
+
+Reported: marking the tier IX in the KPz 67 line as purchased also marked the tier VIII as
+researched and bought. *"This should not be an enforced assumption past initialization. It is
+possible to sell tanks, and I would like the option to indicate that where applicable."*
+
+The row-level rule added earlier the same day — anything below a vehicle you own was owned to reach
+it — was triggering on `is_purchased`, which meant it fired on a tick as readily as on play
+history. Reproduced exactly: with the tier VIII (Pz.Kpfw. 55) holding no purchase record, ticking
+the tier IX (Versuchspanzer 57) flipped it to bought *and* researched.
+
+The trigger is now **play history and nothing else**. Battles in a vehicle are evidence you owned
+what sits under it; a tick is a statement about one tank, and propagating it downward puts words in
+your mouth about tanks you may well have sold. An explicit purchase record still wins over the
+inference either way, so saying you sold something sticks.
+
+Both directions verified against the live board: ticking the KPz 67's tier IX leaves the VIII
+alone, while the Obj. 140 line's T-54 is still settled by the played tier X above it — which was
+the case the rule was written for.
+
+**"Buying a line's last vehicle settles the line" is gone as a rule**, and that is the point rather
+than a casualty. It made sense while the server dropped bought-out lines and there was nothing to
+click; now the lines stay and the tiers under them are yours to state. Two tests pinned it and were
+rewritten to pin the replacement — one that a tick does not spread, one that play history still
+does and that un-ticking survives it.
+
+Suite: **184 passed, 1047 assertions.**

@@ -547,7 +547,14 @@ it('leaves a tank researched when it is marked as not bought', function () {
     expect(WotTankPurchase::where('tank_id', 80)->first()->is_unlocked)->toBeTrue();
 });
 
-it('drops a line once its last vehicle is bought', function () {
+/**
+ * Marking a vehicle bought says something about that vehicle and nothing else.
+ * Owning a tier X does imply having owned the IX to research past it, but that
+ * is inferred from having *played* the X — a tick is a statement you made, and
+ * spreading it down the line would put words in your mouth about tanks you may
+ * well have sold.
+ */
+it('does not mark the tiers below a vehicle you tick as bought', function () {
     $user = User::factory()->create();
     purchaseLine($user);
 
@@ -557,12 +564,39 @@ it('drops a line once its last vehicle is bought', function () {
         // The line stays on the board — it is a record of what you own, and it
         // is the filter's job to hide it, not the server's.
         ->has('purchase.rows', 1)
-        // Buying the top of a line settles it: you cannot research past a
-        // vehicle you do not own, so the tiers below were bought too.
+        ->where('purchase.rows.0.cells.10.is_purchased', true)
+        // The tier VIII is in the garage, so it was owned all along.
         ->where('purchase.rows.0.cells.8.is_purchased', true)
+        // The tier IX is not, and ticking the X above it does not change that.
+        ->where('purchase.rows.0.cells.9.is_purchased', false)
+        ->where('purchase.rows.0.credits_remaining', 3_400_000)
+        ->where('totals.credits_required', 3_400_000),
+    );
+});
+
+/**
+ * The other half: what you have played still settles what sits under it, which
+ * is how a line researched past long ago reads as owned without ticking every
+ * tier by hand.
+ */
+it('settles the tiers below a vehicle that has been played', function () {
+    [$eight, $nine, $ten] = techLine();
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create();
+    played($account, $ten->tank_id);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
         ->where('purchase.rows.0.cells.9.is_purchased', true)
-        ->where('purchase.rows.0.credits_remaining', 0)
-        ->where('totals.credits_required', 0),
+        ->where('purchase.rows.0.cells.8.is_purchased', true)
+        ->where('purchase.rows.0.credits_remaining', 0),
+    );
+
+    // ...and saying you sold one still sticks.
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['is_purchased' => false]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('purchase.rows.0.cells.9.is_purchased', false)
+        ->where('purchase.rows.0.credits_remaining', 3_400_000),
     );
 });
 
@@ -850,9 +884,11 @@ it('claims a shared vehicle for the row that appears first', function () {
  */
 it('never lets an owned line claim a shared vehicle from one that still owes', function () {
     $user = User::factory()->create();
-    branchedLines($user);
+    [$account] = branchedLines($user);
 
-    $this->actingAs($user)->patch(route('wot.grinding.purchase', 100), ['is_purchased' => true]);
+    // Played rather than ticked: play history is what settles the tiers under a
+    // vehicle, so this is what actually leaves line A owning nothing.
+    played($account, 100);
 
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
         // Both lines are on the board now; line A is simply settled.
