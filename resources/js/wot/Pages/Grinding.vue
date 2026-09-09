@@ -637,17 +637,6 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
             </div>
 
             </template>
-
-            <p class="mt-3 text-xs text-wot-dim">
-                Prices come from the encyclopedia and can be typed over when a seasonal discount applies.
-                Sale prices are the standard structure — 50% off tiers II–V and VIII–X, 30% off
-                tiers VI–VII — and are a preview only: nothing is saved, and the field is read-only
-                while it is on. Every line stays on the board, including ones you have finished —
-                use the Owned filter to put them away. Hiding a tier takes it out of the totals.
-                Tiers you have already bought out start hidden — turn one back on to un-tick
-                something in it. A tank that sits on more than one line is counted, and edited,
-                only on the first line that shows it.
-            </p>
         </section>
 
         <!-- 3-5. Target-driven views -------------------------------------------->
@@ -780,7 +769,12 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
             </div>
         </section>
 
-        <div class="mt-8 grid gap-6 lg:grid-cols-2">
+        <!-- The purchase board is a shopping list, and both forms below ask
+             questions that belong to the grind rather than to the list. Note the
+             consequence: credits_available is only editable from another tab,
+             even though the shortfall under Credits needed is measured against
+             it here. -->
+        <div v-if="view !== 'purchase'" class="mt-8 grid gap-6 lg:grid-cols-2">
             <form class="border border-wot-border bg-wot-panel p-4" @submit.prevent="addTarget">
                 <h2 class="text-base">Add a target</h2>
                 <p class="mt-1 text-xs text-wot-dim">The path is built from the tech tree, starting at the last vehicle you've played.</p>
