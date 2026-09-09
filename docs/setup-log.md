@@ -2444,3 +2444,171 @@ under-reported — 76 vehicles is a lower bound, and a vehicle reachable from tw
 to whichever unlocks it cheaper. The board is not authoritative on which lines share a vehicle.
 
 Suite: **187 passed, 1045 assertions.**
+
+
+## 2026-09-09 — Owned lines stay on the board, behind a filter
+
+Reported: "it is removing lines that I fully own". Two things were removing them — the server
+rejected any row whose top cell was bought, and the client hid any row with nothing left to pay.
+Both are gone; the board now shows every line and an **Owned** filter puts the finished ones away,
+matching how Nation and Tier already work.
+
+### The seam that had to be closed first
+
+Three lines were being hidden, and displaying them naively pushed `credits_required` from
+440,980,000 to 447,830,000. Two of them held an unbought tier IX under a bought tier X — the
+Obj. 140 line wanting 3,450,000 for a T-54, the EBR 105 line 3,400,000 for an EBR 90.
+
+The first instinct was to correct the stored data. There was nothing to correct: **neither tank has
+a purchase record at all.** They read as unbought because `played` means *in the garage with
+battles*, and selling a tank after moving up the line takes every trace of having owned it. The
+board already knew better in one place — backfilled ancestors default to owned precisely because
+you researched through them — and simply did not apply that reasoning to steps or to a candidate
+sitting under its own successor.
+
+So the rule moved up to the row, where both paths meet:
+
+> anything below a vehicle you own was owned too, because you cannot research past a vehicle
+> without having owned it.
+
+An explicit purchase record still wins, so un-ticking a tier you sold and want back keeps working;
+only cells with nothing stored about them are inferred. With that in place the three lines are
+fully owned, contribute nothing, and `credits_required` is unchanged at 440,980,000 — the 6,850,000
+was never a real debt, just an inference the board was not making.
+
+`is_bought_out` came out entirely. It existed only to drive the reject, and "settled" is now simply
+`credits_remaining === 0` — which is also what the client's filter tests, so the flag would have
+been a second definition of the same idea.
+
+### Claiming needed a second pass
+
+Owned lines staying on the board broke an assumption in `claimShared()`. A settled line shows the
+same low tiers as a line still working up to them and sorts wherever its name puts it. Claiming
+strictly in display order, it could take a shared cell by arriving first — contributing nothing
+because it owns the tank, while the row that still owed carried it read-only and contributed
+nothing either. The price would have dropped off the board silently.
+
+Ownership now runs in two passes: rows that still owe a vehicle get first refusal, and only then
+does anything nobody owes fall to the first row showing it. Pinned by
+`it('never lets an owned line claim a shared vehicle from one that still owes')`.
+
+Ownership is also keyed on the row `key` rather than its name now. Rows are named after their tier
+X, two lines could share one, and the sort's tie-break already assumes names can collide.
+
+### Result
+
+Live board: **48 → 51 rows**, 3 fully owned, `credits_required` unchanged at 440,980,000. The
+filter only appears when there is something to hide, and says how many lines it would put away.
+
+Suite: **187 passed, 1059 assertions.**
+
+
+## 2026-09-09 — Tanks to Purchase is the tech tree, not a projection of your targets
+
+Reported, in order: the Owned filter did nothing; the Sheridan line was missing; and then the
+framing that explains both — *"the board should show all tanks in the entire tech tree. The notion
+of adding targets is a misnomer for this table."*
+
+The filter was working. There was no Sheridan row to show, and there never had been. Rows came from
+three places, and none of them could produce that line:
+
+- **tracked targets** — the Sheridan was not one;
+- **candidates**, meaning anything one research step from something played — a candidate is
+  something you could *buy next*, so a vehicle you already own can never be one;
+- and nothing else.
+
+31 tier X vehicles were owned; **16 had no row at all**, and every one of the 16 had no successor.
+They sit at the top of their branch, so nothing above them is buyable, so no candidate row could
+ever exist for them. Kranvagn, STB-1, Type 5 H, T110E3, Obj. 268/4, Sheridan.
+
+### The reframe
+
+`PurchaseBoard` now enumerates the tree: **one row per branch top**, a vehicle nothing else
+researches from, with its whole lineage behind it. `for()` no longer takes `$targets` at all.
+
+`targetRow()`, `candidateRows()`, `ownedRows()`, `$covered` and `$subsumed` all collapsed into one
+`lineRows()`. Those five existed to answer "which lines are worth showing?", which stops being a
+question when the answer is all of them. Deciding what to look at moved to the filters, where the
+user put it.
+
+The tier floor earns a second job: 159 vehicles unlock nothing, but 86 are tier II–VII dead ends
+that are branch tops only in the technical sense. `purchase_min_tier` keeps them out, leaving the
+72 lines the tree actually ends at.
+
+**Ownership got simpler and more honest as a side effect.** It used to be positional — an ancestor
+cell was owned because it was backfilled, a step was owned because it was position zero. Now a cell
+is owned if the vehicle has been played, and the rule added earlier that day fills in the rest:
+anything below something owned was owned to reach it. The same tank no longer reads bought on one
+line and unbought on another, which was a real inconsistency the old scheme produced and one of its
+tests actually pinned.
+
+### The headline card follows the board now
+
+`credits_required` is the cost of the entire tree — the honest number for a board that is the
+entire tree, and a useless one to hold against your balance. The "Credits needed" card reads the
+client's filtered `grandTotal` instead, so narrowing to a nation or hiding what you own answers
+"what would finishing this cost me?". The server total still drives nothing else.
+
+### Tests
+
+Eight pinned concepts that no longer exist — candidate gating, tracked-versus-candidate dedup, the
+two-floor rule, the tier XI successor push — and were removed with approval rather than contorted
+into new shapes. Four fresh ones replace them: every line gets a row tracked or not, a line you own
+outright shows owing nothing, the floor decides what counts as a line, and the board is unchanged
+by adding a grind target.
+
+Two survivors needed repointing rather than deleting. `it('names a purchase row after its tier X')`
+now proves the rule where it still bites — a line running on to a tier XI is headed by the XI and
+named for its X. And the researched-past test now pins the *better* behaviour: both lines agree
+about the tank they share, and one of them claims it.
+
+The fixtures moved with the model: `purchaseLine()` marks its tier VIII played rather than relying
+on position zero, and `branchedLines()` its tier VII. That one change took the failures from 17 to
+10 — the fixtures were expressing "you already own the bottom of this line" in the old vocabulary.
+
+### Result
+
+Live board: **51 → 72 lines**, 20 fully owned, 702 cells of which 269 are shared duplicates, tiers
+1–11, built in ~50 ms. Whole-tree cost 491,320,000; the card shows whatever the filters leave.
+
+Suite: **182 passed, 1011 assertions.**
+
+
+## 2026-09-09 — Collector's vehicles are not lines
+
+Asked about the 113 and the AMX 30 appearing as lines. They are collector's vehicles, and the
+board should not carry them.
+
+They turn out to be identifiable from structure alone, which matters because **the encyclopedia
+publishes no flag for it**: `is_premium` is false for all of them, and `is_gift` was dropped back
+in `2026_09_09_033544` as unused. What they do have is no lineage at all — neither a predecessor
+nor a successor:
+
+| vehicle | predecessor | ancestors |
+|---|---|---|
+| 113 | none | 0 |
+| AMX 30 | none | 0 |
+| AMX 30 B | none | 0 |
+| WZ-113G FT (a real line top) | WZ-111G FT | 9 |
+| Rinoceronte (a real line top) | Progetto 66 | 9 |
+
+Nothing researches into them because they are bought outright, so they head no line and rendered
+as a one-cell row with no path behind it. `lineRows()` now rejects a branch top with no
+predecessor, which at tier VIII and above can only mean unreachable by research.
+
+Five rows went, and they were exactly the five one-cell rows on the board: the 113, both AMX 30s,
+the Jagdpanther II and the T-62A. Lines **72 → 67**, and the bill fell by 21,850,000 — precisely
+what those five were asking for, with no knock-on effects.
+
+Worth recording because it nearly became a false alarm: the total looked like it had dropped
+46,970,000, about 25M more than the five rows cost. Measuring the change in isolation showed the
+arithmetic was exact, and the gap was simply the account marking 22 vehicles as bought in the
+browser between the two readings. Two measurements of live data taken at different times are not a
+before-and-after.
+
+Also this session: the Owned control became a checkbox reading "Hide lines that are fully owned",
+checked by default. A tick-box can state what it does; a chip toggle leaves you to infer it from
+which state looks active, which is what prompted the question. Checked now means hidden, so the
+control and the flag it sets read the same way round.
+
+Suite: **183 passed, 1023 assertions.**

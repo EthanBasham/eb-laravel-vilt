@@ -172,6 +172,18 @@ const hiddenNations = ref([]);
  */
 const hiddenTiers = ref([...(props.purchase.bought_tiers ?? [])]);
 
+/*
+ * Lines with nothing left to buy, hidden by default.
+ *
+ * The board is the whole tech tree now, so most of what it holds on any given
+ * visit is finished business — and the arithmetic above it reads the visible
+ * rows, so leaving them in makes the headline figure the cost of the tree
+ * rather than the cost of what is left. They are still there, one click away,
+ * which is the part that was missing before: the server used to drop them and
+ * there was nothing to click.
+ */
+const hideOwned = ref(true);
+
 const page = usePage();
 
 const drop = (list, value) => (list.includes(value)
@@ -199,18 +211,33 @@ const shownTiers = computed(() => props.purchase.tiers.filter((t) => !hiddenTier
 const cellCost = (cell) => (cell && !cell.is_purchased && !cell.is_shared ? cell.price : 0);
 const rowRemaining = (row) => shownTiers.value.reduce((sum, t) => sum + cellCost(row.cells[t]), 0);
 
-// A line with nothing left to buy in the visible tiers is not a shopping list
-// row — the same rule the server applies to a line that has been bought out,
-// applied to the tiers on screen rather than to all of them.
+// "Owned" means nothing left to buy in the visible tiers, so it tracks the
+// Remaining column rather than a separate server flag: if the row reads 0, the
+// filter treats it as owned.
+const isOwned = (row) => rowRemaining(row) === 0;
+
+// Only offer the checkbox when it would do something.
+const hasOwnedLines = computed(() => props.purchase.rows.some(isOwned));
+
 const shownRows = computed(() => props.purchase.rows.filter(
-    (r) => !hiddenNations.value.includes(r.nation) && rowRemaining(r) > 0,
+    (r) => !hiddenNations.value.includes(r.nation) && !(hideOwned.value && isOwned(r)),
 ));
 const tierTotal = (tier) => shownRows.value.reduce((sum, r) => sum + cellCost(r.cells[tier]), 0);
 const grandTotal = computed(() => shownRows.value.reduce((sum, r) => sum + rowRemaining(r), 0));
 const short = (v) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : n(v));
 
-// Credits shortfall is the number that decides whether a plan is realistic.
-const creditGap = computed(() => props.totals.credits_required - props.settings.credits_available);
+/*
+ * Credits shortfall is the number that decides whether a plan is realistic, so
+ * it follows the board rather than the server's total.
+ *
+ * The server now bills the entire tech tree, which is the honest number for a
+ * board that shows the entire tech tree and a useless one to hold against your
+ * balance. Reading the filtered total instead means narrowing to a nation, or
+ * hiding what you own, answers "what would finishing this cost me?".
+ *
+ * Declared after grandTotal because it reads it.
+ */
+const creditGap = computed(() => grandTotal.value - props.settings.credits_available);
 </script>
 
 <template>
@@ -243,7 +270,7 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
             <div class="border border-wot-border bg-wot-panel p-3">
                 <dt class="text-xs uppercase tracking-wider text-wot-dim">Credits needed</dt>
                 <dd class="mt-1 text-xl tabular-nums" :class="creditGap > 0 ? 'text-wot-bad' : 'text-wot-good'">
-                    {{ short(totals.credits_required) }}
+                    {{ short(grandTotal) }}
                 </dd>
                 <p class="mt-0.5 text-xs text-wot-dim">
                     {{ creditGap > 0 ? `${short(creditGap)} short` : 'covered' }}
@@ -395,6 +422,21 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
                                 @click="hiddenTiers = []">
                             All
                         </button>
+                    </div>
+
+                    <!-- A checkbox rather than a filter button. The two rows
+                         above pick which of many values to show, where a
+                         selected/unselected chip reads naturally; this is one
+                         on/off decision, and a label can say outright what
+                         ticking it does instead of leaving you to infer it from
+                         which state looks active. Checked means hidden, so the
+                         control and the flag it sets agree. -->
+                    <div v-if="hasOwnedLines" class="flex flex-wrap items-center gap-1.5">
+                        <span class="w-12 shrink-0 text-xs font-bold uppercase tracking-wider text-wot-dim">Lines</span>
+                        <label class="flex items-center gap-2 text-xs text-wot-text">
+                            <input v-model="hideOwned" type="checkbox" class="border">
+                            Hide lines that are fully owned
+                        </label>
                     </div>
                 </div>
 
@@ -558,8 +600,8 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
 
             <p class="mt-3 text-xs text-wot-dim">
                 Prices come from the encyclopedia and can be typed over when a seasonal discount applies.
-                A line disappears once its last vehicle is bought, or once the visible tiers hold
-                nothing it still has to pay for. Hiding a tier takes it out of the totals.
+                Every line stays on the board, including ones you have finished — use the Owned
+                filter to put them away. Hiding a tier takes it out of the totals.
                 Tiers you have already bought out start hidden — turn one back on to un-tick
                 something in it. A tank that sits on more than one line is counted, and edited,
                 only on the first line that shows it.
