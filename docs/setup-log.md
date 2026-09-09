@@ -2082,7 +2082,7 @@ read five hours late, new rows included.
    returning. The instant is unchanged; only its expression moves.
 4. A migration, `convert_timestamps_from_utc_to_app_timezone`, rebasing existing rows.
 
-The migration discovers its targets from `information_schema` rather than listing them — 43
+The migration discovers its targets from `information_schema` rather than listing them — 44
 zone-less timestamp columns across 17 tables, which is more than the news tables because every
 `created_at` in the database was written by a UTC `now()`. It converts in Postgres via
 `AT TIME ZONE 'UTC' AT TIME ZONE 'America/Chicago'` so the offset used is the one actually in
@@ -2124,3 +2124,16 @@ Test case: `Grinding.vue`'s Tanks-to-Purchase Unlock/Buy button now renders `Ico
 `is_unlocked` condition that already drove the label text and border color. Presentational
 only — no props, backend, or test assertions changed; `GrindingTest.php` still passes
 (49 passed, 390 assertions) since it never asserted on button markup.
+
+## 2026-09-09 — Pinning is a grouping mechanic, not its own order
+
+`WotArticle::scopePinnedFirstFor()` dropped its `ORDER BY wot_article_pins.pinned_at DESC`
+tier. Pinned articles still hoist above unpinned ones, but now sort among themselves the same
+way unpinned ones do — by `published_at DESC`, then `id DESC`. Re-pinning still refreshes
+`pinned_at` (needed for "is this pinned" state and to avoid the unique-constraint error) but
+that refresh no longer moves the article's position.
+
+`ArticlePinTest.php`'s pin-ordering tests were written against the old behavior and asserted
+pin-recency ordering; updated to assert publish-date ordering instead (`orders several pins by
+published date, not by when they were pinned`), and the idempotent re-pin test dropped its
+now-untrue "moves back to the top" assertion, keeping only the unique-constraint check.

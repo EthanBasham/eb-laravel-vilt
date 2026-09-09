@@ -1,5 +1,6 @@
 <script setup>
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
+import { IconLock, IconShoppingCart } from '@tabler/icons-vue';
 import { computed, ref } from 'vue';
 import AppShell from '../Components/AppShell.vue';
 import EditableNumber from '../Components/EditableNumber.vue';
@@ -362,7 +363,7 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
 
                                             <button
                                                 type="button"
-                                                class="border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors"
+                                                class="inline-flex items-center gap-1 border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors"
                                                 :class="row.cells[tier].is_unlocked
                                                     ? 'border-wot-good/50 text-wot-good hover:bg-wot-good/15'
                                                     : 'border-wot-border text-wot-dim hover:text-wot-text'"
@@ -371,6 +372,7 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
                                                     ? setPurchase(row.cells[tier].tank_id, { is_purchased: true })
                                                     : setPurchase(row.cells[tier].tank_id, { is_unlocked: true })"
                                             >
+                                                <component :is="row.cells[tier].is_unlocked ? IconShoppingCart : IconLock" :size="12" stroke-width="2.25" />
                                                 {{ row.cells[tier].is_unlocked ? 'Buy' : 'Unlock' }}
                                             </button>
                                         </div>
