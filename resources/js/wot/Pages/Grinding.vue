@@ -184,6 +184,23 @@ const hiddenTiers = ref([...(props.purchase.bought_tiers ?? [])]);
  */
 const hideOwned = ref(true);
 
+/*
+ * Wargaming's standard sale structure, as a discount per tier.
+ *
+ * Tier I is free already, and tier XI is not part of the published structure,
+ * so neither is listed — a tier missing from here is simply not discounted.
+ *
+ * This is a preview, not a stored price: it applies to whatever a cell already
+ * costs, so a price you have typed over for a specific offer gets discounted
+ * along with the rest.
+ */
+const SALE = { 2: 0.5, 3: 0.5, 4: 0.5, 5: 0.5, 6: 0.3, 7: 0.3, 8: 0.5, 9: 0.5, 10: 0.5 };
+const showSale = ref(false);
+
+const salePrice = (cell) => (showSale.value
+    ? Math.round(cell.price * (1 - (SALE[cell.tier] ?? 0)))
+    : cell.price);
+
 const page = usePage();
 
 const drop = (list, value) => (list.includes(value)
@@ -208,7 +225,7 @@ const shownTiers = computed(() => props.purchase.tiers.filter((t) => !hiddenTier
 // A shared cell costs this row nothing: the row that owns the vehicle is paying
 // for it, which is what keeps the row totals summing to the grand total and
 // agreeing with the server's credits_remaining cell for cell.
-const cellCost = (cell) => (cell && !cell.is_purchased && !cell.is_shared ? cell.price : 0);
+const cellCost = (cell) => (cell && !cell.is_purchased && !cell.is_shared ? salePrice(cell) : 0);
 const rowRemaining = (row) => shownTiers.value.reduce((sum, t) => sum + cellCost(row.cells[t]), 0);
 
 // "Owned" means nothing left to buy in the visible tiers, so it tracks the
@@ -438,6 +455,14 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
                             Hide lines that are fully owned
                         </label>
                     </div>
+
+                    <div class="flex flex-wrap items-center gap-1.5">
+                        <span class="w-12 shrink-0 text-xs font-bold uppercase tracking-wider text-wot-dim">Prices</span>
+                        <label class="flex items-center gap-2 text-xs text-wot-text">
+                            <input v-model="showSale" type="checkbox" class="border">
+                            Show discounted prices
+                        </label>
+                    </div>
                 </div>
 
                 <p v-if="!shownRows.length" class="border border-dashed border-wot-border p-8 text-center text-sm text-wot-dim">
@@ -481,7 +506,7 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
                                             class="tabular-nums text-wot-dim/60"
                                             :title="`${row.cells[tier].name} — shared with ${row.cells[tier].shared_with}, where it is counted and edited.`"
                                         >
-                                            {{ n(row.cells[tier].is_purchased ? 0 : row.cells[tier].price) }}
+                                            {{ n(row.cells[tier].is_purchased ? 0 : salePrice(row.cells[tier])) }}
                                         </span>
 
                                         <!-- Owned: nothing left to pay, so the cell
@@ -537,7 +562,22 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
                                                 <component :is="row.cells[tier].is_unlocked ? IconLock : IconLockOpen" :size="14" stroke-width="2.25" />
                                             </button>
 
+                                            <!-- A previewed sale price is derived, not
+                                                 stored, so it shows as text: typing into
+                                                 the field would save the discounted
+                                                 figure as though it were the real one.
+                                                 Sized like the input it replaces so the
+                                                 group does not shift when you toggle. -->
+                                            <span
+                                                v-if="showSale"
+                                                class="w-20 border border-wot-border bg-wot-sunken px-1 py-0.5 text-end text-sm tabular-nums text-wot-gold"
+                                                :title="`${row.cells[tier].name} — ${n(row.cells[tier].price)} at full price`"
+                                            >
+                                                {{ n(salePrice(row.cells[tier])) }}
+                                            </span>
+
                                             <EditableNumber
+                                                v-else
                                                 :field="'price_credit'"
                                                 :model-value="row.cells[tier].price"
                                                 :url="`/wot/grinding/purchases/${row.cells[tier].tank_id}`"
@@ -600,8 +640,10 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
 
             <p class="mt-3 text-xs text-wot-dim">
                 Prices come from the encyclopedia and can be typed over when a seasonal discount applies.
-                Every line stays on the board, including ones you have finished — use the Owned
-                filter to put them away. Hiding a tier takes it out of the totals.
+                Sale prices are the standard structure — 50% off tiers II–V and VIII–X, 30% off
+                tiers VI–VII — and are a preview only: nothing is saved, and the field is read-only
+                while it is on. Every line stays on the board, including ones you have finished —
+                use the Owned filter to put them away. Hiding a tier takes it out of the totals.
                 Tiers you have already bought out start hidden — turn one back on to un-tick
                 something in it. A tank that sits on more than one line is counted, and edited,
                 only on the first line that shows it.
