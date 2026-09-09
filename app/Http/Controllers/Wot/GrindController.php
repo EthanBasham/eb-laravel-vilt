@@ -7,9 +7,11 @@ use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Wot\UpdateGrindStepRequest;
+use App\Http\Requests\Wot\UpdateTankPurchaseRequest;
 use App\Models\WotGrindSetting;
 use App\Models\WotGrindStep;
 use App\Models\WotGrindTarget;
+use App\Models\WotTankPurchase;
 use App\Models\WotVehicle;
 use App\Services\Wargaming\GrindBoard;
 use App\Services\Wargaming\TechTree;
@@ -108,6 +110,38 @@ class GrindController extends Controller
         ]);
 
         $step->setModuleResearched($validated['module_id'], $validated['researched']);
+
+        return back(fallback: route('wot.grinding'));
+    }
+
+    /**
+     * Marks a vehicle researched or bought, or overrides what it costs.
+     *
+     * Keyed on the tank rather than on a grind step: the tier XI above a target
+     * belongs to no path, and a tank worth buying need not be one you are
+     * currently grinding towards.
+     */
+    public function updatePurchase(UpdateTankPurchaseRequest $request, int $tankId): RedirectResponse
+    {
+        $account = $request->user()->wotAccount;
+
+        abort_unless($account, 404);
+        abort_unless(WotVehicle::where('tank_id', $tankId)->exists(), 404);
+
+        $purchase = WotTankPurchase::firstOrNew([
+            'wot_account_id' => $account->id,
+            'tank_id' => $tankId,
+        ]);
+
+        $purchase->fill($request->validated());
+
+        // Buying a tank researches it, whatever order the buttons were pressed
+        // in — the reverse is not true.
+        if ($purchase->is_purchased) {
+            $purchase->is_unlocked = true;
+        }
+
+        $purchase->save();
 
         return back(fallback: route('wot.grinding'));
     }

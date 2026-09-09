@@ -18,6 +18,8 @@ use App\Models\WotVehicle;
  */
 class GrindBoard
 {
+    public function __construct(private readonly PurchaseBoard $purchases) {}
+
     /**
      * @return array<string, mixed>
      */
@@ -44,14 +46,19 @@ class GrindBoard
 
         $activeSteps = $this->activeSteps($targets, $vehicles);
 
+        // Credits are the purchase board's business alone, so the headline card
+        // and the Tanks to Purchase tab can never quote different figures.
+        $purchase = $this->purchases->for($account, $targets);
+
         return [
             'active' => $this->active($activeSteps, $targets, $vehicles),
+            'purchase' => $purchase,
             'targets' => $targets->map(fn (WotGrindTarget $t): array => $this->target($t, $vehicles))->values()->all(),
             'settings' => [
                 'credits_available' => (int) $settings->credits_available,
                 'garage_slots_vacant' => (int) $settings->garage_slots_vacant,
             ],
-            'totals' => $this->totals($targets, $activeSteps),
+            'totals' => $this->totals($targets, $activeSteps, $purchase['credits_required']),
         ];
     }
 
@@ -129,7 +136,6 @@ class GrindBoard
             'xp_required' => $target->steps->sum(fn (WotGrindStep $s): int => $s->xpRequired()),
             'xp_remaining' => $target->xpRemaining(),
             'free_xp_planned' => $target->freeXpPlanned(),
-            'credits_required' => $target->creditsRequired(),
             'blueprint_fragments' => (int) $target->steps->sum('blueprint_fragments'),
             'steps' => $target->steps->map(fn (WotGrindStep $s): array => [
                 'id' => $s->id,
@@ -159,7 +165,7 @@ class GrindBoard
      * @param  Collection<int, WotGrindStep>  $activeSteps
      * @return array<string, mixed>
      */
-    private function totals(Collection $targets, Collection $activeSteps): array
+    private function totals(Collection $targets, Collection $activeSteps, int $creditsRequired): array
     {
         $open = $targets->where('is_complete', false);
 
@@ -174,7 +180,7 @@ class GrindBoard
             'xp_required' => (int) $open->sum(fn (WotGrindTarget $t): int => $t->steps->sum(fn (WotGrindStep $s): int => $s->xpRequired())),
             'xp_remaining' => (int) $open->sum(fn (WotGrindTarget $t): int => $t->xpRemaining()),
             'free_xp_planned' => (int) $open->sum(fn (WotGrindTarget $t): int => $t->freeXpPlanned()),
-            'credits_required' => (int) $open->sum(fn (WotGrindTarget $t): int => $t->creditsRequired()),
+            'credits_required' => $creditsRequired,
             'blueprint_fragments' => (int) $targets->flatMap->steps->sum('blueprint_fragments'),
             'banked_xp' => (int) $targets->flatMap->steps->sum('banked_xp'),
         ];

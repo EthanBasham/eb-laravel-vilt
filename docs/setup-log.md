@@ -1769,3 +1769,64 @@ the divergent case: rows at 100% and 0% read 1%, not 50%.
 construction rather than by two matching predicates.
 
 Suite: **161 passed, 680 assertions.**
+
+## Tanks to Purchase rebuilt as a tier matrix
+
+The view was a row per line with a Credits column and a "Tanks to buy" count,
+sharing a table with XP Remaining, Free XP and Blueprints. Rebuilt as its own
+section: one row per research line, one column per tier, one cell per vehicle,
+and no XP, module or banked figure anywhere on it.
+
+Cell states, per the brief: a greyed `0` for a vehicle already bought, the price
+in white with an **Unlock** button when it is not researched, the price in green
+with a **Buy** button when it is researched but not bought. The greyed `0` is
+itself a button that reverts — a mis-click would otherwise be permanent. A line
+drops out of the table once its last vehicle is bought.
+
+### Ownership state lives on the tank, not the step
+
+New `wot_tank_purchases` table keyed on `(wot_account_id, tank_id)`, holding
+`is_unlocked`, `is_purchased` and a nullable `price_credit` override.
+
+Not columns on `wot_grind_steps`, for two reasons. Tier XI vehicles sit above
+every tier X target and belong to no research path, so hanging their state off a
+step would have meant inventing steps — and every XP total on the other tabs is
+reconciled against the spreadsheet, so nothing may be added to a path. And a
+tank worth buying is not always one on a tracked path.
+
+Rows only exist once something has been said about a tank. Defaults otherwise:
+purchased if the account has battles in the vehicle (the same signal that
+truncates a research path, so the two agree by construction) or if it is the
+line's position zero. Buying implies unlocking, enforced in the controller
+rather than trusted from the client.
+
+### Tier XI
+
+The API does carry tier XI — 28 vehicles, all 7,400,000 credits — and 27 tier Xs
+have `next_tanks` pointing at one. `PurchaseBoard` resolves that successor per
+line and appends it as a cell, without creating a grind step. 7 of the 17
+tracked lines have one. A test pins that the path stays three steps long.
+
+### Prices
+
+Cells default to the encyclopedia price and are typed over when a seasonal
+selectable discount applies. The override is nullable, so clearing it restores
+the shop price rather than recording a free tank; a `×` appears beside an
+overridden price to do exactly that. `EditableNumber` grew `url`/`only`/`tone`
+props for this — it was hard-wired to the grind-step endpoint.
+
+### One credits figure, not two
+
+`totals.credits_required` now comes from the purchase board rather than from
+`WotGrindTarget::creditsRequired()`, so the headline card, the tab footer and
+the visible rows cannot disagree. It sums the *visible* rows, which means buying
+a line's last vehicle settles that line even if an intermediate tier was never
+ticked — defensible because you cannot research past a vehicle you do not own.
+A test caught the first cut of this, where the total was summed after the
+bought-out rows were dropped while the docblock claimed the opposite.
+
+`credits_remaining` rejects purchased cells rather than skipping position zero,
+so un-ticking the vehicle you are grinding in puts its price back on the bill
+instead of leaving a Buy button over a cost nothing counts.
+
+Suite: **169 passed, 779 assertions.**

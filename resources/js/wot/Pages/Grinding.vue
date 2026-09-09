@@ -11,6 +11,7 @@ const props = defineProps({
     targets: { type: Array, default: () => [] },
     settings: { type: Object, required: true },
     totals: { type: Object, required: true },
+    purchase: { type: Object, required: true },
     options: { type: Array, default: () => [] },
 });
 
@@ -54,6 +55,15 @@ const removeTarget = (t) => {
 const toggleComplete = (t) => router.patch(`/wot/grinding/targets/${t.id}/complete`, {}, { preserveScroll: true });
 
 const n = (v) => new Intl.NumberFormat().format(v ?? 0);
+
+// Tiers are Roman in game and in every community tool; Arabic column headers
+// here would read as a different quantity entirely.
+const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI'];
+
+const setPurchase = (tankId, payload) => router.patch(`/wot/grinding/purchases/${tankId}`, payload, {
+    preserveScroll: true,
+    only: ['purchase', 'totals'],
+});
 const short = (v) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : n(v));
 
 // Credits shortfall is the number that decides whether a plan is realistic.
@@ -184,7 +194,115 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
             </div>
         </section>
 
-        <!-- 2-5. Target-driven views -------------------------------------------->
+        <!-- 2. Tanks to Purchase ------------------------------------------------>
+        <!--
+            Credits only. Every other figure on this page belongs to a different
+            question, and a shopping list that also quotes XP is a shopping list
+            you have to read twice.
+        -->
+        <section v-else-if="view === 'purchase'" class="mt-4" aria-labelledby="purchase-heading">
+            <h2 id="purchase-heading" class="sr-only">Tanks to purchase</h2>
+
+            <p v-if="!purchase.rows.length" class="border border-dashed border-wot-border p-8 text-center text-sm text-wot-dim">
+                Nothing left to buy. Every tracked line has been bought out.
+            </p>
+
+            <div v-else class="overflow-x-auto border border-wot-border bg-wot-panel">
+                <table class="min-w-full divide-y divide-wot-border text-sm">
+                    <thead class="bg-wot-sunken">
+                        <tr>
+                            <th scope="col" class="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Line</th>
+                            <th v-for="tier in purchase.tiers" :key="tier" scope="col"
+                                class="px-3 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">
+                                Tier {{ ROMAN[tier] }}
+                            </th>
+                            <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Remaining</th>
+                        </tr>
+                    </thead>
+
+                    <tbody class="divide-y divide-wot-border-soft">
+                        <tr v-for="row in purchase.rows" :key="row.id" class="hover:bg-wot-sunken">
+                            <td class="whitespace-nowrap px-4 py-2">
+                                <NationFlag :nation="row.nation" class="me-2" />
+                                <span class="text-wot-heading">{{ row.name }}</span>
+                            </td>
+
+                            <td v-for="tier in purchase.tiers" :key="tier" class="px-3 py-2 text-right align-top">
+                                <template v-if="row.cells[tier]">
+                                    <!-- Owned: nothing left to pay, so the cell
+                                         reads zero rather than restating a price
+                                         that is no longer owed. -->
+                                    <button
+                                        v-if="row.cells[tier].is_purchased"
+                                        type="button"
+                                        class="tabular-nums text-wot-dim hover:text-wot-muted"
+                                        :title="`${row.cells[tier].name} — bought. Mark as not bought.`"
+                                        @click="setPurchase(row.cells[tier].tank_id, { is_purchased: false })"
+                                    >
+                                        0
+                                    </button>
+
+                                    <div v-else class="flex flex-col items-end gap-1">
+                                        <div class="flex items-center justify-end">
+                                            <EditableNumber
+                                                :field="'price_credit'"
+                                                :model-value="row.cells[tier].price"
+                                                :url="`/wot/grinding/purchases/${row.cells[tier].tank_id}`"
+                                                :only="['purchase', 'totals']"
+                                                :tone="row.cells[tier].is_unlocked ? 'text-wot-good' : 'text-wot-text'"
+                                            />
+                                            <!-- Only offered once a price has been
+                                                 overridden; there is nothing to
+                                                 reset back to otherwise. -->
+                                            <button
+                                                v-if="row.cells[tier].is_discounted"
+                                                type="button"
+                                                class="ms-1 text-xs text-wot-dim hover:text-wot-bad"
+                                                :title="`Reset to the ${n(row.cells[tier].api_price)} shop price`"
+                                                @click="setPurchase(row.cells[tier].tank_id, { price_credit: null })"
+                                            >
+                                                &times;
+                                            </button>
+                                        </div>
+
+                                        <button
+                                            type="button"
+                                            class="border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-colors"
+                                            :class="row.cells[tier].is_unlocked
+                                                ? 'border-wot-good/50 text-wot-good hover:bg-wot-good/15'
+                                                : 'border-wot-border text-wot-dim hover:text-wot-text'"
+                                            :title="row.cells[tier].name"
+                                            @click="row.cells[tier].is_unlocked
+                                                ? setPurchase(row.cells[tier].tank_id, { is_purchased: true })
+                                                : setPurchase(row.cells[tier].tank_id, { is_unlocked: true })"
+                                        >
+                                            {{ row.cells[tier].is_unlocked ? 'Buy' : 'Unlock' }}
+                                        </button>
+                                    </div>
+                                </template>
+                            </td>
+
+                            <td class="px-4 py-2 text-right tabular-nums font-bold text-wot-heading">{{ n(row.credits_remaining) }}</td>
+                        </tr>
+                    </tbody>
+
+                    <tfoot v-if="purchase.rows.length > 1" class="border-t-2 border-wot-border bg-wot-sunken">
+                        <tr>
+                            <th scope="row" class="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Total</th>
+                            <td v-for="tier in purchase.tiers" :key="tier" class="px-3 py-3" />
+                            <td class="px-4 py-3 text-right tabular-nums font-bold text-wot-heading">{{ n(purchase.credits_required) }}</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+
+            <p class="mt-3 text-xs text-wot-dim">
+                Prices come from the encyclopedia and can be typed over when a seasonal discount applies.
+                A line disappears once its last vehicle is bought.
+            </p>
+        </section>
+
+        <!-- 3-5. Target-driven views -------------------------------------------->
         <section v-else class="mt-4" aria-labelledby="targets-heading">
             <h2 id="targets-heading" class="sr-only">{{ views.find((v) => v.key === view).label }}</h2>
 
@@ -200,10 +318,6 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
                             <template v-else-if="view === 'freexp'">
                                 <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Free XP planned</th>
                                 <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">XP remaining</th>
-                            </template>
-                            <template v-else-if="view === 'purchase'">
-                                <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Credits</th>
-                                <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Tanks to buy</th>
                             </template>
                             <template v-else>
                                 <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Fragments</th>
@@ -231,10 +345,6 @@ const creditGap = computed(() => props.totals.credits_required - props.settings.
                                 <template v-else-if="view === 'freexp'">
                                     <td class="px-4 py-2 text-right tabular-nums text-wot-gold">{{ n(t.free_xp_planned) }}</td>
                                     <td class="px-4 py-2 text-right tabular-nums text-wot-muted">{{ n(t.xp_remaining) }}</td>
-                                </template>
-                                <template v-else-if="view === 'purchase'">
-                                    <td class="px-4 py-2 text-right tabular-nums text-wot-heading">{{ n(t.credits_required) }}</td>
-                                    <td class="px-4 py-2 text-right tabular-nums text-wot-muted">{{ t.steps.filter((s) => s.price_credit).length }}</td>
                                 </template>
                                 <template v-else>
                                     <td class="px-4 py-2 text-right tabular-nums text-wot-gold">{{ t.blueprint_fragments }}</td>

@@ -3,10 +3,15 @@ import { router } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
 
 const props = defineProps({
-    stepId: { type: Number, required: true },
+    stepId: { type: Number, default: null },
     field: { type: String, required: true },
     modelValue: { type: [Number, String], default: 0 },
     align: { type: String, default: 'text-right' },
+    // Steps are the common case, so they stay the default. The purchase board
+    // edits vehicles instead, which are keyed by tank rather than by step.
+    url: { type: String, default: '' },
+    only: { type: Array, default: () => ['active', 'targets', 'totals'] },
+    tone: { type: String, default: '' },
 });
 
 const raw = ref(String(props.modelValue ?? 0));
@@ -48,10 +53,12 @@ const commit = () => {
     if (next === Number(props.modelValue ?? 0)) return;
 
     saving.value = true;
-    router.patch(`/wot/grinding/steps/${props.stepId}`, { [props.field]: next }, {
+    const url = props.url || `/wot/grinding/steps/${props.stepId}`;
+
+    router.patch(url, { [props.field]: next }, {
         preserveScroll: true,
         // Only the board comes back; nothing else on the page moved.
-        only: ['active', 'targets', 'totals'],
+        only: props.only,
         onFinish: () => (saving.value = false),
     });
 };
@@ -70,7 +77,7 @@ const commit = () => {
         inputmode="numeric"
         autocomplete="off"
         class="w-24 border border-transparent bg-transparent px-1 py-0.5 tabular-nums transition-colors hover:border-wot-border focus:border-wot-gold"
-        :class="[align, saving ? 'opacity-50' : '']"
+        :class="[align, tone, saving ? 'opacity-50' : '']"
         :disabled="saving"
         @input="onInput"
         @focus="focus"

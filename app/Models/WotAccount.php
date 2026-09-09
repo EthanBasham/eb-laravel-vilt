@@ -91,4 +91,10 @@ class WotAccount extends Model
     {
         return $this->hasMany(WotVehicleSnapshot::class);
     }
+
+    /** @return HasMany<WotTankPurchase, $this> */
+    public function tankPurchases(): HasMany
+    {
+        return $this->hasMany(WotTankPurchase::class);
+    }
 }

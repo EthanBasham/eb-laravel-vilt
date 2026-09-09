@@ -8,6 +8,7 @@ use App\Models\WotGrindTarget;
 use App\Models\WotVehicle;
 use App\Models\WotVehicleSnapshot;
 use App\Models\WotVehicleModule;
+use App\Models\WotTankPurchase;
 
 /** A three-tier line: T8 -> T9 -> T10. */
 function techLine(): array
@@ -440,4 +441,147 @@ it('reports full progress when nothing is active', function () {
         ->where('totals.active.xp_required', 0)
         ->where('totals.active.progress', 100),
     );
+});
+
+/** A three-step line already seeded as a target, for the purchase board. */
+function purchaseLine(User $user): array
+{
+    [$eight, $nine, $ten] = techLine();
+    $account = WotAccount::factory()->for($user)->create();
+    $target = WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => $ten->tank_id]);
+
+    foreach ([[80, 8, 0], [90, 9, 1], [100, 10, 2]] as [$tank, $tier, $position]) {
+        WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => $tank,
+            'tier' => $tier, 'position' => $position]);
+    }
+
+    return [$account, $target, $ten];
+}
+
+it('lays the purchase board out as one column per tier', function () {
+    $user = User::factory()->create();
+    purchaseLine($user);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('purchase.tiers', [8, 9, 10])
+        ->has('purchase.rows', 1)
+        // Position zero is the vehicle the line is ground in, so it is owned.
+        ->where('purchase.rows.0.cells.8.is_purchased', true)
+        ->where('purchase.rows.0.cells.9.is_purchased', false)
+        ->where('purchase.rows.0.cells.9.is_unlocked', false)
+        ->where('purchase.rows.0.cells.9.price', 3_400_000)
+        ->where('purchase.rows.0.cells.10.price', 6_100_000)
+        // The owned vehicle is not an outlay.
+        ->where('purchase.rows.0.credits_remaining', 9_500_000)
+        ->where('totals.credits_required', 9_500_000),
+    );
+});
+
+it('unlocks a tank and then buys it', function () {
+    $user = User::factory()->create();
+    purchaseLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['is_unlocked' => true])->assertRedirect();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('purchase.rows.0.cells.9.is_unlocked', true)
+        ->where('purchase.rows.0.cells.9.is_purchased', false)
+        // Unlocking costs XP, not credits — the bill is unchanged.
+        ->where('purchase.rows.0.credits_remaining', 9_500_000),
+    );
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['is_purchased' => true]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('purchase.rows.0.cells.9.is_purchased', true)
+        ->where('purchase.rows.0.credits_remaining', 6_100_000),
+    );
+});
+
+it('treats a bought tank as researched even if it was never unlocked', function () {
+    $user = User::factory()->create();
+    purchaseLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['is_purchased' => true]);
+
+    expect(WotTankPurchase::where('tank_id', 90)->first()->is_unlocked)->toBeTrue();
+});
+
+it('drops a line once its last vehicle is bought', function () {
+    $user = User::factory()->create();
+    purchaseLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 100), ['is_purchased' => true]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->has('purchase.rows', 0)
+        // Buying the top of a line settles it: you cannot research past a
+        // vehicle you do not own, so the tiers below were bought too.
+        ->where('totals.credits_required', 0),
+    );
+});
+
+it('takes a discounted price over the shop price and gives it back', function () {
+    $user = User::factory()->create();
+    purchaseLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 100), ['price_credit' => 3_050_000]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('purchase.rows.0.cells.10.price', 3_050_000)
+        ->where('purchase.rows.0.cells.10.api_price', 6_100_000)
+        ->where('purchase.rows.0.cells.10.is_discounted', true)
+        ->where('purchase.rows.0.credits_remaining', 6_450_000),
+    );
+
+    // Clearing restores the encyclopedia price rather than recording a free tank.
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 100), ['price_credit' => null]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('purchase.rows.0.cells.10.price', 6_100_000)
+        ->where('purchase.rows.0.cells.10.is_discounted', false),
+    );
+});
+
+/**
+ * The sheet stopped at tier X. Tier XI is reached from a tier X's next_tanks
+ * without becoming a grind step, so no XP figure moves.
+ */
+it('adds the tier XI above a target without touching the research path', function () {
+    $user = User::factory()->create();
+    [$account, $target, $ten] = purchaseLine($user);
+
+    $eleven = WotVehicle::factory()->create(['tank_id' => 110, 'name' => 'Top XI', 'tier' => 11,
+        'price_credit' => 7_400_000, 'next_tanks' => null]);
+    $ten->update(['next_tanks' => [$eleven->tank_id => 325_000]]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('purchase.tiers', [8, 9, 10, 11])
+        ->where('purchase.rows.0.cells.11.name', 'Top XI')
+        ->where('purchase.rows.0.credits_remaining', 16_900_000)
+        // The grind path is untouched: still three steps, same XP.
+        ->where('targets.0.steps', fn ($steps) => count($steps) === 3),
+    );
+});
+
+it('will not let one account mark another account tanks bought', function () {
+    $user = User::factory()->create();
+    purchaseLine($user);
+
+    $intruder = User::factory()->create();
+    WotAccount::factory()->for($intruder)->create();
+
+    $this->actingAs($intruder)->patch(route('wot.grinding.purchase', 90), ['is_purchased' => true]);
+
+    // The write lands on the intruder's own board, never on someone else's.
+    expect(WotTankPurchase::count())->toBe(1)
+        ->and(WotTankPurchase::first()->wot_account_id)->toBe($intruder->wotAccount->id);
+});
+
+it('rejects a tank the encyclopedia has never heard of', function () {
+    $user = User::factory()->create();
+    purchaseLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 999999), ['is_purchased' => true])
+        ->assertNotFound();
 });
