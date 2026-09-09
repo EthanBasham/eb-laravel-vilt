@@ -1433,3 +1433,43 @@ the old per-endpoint entries.
 dashboard renders per vehicle, and what `PeriodStats` differences between snapshots. Removing
 a field there breaks one of them **silently, as a zero rather than an error**, which is why the
 constant carries that warning.
+
+---
+
+## 2026-09-09 — News and upcoming-events panels on the dashboard
+
+Two columns above the statistics: a condensed news list with Latest/Pinned tabs, and the next
+five days of events.
+
+**Both read local tables only.** No API call, a few milliseconds, and — deliberately — they
+still render when the Wargaming call below them fails. The error path returns them alongside
+the error, so an outage costs the numbers rather than the whole page. There's a test for that
+specifically, since it's the kind of thing that silently regresses.
+
+### Decisions worth recording
+
+**Both tabs ship with the page.** Five rows each is a trivial payload, and a tab that costs a
+round trip feels broken. The tab state is a client-side `ref`.
+
+**Long campaigns are summarised, not repeated.** Checking the real data first was what shaped
+this: over the next five days there are six events, but three run 14, 29 and 83 days. Putting
+them in every day box would have printed fifteen rows to bury the three that are actually
+scheduled. Anything spanning more than a week drops to an "Also running" footer — the same
+threshold and reasoning as the month calendar, so the two read consistently.
+
+The seven-day cutoff earns its place in the live data: "Trade In and Roll Out" runs exactly
+seven days and correctly stays in the day boxes, while the 14-day campaign moves to the
+footer.
+
+**Times appear only on the day a session starts.** A multi-day window rendered with "16:00" on
+each of its days would be stating something untrue.
+
+**Fixed thumbnail box.** The feed's images vary in size and 11 of 120 articles have none; a
+fixed `h-12 w-20` with `object-cover` keeps every row the same height. Titles are
+`line-clamp-2` for the same reason — headlines vary enough that a ragged list is harder to
+scan. `line-clamp` is core in Tailwind v4, so no plugin was needed.
+
+Unseen articles carry a small green dot plus visually-hidden "(unread)" text, reusing the
+existing seen tracker rather than inventing a second notion of new.
+
+Suite: **130 passed, 499 assertions.**

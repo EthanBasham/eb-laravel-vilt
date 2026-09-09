@@ -2,8 +2,10 @@
 import { Head, router } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 import AppShell from '../Components/AppShell.vue';
+import NewsPanel from '../Components/NewsPanel.vue';
 import PeriodTable from '../Components/PeriodTable.vue';
 import StatTile from '../Components/StatTile.vue';
+import UpcomingPanel from '../Components/UpcomingPanel.vue';
 
 const props = defineProps({
     account: { type: Object, required: true },
@@ -12,6 +14,8 @@ const props = defineProps({
     history: { type: Object, default: () => ({ history_since: null, periods: [] }) },
     vehicles: { type: Array, default: () => [] },
     error: { type: String, default: null },
+    news: { type: Object, default: () => ({ latest: [], pinned: [] }) },
+    upcoming: { type: Object, default: () => ({ days: [], ongoing: [] }) },
 });
 
 // --- Garage table state -----------------------------------------------------
@@ -174,6 +178,13 @@ const disconnect = () => {
         <p v-if="error" class="mt-6 border-l-2 border-wot-bad bg-wot-panel px-4 py-3 text-sm text-wot-bad" role="alert">
             {{ error }}
         </p>
+
+        <!-- Both read local tables, so they render even when the block below
+             failed because Wargaming was unreachable. -->
+        <div class="mt-8 grid gap-6 lg:grid-cols-2">
+            <NewsPanel :news="news" />
+            <UpcomingPanel :upcoming="upcoming" />
+        </div>
 
         <template v-if="summary">
             <dl class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

@@ -4,6 +4,8 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use App\Models\User;
 use App\Models\WotAccount;
+use App\Models\WotArticle;
+use App\Models\WotEvent;
 use App\Models\WotVehicle;
 
 /** Wargaming's account/info shape, trimmed to what the dashboard reads. */
@@ -204,4 +206,106 @@ it('fetches all three payloads once and reuses them', function () {
     $this->actingAs($user)->get(route('wot.dashboard'));
 
     Http::assertSentCount(3);
+});
+
+// --- The two panels above the statistics -------------------------------------
+
+it('shows the five newest articles and the pinned ones separately', function () {
+    $user = User::factory()->create();
+    WotAccount::factory()->for($user)->create(['account_id' => 7]);
+    $articles = collect(range(1, 7))->map(fn (int $i) => WotArticle::factory()->create([
+        'title' => "Article {$i}",
+        'published_at' => now()->subDays(7 - $i),
+    ]));
+    $this->actingAs($user)->post(route('wot.news.pin', $articles->first()));
+
+    Http::fake([
+        '*/account/info/*' => Http::response(accountInfoResponse(7)),
+        '*/tanks/stats/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
+        '*/tanks/achievements/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
+    ]);
+
+    $this->actingAs($user)->get(route('wot.dashboard'))->assertInertia(fn ($page) => $page
+        ->has('news.latest', 5)
+        // Newest first, so Article 7 leads and Articles 1-2 fall off.
+        ->where('news.latest.0.title', 'Article 7')
+        ->has('news.pinned', 1)
+        ->where('news.pinned.0.title', 'Article 1'),
+    );
+});
+
+it('marks unseen articles in the panel', function () {
+    $user = User::factory()->create();
+    WotAccount::factory()->for($user)->create(['account_id' => 7]);
+    $article = WotArticle::factory()->create();
+    Http::fake([
+        '*/account/info/*' => Http::response(accountInfoResponse(7)),
+        '*/tanks/stats/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
+        '*/tanks/achievements/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
+    ]);
+
+    $this->actingAs($user)->get(route('wot.dashboard'))
+        ->assertInertia(fn ($page) => $page->where('news.latest.0.is_seen', false));
+
+    $this->actingAs($user)->post(route('wot.news.seen'), ['ids' => [$article->id]]);
+
+    $this->actingAs($user)->get(route('wot.dashboard'))
+        ->assertInertia(fn ($page) => $page->where('news.latest.0.is_seen', true));
+});
+
+it('buckets upcoming events into five days', function () {
+    $user = User::factory()->create();
+    WotAccount::factory()->for($user)->create(['account_id' => 7]);
+    $article = WotArticle::factory()->create();
+
+    // A timed session tomorrow, and a campaign spanning months.
+    WotEvent::create([
+        'wot_article_id' => $article->id, 'title' => 'Stream tomorrow',
+        'starts_at' => now()->addDay()->setTime(16, 0), 'ends_at' => now()->addDay()->setTime(22, 59),
+        'event_type' => 'stream', 'source' => WotEvent::SOURCE_CALENDAR,
+    ]);
+    WotEvent::create([
+        'wot_article_id' => $article->id, 'title' => 'Battle Pass',
+        'starts_at' => now()->subDays(3), 'ends_at' => now()->addDays(60),
+        'source' => WotEvent::SOURCE_WINDOW,
+    ]);
+
+    Http::fake([
+        '*/account/info/*' => Http::response(accountInfoResponse(7)),
+        '*/tanks/stats/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
+        '*/tanks/achievements/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
+    ]);
+
+    $this->actingAs($user)->get(route('wot.dashboard'))->assertInertia(fn ($page) => $page
+        ->has('upcoming.days', 5)
+        ->where('upcoming.days.0.is_today', true)
+        // The session lands on its own day, with a time.
+        ->has('upcoming.days.1.events', 1)
+        ->where('upcoming.days.1.events.0.time', '16:00')
+        // The 60-day campaign is summarised once, not repeated across all five.
+        ->has('upcoming.ongoing', 1)
+        ->where('upcoming.ongoing.0.title', 'Battle Pass')
+        ->has('upcoming.days.0.events', 0),
+    );
+});
+
+/**
+ * The panels read local tables, so a Wargaming outage should cost the numbers
+ * below them, not the whole page.
+ */
+it('still renders the panels when the API fails', function () {
+    $user = User::factory()->create();
+    WotAccount::factory()->for($user)->create();
+    WotArticle::factory()->create(['title' => 'Still here']);
+    Http::fake(['*' => Http::response([
+        'status' => 'error',
+        'error' => ['code' => 407, 'message' => 'SOURCE_NOT_AVAILABLE'],
+    ])]);
+
+    $this->actingAs($user)->get(route('wot.dashboard'))->assertInertia(fn ($page) => $page
+        ->whereNot('error', null)
+        ->where('summary', null)
+        ->where('news.latest.0.title', 'Still here')
+        ->has('upcoming.days', 5),
+    );
 });
