@@ -110,7 +110,7 @@ const asDate = (iso) => new Date(iso).toLocaleDateString(undefined, { dateStyle:
                     type="button"
                     class="absolute right-2 top-2 z-10 border px-2 py-1 text-xs leading-none transition-colors"
                     :class="article.is_pinned
-                        ? 'border-wot-gold bg-wot-gold/65 text-wot-abyss backdrop-blur-sm'
+                        ? 'border-wot-gold bg-wot-gold/45 text-wot-abyss backdrop-blur-sm'
                         : 'border-wot-border bg-wot-abyss/70 text-wot-dim hover:border-wot-gold hover:text-wot-gold'"
                     :aria-pressed="article.is_pinned"
                     :title="article.is_pinned ? 'Unpin from your feed' : 'Pin to the top of your feed'"
