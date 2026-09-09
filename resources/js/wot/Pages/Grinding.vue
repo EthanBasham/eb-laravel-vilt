@@ -206,7 +206,7 @@ const hideOwned = ref(saved?.hide_owned ?? true);
  * costs, so a price you have typed over for a specific offer gets discounted
  * along with the rest.
  */
-const SALE = { 2: 0.5, 3: 0.5, 4: 0.5, 5: 0.5, 6: 0.3, 7: 0.3, 8: 0.5, 9: 0.5, 10: 0.5 };
+const SALE = { 2: 0.5, 3: 0.5, 4: 0.5, 5: 0.5, 6: 0.3, 7: 0.3, 8: 0.15, 9: 0.15, 10: 0.15 };
 const showSale = ref(saved?.show_sale ?? false);
 
 /*
