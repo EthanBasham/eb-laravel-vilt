@@ -6,7 +6,9 @@ use App\Models\User;
 use App\Models\WotAccount;
 use App\Models\WotArticle;
 use App\Models\WotEvent;
+use App\Models\WotTankPurchase;
 use App\Models\WotVehicle;
+use App\Models\WotVehicleModule;
 
 /** Wargaming's account/info shape, trimmed to what the dashboard reads. */
 function accountInfoResponse(int $accountId): array
@@ -123,6 +125,53 @@ it('renders an error instead of failing when the API rejects the call', function
         ->get(route('wot.dashboard'))
         ->assertOk()
         ->assertInertia(fn ($page) => $page->component('Dashboard')->whereNot('error', null));
+});
+
+/**
+ * The dashboard carries the Grinding page's own Active Grinding table, built by
+ * the same assembly rather than a second one — a figure that differed between
+ * the two pages would be the drift that took the tracked-target tables down.
+ *
+ * It sits with the news and calendar panels because it reads local tables too,
+ * so it renders even when the account payloads are what failed.
+ */
+it('defers the active grinding table, and builds it even when the API is unreachable', function () {
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create();
+
+    // A line of its own rather than GrindingTest's: requiring that file to
+    // borrow one fixture would register its whole suite here as well.
+    WotVehicle::factory()->create(['tank_id' => 100, 'short_name' => 'Tgt X', 'tier' => 10,
+        'nation' => 'ussr', 'next_tanks' => null]);
+    WotVehicle::factory()->create(['tank_id' => 90, 'short_name' => 'Mid IX', 'tier' => 9,
+        'nation' => 'ussr', 'next_tanks' => [100 => 225_000]]);
+    WotVehicle::factory()->create(['tank_id' => 80, 'short_name' => 'Low VIII', 'tier' => 8,
+        'nation' => 'ussr', 'next_tanks' => [90 => 149_400]]);
+
+    WotVehicleModule::create(['module_id' => 200, 'tank_id' => 90, 'name' => 'Gun 90',
+        'type' => 'vehicleGun', 'price_xp' => 90_000, 'price_credit' => 0, 'is_default' => false]);
+    WotTankPurchase::create(['wot_account_id' => $account->id, 'tank_id' => 90,
+        'is_playing' => true, 'banked_xp' => 40_000]);
+
+    Http::fake(['*' => Http::response([
+        'status' => 'error',
+        'error' => ['code' => 407, 'message' => 'INVALID_IP_ADDRESS', 'value' => '203.0.113.7'],
+    ])]);
+
+    $this->actingAs($user)->get(route('wot.dashboard'))->assertOk()->assertInertia(fn ($page) => $page
+        ->component('Dashboard')
+        ->whereNot('error', null)
+        // Deferred, so the page paints before the XP board is built for it.
+        ->missing('grinding')
+        ->loadDeferredProps(fn ($reload) => $reload
+            ->has('grinding.rows', 1)
+            ->where('grinding.rows.0.tank_id', 90)
+            ->where('grinding.rows.0.banked_xp', 40_000)
+            // Its own gun, plus the unlock into the tier X above it.
+            ->where('grinding.rows.0.xp_required', 315_000)
+            ->where('grinding.totals.tanks', 1),
+        ),
+    );
 });
 
 /**

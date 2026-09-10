@@ -82,6 +82,25 @@ class GrindBoard
     }
 
     /**
+     * Active Grinding alone, for a page that shows that table and nothing else.
+     *
+     * The XP board still has to be built — every figure on a row is read off
+     * its cells — but the other three do not, and the dashboard has no use for
+     * them. Same assembly as for(), so the two copies of the table cannot come
+     * from two different reckonings.
+     *
+     * @return array{rows: list<array<string, mixed>>, totals: array<string, mixed>}
+     */
+    public function activeGrinding(WotAccount $account): array
+    {
+        $byTank = $this->cellsByTank($this->xp->for($account)['rows']);
+        $playing = $account->tankPurchases()->where('is_playing', true)->get()->keyBy('tank_id');
+        $active = $this->active($playing, $byTank);
+
+        return ['rows' => $active, 'totals' => $this->activeTotals($active)];
+    }
+
+    /**
      * The XP board's cells, indexed by the tank each one is about.
      *
      * A tank appears on every line that runs through it, so this keeps two
@@ -260,7 +279,6 @@ class GrindBoard
             // cannot go stale after an edit without someone remembering to add
             // a new key to three separate only: lists.
             'active' => $this->activeTotals($active),
-            'playing' => count($active),
             /*
              * The tree's figures. A board that shows the whole tree and a
              * card that totalled something narrower were two answers to one

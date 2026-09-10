@@ -12,13 +12,14 @@ use App\Models\WotAccount;
 use App\Models\WotArticle;
 use App\Models\WotEvent;
 use App\Services\Wargaming\AccountDashboard;
+use App\Services\Wargaming\GrindBoard;
 use App\Services\Wargaming\WargamingException;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class DashboardController extends Controller
 {
-    public function index(Request $request, AccountDashboard $dashboard): Response
+    public function index(Request $request, AccountDashboard $dashboard, GrindBoard $board): Response
     {
         $account = $request->user()->wotAccount;
 
@@ -44,7 +45,7 @@ class DashboardController extends Controller
                 'error' => $e->getMessage(),
                 'summary' => null,
                 'vehicles' => [],
-                ...$this->sidePanels($request),
+                ...$this->localPanels($request, $account, $board),
             ]);
         }
 
@@ -54,24 +55,38 @@ class DashboardController extends Controller
             'account' => $this->accountProps($account),
             'error' => null,
             ...$data,
-            ...$this->sidePanels($request),
+            ...$this->localPanels($request, $account, $board),
         ]);
     }
 
     /**
-     * The two panels above the statistics: recent news, and what is happening
-     * over the next few days.
+     * The three panels above the statistics: recent news, what is happening over
+     * the next few days, and the tanks being ground.
      *
-     * Both read local tables rather than any API, so they cost a few
-     * milliseconds and survive Wargaming being unreachable.
+     * All read local tables rather than any API, so they cost a few
+     * milliseconds and survive Wargaming being unreachable — which is why they
+     * are assembled apart from the account payloads and rendered on both paths.
      *
      * @return array<string, mixed>
      */
-    private function sidePanels(Request $request): array
+    private function localPanels(Request $request, WotAccount $account, GrindBoard $board): array
     {
         $user = $request->user();
 
         return [
+            /*
+             * The Grinding page's own table, from the same assembly rather than
+             * a second one — a figure that differed between the two pages would
+             * be exactly the drift that took the tracked-target tables down.
+             *
+             * Deferred, because that assembly has to build the XP board to read
+             * a row off its cells: 135ms against the 54ms everything else on
+             * this page costs with a warm cache. It sits below the fold, and
+             * paying for it before the page paints would be paying for it in
+             * the wrong order. A write from the table still resolves it, since
+             * a partial reload naming a deferred prop resolves it.
+             */
+            'grinding' => Inertia::defer(fn (): array => $board->activeGrinding($account)),
             'news' => [
                 // Plain newest-first: the Latest tab shows what actually
                 // published most recently, not pinned articles hoisted above

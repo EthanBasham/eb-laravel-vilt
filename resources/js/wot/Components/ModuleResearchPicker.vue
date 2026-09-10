@@ -14,6 +14,12 @@ import { computed, ref } from 'vue';
  */
 const props = defineProps({
     cell: { type: Object, required: true },
+    /*
+     * The props a tick should bring back. Defaults to the XP board's, which is
+     * where this started; the Active Grinding table passes its page's own, and
+     * on the dashboard those are named differently again.
+     */
+    only: { type: Array, default: () => ['active', 'xp', 'freexp', 'totals'] },
 });
 
 const open = ref(false);
@@ -28,10 +34,10 @@ const toggle = (module) => {
         researched: !module.is_researched,
     }, {
         preserveScroll: true,
-        // The other boards move too: researching a module takes it off the
-        // Free XP plan, and spends the banked XP that Active Grinding shows —
-        // so both change even though nothing on either was touched.
-        only: ['active', 'xp', 'freexp', 'totals'],
+        // Whatever the page around it calls its boards: researching a module
+        // takes it off the Free XP plan and spends the banked XP Active
+        // Grinding shows, so both move even though neither was touched.
+        only: props.only,
         onFinish: () => (busy.value = null),
     });
 };

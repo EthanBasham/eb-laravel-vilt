@@ -2,6 +2,7 @@
 import { Head, router, usePage } from '@inertiajs/vue3';
 import { IconEngine, IconLock, IconLockOpen, IconShoppingCart } from '@tabler/icons-vue';
 import { computed, ref } from 'vue';
+import ActiveGrindingTable from '../Components/ActiveGrindingTable.vue';
 import AppShell from '../Components/AppShell.vue';
 import EditableNumber from '../Components/EditableNumber.vue';
 import ModulePlanPicker from '../Components/ModulePlanPicker.vue';
@@ -40,9 +41,17 @@ const view = ref('active');
  * The four boards move with it: the tank leaves the picker, and its banked XP
  * joins or leaves the headline card.
  */
+/*
+ * What a write to a grinding row has to bring back on this page. Ticking a
+ * module spends banked XP and moves the XP and Free XP boards with it; adding
+ * or dropping a tank moves the picker. All of them are built on every request
+ * anyway, so naming them costs only the bytes back.
+ */
+const GRIND_RELOAD = ['active', 'options', 'xp', 'freexp', 'totals'];
+
 const setPlaying = (tankId, is_playing) => router.patch(`/wot/grinding/purchases/${tankId}`, { is_playing }, {
     preserveScroll: true,
-    only: ['active', 'options', 'totals'],
+    only: GRIND_RELOAD,
 });
 
 /*
@@ -467,12 +476,7 @@ const bpGrandTotal = computed(() => bpShownRows.value.reduce((sum, r) => sum + b
 
     <AppShell>
         <div class="flex flex-wrap items-end justify-between gap-4 border-b border-wot-border pb-5">
-            <div>
-                <h1 class="text-3xl">Grinding</h1>
-                <p class="mt-1 text-sm text-wot-dim">
-                    {{ totals.playing }} {{ totals.playing === 1 ? 'tank' : 'tanks' }} being ground
-                </p>
-            </div>
+            <h1 class="text-3xl">Grinding</h1>
         </div>
 
         <dl class="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -516,103 +520,13 @@ const bpGrandTotal = computed(() => bpShownRows.value.reduce((sum, r) => sum + b
         <section v-if="view === 'active'" class="mt-4" aria-labelledby="active-heading">
             <h2 id="active-heading" class="sr-only">Active grinding</h2>
 
-            <p v-if="!active.length" class="border border-dashed border-wot-border p-8 text-center text-sm text-wot-dim">
-                Nothing being ground. Add a tank below.
-            </p>
-
-            <div v-else class="overflow-x-auto border border-wot-border bg-wot-panel">
-                <table class="min-w-full divide-y divide-wot-border text-sm">
-                    <thead class="bg-wot-sunken">
-                        <tr>
-                            <th scope="col" class="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Tank</th>
-                            <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">XP banked</th>
-                            <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">To max</th>
-                            <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">To next tank</th>
-                            <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Remaining</th>
-                            <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Progress</th>
-                            <th scope="col" class="w-10 px-4 py-3" />
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-wot-border-soft">
-                        <tr v-for="row in active" :key="row.tank_id" class="hover:bg-wot-sunken">
-                            <td class="px-4 py-2">
-                                <NationFlag :nation="row.nation" class="me-2" />
-                                <span class="text-wot-heading">{{ row.name }}</span>
-                                <span class="ms-2 text-xs text-wot-dim">T{{ row.tier }}</span>
-                            </td>
-                            <!-- The one number no API can supply. -->
-                            <td class="px-4 py-2 text-right">
-                                <EditableNumber
-                                    field="banked_xp"
-                                    :model-value="row.banked_xp"
-                                    :url="`/wot/grinding/purchases/${row.tank_id}`"
-                                />
-                            </td>
-                            <!-- The XP board's own picker, against the XP
-                                 board's own store: a module ticked here is
-                                 ticked there, which is the whole point of
-                                 building this table out of its cells. -->
-                            <td class="px-4 py-2 text-right">
-                                <ModuleResearchPicker :cell="row" />
-                            </td>
-                            <!-- Every unlock this tank leads to that is still
-                                 owed. Usually one; a tank under two tier Xs
-                                 owes both, and both are grinds you would do
-                                 from this seat. -->
-                            <td class="px-4 py-2 text-right">
-                                <span v-if="!row.unlocks.length" class="text-wot-muted">—</span>
-                                <div v-for="u in row.unlocks" :key="u.tank_id" class="whitespace-nowrap tabular-nums text-wot-muted">
-                                    <span v-if="row.unlocks.length > 1" class="me-2 text-xs text-wot-dim">{{ u.name }}</span>
-                                    {{ n(u.xp) }}
-                                </div>
-                            </td>
-                            <td class="px-4 py-2 text-right tabular-nums text-wot-heading">{{ n(row.xp_remaining) }}</td>
-                            <td class="px-4 py-2 text-right">
-                                <div class="flex items-center justify-end gap-2">
-                                    <span class="h-1.5 w-16 bg-wot-sunken">
-                                        <span class="block h-full bg-wot-gold" :style="{ width: `${row.progress}%` }" />
-                                    </span>
-                                    <span class="w-12 text-right tabular-nums text-wot-muted">{{ row.progress }}%</span>
-                                </div>
-                            </td>
-                            <td class="px-4 py-2 text-right">
-                                <button
-                                    type="button"
-                                    class="text-xs uppercase tracking-wider text-wot-dim transition-colors hover:text-wot-bad"
-                                    :title="`Stop grinding ${row.name}`"
-                                    :aria-label="`Stop grinding ${row.name}`"
-                                    @click="setPlaying(row.tank_id, false)"
-                                >
-                                    &times;
-                                </button>
-                            </td>
-                        </tr>
-                    </tbody>
-
-                    <tfoot v-if="active.length > 1" class="border-t-2 border-wot-border bg-wot-sunken">
-                        <tr>
-                            <th scope="row" class="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">
-                                Total
-                                <span class="ms-2 font-normal normal-case tracking-normal text-wot-dim">{{ totals.active.tanks }} tanks</span>
-                            </th>
-                            <td class="px-4 py-3 text-right tabular-nums text-wot-good">{{ n(totals.active.banked_xp) }}</td>
-                            <td class="px-4 py-3 text-right tabular-nums text-wot-muted">{{ n(totals.active.module_xp) }}</td>
-                            <td class="px-4 py-3 text-right tabular-nums text-wot-muted">{{ n(totals.active.research_cost) }}</td>
-                            <td class="px-4 py-3 text-right tabular-nums font-bold text-wot-heading">{{ n(totals.active.xp_remaining) }}</td>
-                            <td class="px-4 py-3 text-right">
-                                <div class="flex items-center justify-end gap-2">
-                                    <span class="h-1.5 w-16 bg-wot-panel">
-                                        <span class="block h-full bg-wot-gold" :style="{ width: `${totals.active.progress}%` }" />
-                                    </span>
-                                    <span class="w-12 text-right tabular-nums text-wot-muted">{{ totals.active.progress }}%</span>
-                                </div>
-                            </td>
-                            <td class="px-4 py-3" />
-                        </tr>
-                    </tfoot>
-                </table>
-            </div>
-
+            <ActiveGrindingTable
+                :rows="active"
+                :totals="totals.active"
+                :only="GRIND_RELOAD"
+            >
+                <template #empty>Nothing being ground. Add a tank below.</template>
+            </ActiveGrindingTable>
         </section>
 
         <!-- 2. XP Remaining ------------------------------------------------------
@@ -1466,7 +1380,7 @@ const bpGrandTotal = computed(() => bpShownRows.value.reduce((sum, r) => sum + b
                             >
                                 <NationFlag :nation="o.nation" />
                                 {{ o.name }}
-                                <span class="text-wot-dim">T{{ o.tier }}</span>
+                                <span class="text-wot-dim">{{ ROMAN[o.tier] }}</span>
                                 <VehicleTypeIcon :type="o.type" class="text-wot-dim" />
                             </button>
                         </li>

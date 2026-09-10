@@ -2789,3 +2789,37 @@ to Purchase, because owning a tank is a fact about the tank — and `xp_remainin
 about what a tank has left.
 
 Suite: **235 passed, 1720 assertions.**
+
+### Active Grinding on the dashboard
+
+*"Finally add a duplicate of the Active Grinding table to the Dashboard under the News and calendar
+sections."*
+
+Not a duplicate in the source. The table moved into `ActiveGrindingTable.vue` and both pages render
+the same component against the same rows, assembled by the same `GrindBoard` code — a second copy of
+that markup, or of those figures, is precisely the drift that took the tracked-target tables down
+earlier today.
+
+It is **editable on the dashboard**, not a read-only glance. Banked XP is typed by hand after a
+session and the dashboard is where you land, so having to leave it to record one number would be the
+friction the spreadsheet never had.
+
+Two things that took arranging:
+
+**Reload keys differ per page.** The Grinding page keeps these rows under `active` beside four boards
+that move with them; the dashboard holds the lot under `grinding`. So the component takes an `only`
+prop and threads it into `EditableNumber` and `ModuleResearchPicker`, the same way
+`EditableNumber` already took one — a component cannot know what the page around it calls things.
+
+**The panel is deferred.** `GrindBoard::activeGrinding()` skips the three boards the dashboard has no
+use for, but it still has to build the XP board, because every figure on a row is read off its cells:
+**135ms against the 54ms everything else on the page costs** with a warm cache. It sits below the
+fold, so `Inertia::defer()` paints the page first and fetches it after, behind a pulsing skeleton the
+table's own height. First-paint assembly is unchanged at ~58ms. A write from the table still resolves
+it, since a partial reload naming a deferred prop resolves it.
+
+The panel sits with news and calendar because it shares their property: it reads local tables, so it
+renders even when the account payloads are what failed. `sidePanels()` is `localPanels()` now, and
+says so.
+
+Suite: **236 passed, 1747 assertions.**

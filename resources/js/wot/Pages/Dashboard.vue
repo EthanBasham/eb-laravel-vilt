@@ -1,6 +1,7 @@
 <script setup>
-import { Head, router, usePage } from '@inertiajs/vue3';
+import { Deferred, Head, Link, router, usePage } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
+import ActiveGrindingTable from '../Components/ActiveGrindingTable.vue';
 import AppShell from '../Components/AppShell.vue';
 import NationFlag from '../Components/NationFlag.vue';
 import NewsPanel from '../Components/NewsPanel.vue';
@@ -10,6 +11,7 @@ import UpcomingPanel from '../Components/UpcomingPanel.vue';
 
 const props = defineProps({
     account: { type: Object, required: true },
+    grinding: { type: Object, default: () => ({ rows: [], totals: {} }) },
     summary: { type: Object, default: null },
     achievements: { type: Object, default: null },
     history: { type: Object, default: () => ({ history_since: null, periods: [] }) },
@@ -200,6 +202,35 @@ const disconnect = () => {
             <NewsPanel :news="news" />
             <UpcomingPanel :upcoming="upcoming" />
         </div>
+
+        <!-- The Grinding page's own table, the same component against the same
+             rows. Banked XP is typed by hand after a session, and the dashboard
+             is where you land — so it is editable here rather than a read-only
+             copy you would have to leave to update. -->
+        <section class="mt-8" aria-labelledby="grinding-heading">
+            <h2 id="grinding-heading" class="text-base">Active grinding</h2>
+
+            <div class="mt-2">
+                <Deferred data="grinding">
+                    <!-- Deferred server-side, so the page paints before the XP
+                         board is built. A block the table's own height, so
+                         nothing below it jumps when the rows arrive. -->
+                    <template #fallback>
+                        <div class="animate-pulse border border-wot-border bg-wot-panel p-4" aria-hidden="true">
+                            <div class="h-4 w-40 bg-wot-sunken" />
+                            <div v-for="row in 3" :key="row" class="mt-3 h-4 w-full bg-wot-sunken/70" />
+                        </div>
+                        <span class="sr-only">Loading what you are grinding…</span>
+                    </template>
+
+                    <ActiveGrindingTable :rows="grinding.rows" :totals="grinding.totals" :only="['grinding']">
+                        <template #empty>
+                            Nothing being ground. Add a tank on the <Link href="/wot/grinding" class="text-wot-gold hover:underline">Grinding</Link> page.
+                        </template>
+                    </ActiveGrindingTable>
+                </Deferred>
+            </div>
+        </section>
 
         <template v-if="summary">
             <dl class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

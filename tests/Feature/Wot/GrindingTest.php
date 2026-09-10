@@ -58,8 +58,7 @@ it('adds a tank to Active Grinding', function () {
 
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
         ->has('active', 1)
-        ->where('active.0.tank_id', 80)
-        ->where('totals.playing', 1),
+        ->where('active.0.tank_id', 80),
     );
 });
 
@@ -71,8 +70,7 @@ it('drops a tank from Active Grinding', function () {
     $this->actingAs($user)->patch(route('wot.grinding.purchase', 80), ['is_playing' => false])->assertRedirect();
 
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
-        ->has('active', 0)
-        ->where('totals.playing', 0),
+        ->has('active', 0),
     );
 });
 
