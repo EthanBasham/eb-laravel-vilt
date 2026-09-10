@@ -3,8 +3,6 @@
 use App\Models\User;
 use App\Models\WotAccount;
 use App\Models\WotGrindSetting;
-use App\Models\WotGrindStep;
-use App\Models\WotGrindTarget;
 use App\Models\WotTankModule;
 use App\Models\WotVehicle;
 use App\Models\WotVehicleSnapshot;
@@ -14,366 +12,18 @@ use App\Models\WotTankPurchase;
 /** A three-tier line: T8 -> T9 -> T10. */
 function techLine(): array
 {
-    $ten = WotVehicle::factory()->create(['tank_id' => 100, 'name' => 'Target X', 'short_name' => 'Tgt X', 'tier' => 10, 'type' => 'mediumTank', 'price_credit' => 6_100_000, 'next_tanks' => null]);
-    $nine = WotVehicle::factory()->create(['tank_id' => 90, 'name' => 'Mid IX', 'tier' => 9, 'price_credit' => 3_400_000, 'next_tanks' => [100 => 225_000]]);
-    $eight = WotVehicle::factory()->create(['tank_id' => 80, 'name' => 'Low VIII', 'tier' => 8, 'price_credit' => 2_400_000, 'next_tanks' => [90 => 149_400]]);
+    // One nation for the line, stated rather than left to the factory's random
+    // pick: vehicle lists sort by nation first, so a random one per vehicle
+    // would make their order differ between runs.
+    $ten = WotVehicle::factory()->create(['tank_id' => 100, 'name' => 'Target X', 'short_name' => 'Tgt X', 'tier' => 10, 'nation' => 'ussr', 'type' => 'mediumTank', 'price_credit' => 6_100_000, 'next_tanks' => null]);
+    $nine = WotVehicle::factory()->create(['tank_id' => 90, 'name' => 'Mid IX', 'tier' => 9, 'nation' => 'ussr', 'price_credit' => 3_400_000, 'next_tanks' => [100 => 225_000]]);
+    $eight = WotVehicle::factory()->create(['tank_id' => 80, 'name' => 'Low VIII', 'tier' => 8, 'nation' => 'ussr', 'price_credit' => 2_400_000, 'next_tanks' => [90 => 149_400]]);
 
     return [$eight, $nine, $ten];
 }
 
 it('keeps the board behind auth', function () {
     $this->get(route('wot.grinding'))->assertRedirect(route('login'));
-});
-
-it('builds the path from the tech tree when a target is added', function () {
-    [$eight, $nine, $ten] = techLine();
-    $user = User::factory()->create();
-    $account = WotAccount::factory()->for($user)->create();
-
-    $this->actingAs($user)->post(route('wot.grinding.store'), ['tank_id' => $ten->tank_id])->assertRedirect();
-
-    $steps = WotGrindTarget::first()->steps;
-
-    expect($steps)->toHaveCount(3)
-        // Ordered low tier first, each step carrying what it unlocks.
-        ->and($steps[0]->tier)->toBe(8)
-        ->and($steps[0]->research_xp)->toBe(149_400)
-        ->and($steps[0]->price_credit)->toBe(3_400_000)
-        ->and($steps[1]->research_xp)->toBe(225_000)
-        // The target itself is a step; it unlocks nothing further.
-        ->and($steps[2]->tier)->toBe(10)
-        ->and($steps[2]->research_xp)->toBeNull();
-});
-
-/**
- * The path should start where the player actually is, not at tier 1 — otherwise
- * a new target arrives listing tiers finished years ago.
- */
-it('truncates the path at the last vehicle played', function () {
-    [$eight, $nine, $ten] = techLine();
-    $user = User::factory()->create();
-    $account = WotAccount::factory()->for($user)->create();
-    WotVehicleSnapshot::create([
-        'wot_account_id' => $account->id, 'tank_id' => $nine->tank_id,
-        'captured_at' => now(), 'battles' => 10, 'statistics' => ['battles' => 10],
-    ]);
-
-    $this->actingAs($user)->post(route('wot.grinding.store'), ['tank_id' => $ten->tank_id]);
-
-    $steps = WotGrindTarget::first()->steps;
-
-    expect($steps)->toHaveCount(2)
-        ->and($steps[0]->tier)->toBe(9);
-});
-
-it('totals a path the way the spreadsheet did', function () {
-    [$eight, $nine, $ten] = techLine();
-    $user = User::factory()->create();
-    $account = WotAccount::factory()->for($user)->create();
-    $target = WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => $ten->tank_id]);
-
-    // Mirrors the Concept No. 5 row: modules at two tiers plus two unlocks.
-    WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => 80, 'tier' => 8, 'position' => 0,
-        'research_xp' => 149_400, 'research_xp_remaining' => 109_062, 'module_xp_remaining' => 75_400, 'price_credit' => 3_400_000]);
-    WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => 90, 'tier' => 9, 'position' => 1,
-        'research_xp' => 225_000, 'research_xp_remaining' => 225_000, 'module_xp_remaining' => 124_400, 'price_credit' => 6_100_000]);
-    WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => 100, 'tier' => 10, 'position' => 2]);
-
-    $target->refresh()->load('steps');
-
-    expect($target->steps->sum(fn ($s) => $s->xpRequired()))->toBe(533_862)
-        ->and($target->creditsRequired())->toBe(9_500_000);
-});
-
-/**
- * The blueprint-discounted figure wins when entered; without one the API's full
- * price stands in, so a step is never silently free.
- */
-it('prefers the discounted figure over the full price', function () {
-    $step = new WotGrindStep(['research_xp' => 189_000, 'research_xp_remaining' => 149_310]);
-    expect($step->researchCost())->toBe(149_310);
-
-    $step = new WotGrindStep(['research_xp' => 189_000, 'research_xp_remaining' => null]);
-    expect($step->researchCost())->toBe(189_000);
-});
-
-it('subtracts banked XP from what is left', function () {
-    $step = new WotGrindStep([
-        'research_xp' => 149_310, 'research_xp_remaining' => 149_310,
-        'module_xp_remaining' => 0, 'banked_xp' => 83_305,
-    ]);
-
-    // The spreadsheet's ST-I row, to the digit.
-    expect($step->xpRemaining())->toBe(66_005)
-        ->and($step->progress)->toBe(55.8);
-});
-
-it('never reports negative remaining XP', function () {
-    $step = new WotGrindStep(['research_xp_remaining' => 1000, 'banked_xp' => 5000]);
-
-    expect($step->xpRemaining())->toBe(0)
-        ->and($step->progress)->toBe(100.0);
-});
-
-it('edits a step and shows it on the board', function () {
-    [$eight, $nine, $ten] = techLine();
-    $user = User::factory()->create();
-    $account = WotAccount::factory()->for($user)->create();
-    $target = WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => $ten->tank_id]);
-    $step = WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => 90, 'tier' => 9,
-        'position' => 0, 'research_xp' => 225_000]);
-
-    $this->actingAs($user)->patch(route('wot.grinding.step', $step), [
-        'banked_xp' => 100_000, 'is_active' => true,
-    ])->assertRedirect();
-
-    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
-        ->component('Grinding')
-        ->has('active', 1)
-        ->where('active.0.banked_xp', 100_000)
-        ->where('totals.banked_xp', 100_000),
-    );
-});
-
-it('will not let one account edit another board', function () {
-    $mine = User::factory()->create();
-    WotAccount::factory()->for($mine)->create();
-    $theirs = WotGrindTarget::factory()->create();
-    $step = WotGrindStep::create(['wot_grind_target_id' => $theirs->id, 'tank_id' => 1, 'tier' => 9, 'position' => 0]);
-
-    $this->actingAs($mine)->patch(route('wot.grinding.step', $step), ['banked_xp' => 5])->assertNotFound();
-    $this->actingAs($mine)->delete(route('wot.grinding.destroy', $theirs))->assertNotFound();
-
-    expect($step->fresh()->banked_xp)->toBe(0);
-});
-
-it('toggles a target complete and back', function () {
-    $user = User::factory()->create();
-    $account = WotAccount::factory()->for($user)->create();
-    $target = WotGrindTarget::factory()->for($account, 'account')->create();
-
-    $this->actingAs($user)->patch(route('wot.grinding.complete', $target));
-    expect($target->fresh()->is_complete)->toBeTrue();
-
-    $this->actingAs($user)->patch(route('wot.grinding.complete', $target));
-    expect($target->fresh()->is_complete)->toBeFalse();
-});
-
-it('excludes completed targets from the outstanding totals', function () {
-    [$eight, $nine, $ten] = techLine();
-    $user = User::factory()->create();
-    $account = WotAccount::factory()->for($user)->create();
-    $done = WotGrindTarget::factory()->for($account, 'account')->completed()->create(['tank_id' => $ten->tank_id]);
-    WotGrindStep::create(['wot_grind_target_id' => $done->id, 'tank_id' => 90, 'tier' => 9, 'position' => 0,
-        'research_xp' => 225_000, 'research_xp_remaining' => 225_000]);
-
-    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
-        ->where('totals.targets', 1)
-        ->where('totals.open', 0)
-        // xp_required, not xp_remaining: the latter is the whole tree's figure
-        // now, the way credits_required already was, so a completed target no
-        // longer moves it.
-        ->where('totals.xp_required', 0),
-    );
-});
-
-it('stores planning settings', function () {
-    $user = User::factory()->create();
-    $account = WotAccount::factory()->for($user)->create();
-
-    $this->actingAs($user)->patch(route('wot.grinding.settings'), [
-        'credits_available' => 59_780_000, 'garage_slots_vacant' => 45,
-    ])->assertRedirect();
-
-    expect(WotGrindSetting::where('wot_account_id', $account->id)->first()->credits_available)->toBe(59_780_000);
-});
-
-it('rejects nonsense on the manual fields', function (array $payload) {
-    $user = User::factory()->create();
-    $account = WotAccount::factory()->for($user)->create();
-    $target = WotGrindTarget::factory()->for($account, 'account')->create();
-    $step = WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => 1, 'tier' => 9, 'position' => 0]);
-
-    $this->actingAs($user)->patch(route('wot.grinding.step', $step), $payload)->assertSessionHasErrors();
-})->with([
-    'negative banked' => [['banked_xp' => -1]],
-]);
-
-it('offers only researchable vehicles as new targets', function () {
-    [$eight, $nine, $ten] = techLine();
-    WotVehicle::factory()->premium()->create(['tank_id' => 500, 'name' => 'Premium', 'tier' => 8]);
-    $user = User::factory()->create();
-    $account = WotAccount::factory()->for($user)->create();
-    WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => $ten->tank_id]);
-
-    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(function ($page) {
-        $ids = collect($page->toArray()['props']['options'])->pluck('tank_id');
-
-        // The premium is excluded, and so is the target already tracked.
-        expect($ids)->not->toContain(500)->not->toContain(100)
-            ->and($ids)->toContain(90);
-    });
-});
-
-// --- Module research ----------------------------------------------------------
-
-function moduleStep(): array
-{
-    $user = User::factory()->create();
-    $account = WotAccount::factory()->for($user)->create();
-    WotVehicle::factory()->create(['tank_id' => 900, 'name' => 'Grinder', 'tier' => 9]);
-    $target = WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => 900]);
-    $step = WotGrindStep::create([
-        'wot_grind_target_id' => $target->id, 'tank_id' => 900, 'tier' => 9, 'position' => 0,
-        'research_xp' => 200_000, 'banked_xp' => 100_000,
-    ]);
-
-    WotVehicleModule::insert([
-        ['module_id' => 1, 'tank_id' => 900, 'name' => 'Big Gun', 'type' => 'vehicleGun', 'price_xp' => 60_000, 'price_credit' => 0, 'is_default' => false, 'created_at' => now(), 'updated_at' => now()],
-        ['module_id' => 2, 'tank_id' => 900, 'name' => 'Engine', 'type' => 'vehicleEngine', 'price_xp' => 25_000, 'price_credit' => 0, 'is_default' => false, 'created_at' => now(), 'updated_at' => now()],
-        ['module_id' => 3, 'tank_id' => 900, 'name' => 'Stock Tracks', 'type' => 'vehicleChassis', 'price_xp' => 0, 'price_credit' => 0, 'is_default' => true, 'created_at' => now(), 'updated_at' => now()],
-    ]);
-
-    return [$user, $step];
-}
-
-it('offers only upgrade modules, never stock ones', function () {
-    [$user, $step] = moduleStep();
-
-    expect($step->moduleOptions())->toHaveCount(2)
-        ->and($step->moduleOptions()->pluck('name'))->not->toContain('Stock Tracks')
-        // Outstanding is derived, not stored.
-        ->and($step->outstandingModuleXp())->toBe(85_000);
-});
-
-/**
- * The whole point of the feature: researching a module spends banked XP in
- * game, so the banked figure should drop by exactly its cost rather than being
- * adjusted by hand.
- */
-it('drops banked XP by the module cost when one is researched', function () {
-    [$user, $step] = moduleStep();
-
-    $this->actingAs($user)->patch(route('wot.grinding.module', $step), [
-        'module_id' => 1, 'researched' => true,
-    ])->assertRedirect();
-
-    $step->refresh();
-
-    expect($step->banked_xp)->toBe(40_000)
-        ->and($step->module_xp_remaining)->toBe(25_000)
-        ->and($step->researched_modules)->toBe([1]);
-});
-
-it('gives the XP back when a module is un-ticked', function () {
-    [$user, $step] = moduleStep();
-
-    $this->actingAs($user)->patch(route('wot.grinding.module', $step), ['module_id' => 1, 'researched' => true]);
-    $this->actingAs($user)->patch(route('wot.grinding.module', $step), ['module_id' => 1, 'researched' => false]);
-
-    $step->refresh();
-
-    expect($step->banked_xp)->toBe(100_000)
-        ->and($step->module_xp_remaining)->toBe(85_000)
-        ->and($step->researched_modules)->toBe([]);
-});
-
-it('ignores a repeated tick', function () {
-    [$user, $step] = moduleStep();
-
-    $this->actingAs($user)->patch(route('wot.grinding.module', $step), ['module_id' => 1, 'researched' => true]);
-    $this->actingAs($user)->patch(route('wot.grinding.module', $step), ['module_id' => 1, 'researched' => true]);
-
-    // Charged once, not twice.
-    expect($step->refresh()->banked_xp)->toBe(40_000);
-});
-
-/**
- * A module can legitimately be researched with Free XP, leaving less banked
- * than it cost. Going negative would be nonsense on the page.
- */
-it('floors banked XP at zero', function () {
-    [$user, $step] = moduleStep();
-    $step->update(['banked_xp' => 10_000]);
-
-    $this->actingAs($user)->patch(route('wot.grinding.module', $step), ['module_id' => 1, 'researched' => true]);
-
-    expect($step->refresh()->banked_xp)->toBe(0);
-});
-
-it('refuses a module that belongs to another vehicle', function () {
-    [$user, $step] = moduleStep();
-    WotVehicleModule::insert([['module_id' => 99, 'tank_id' => 555, 'name' => 'Elsewhere',
-        'type' => 'vehicleGun', 'price_xp' => 50_000, 'price_credit' => 0, 'is_default' => false,
-        'created_at' => now(), 'updated_at' => now()]]);
-
-    $this->actingAs($user)->patch(route('wot.grinding.module', $step), ['module_id' => 99, 'researched' => true]);
-
-    expect($step->refresh()->banked_xp)->toBe(100_000)
-        ->and($step->researched_modules)->toBeNull();
-});
-
-it('will not let one account tick another board modules', function () {
-    [$user, $step] = moduleStep();
-    $other = User::factory()->create();
-    WotAccount::factory()->for($other)->create();
-
-    $this->actingAs($other)->patch(route('wot.grinding.module', $step), ['module_id' => 1, 'researched' => true])
-        ->assertNotFound();
-
-    expect($step->refresh()->banked_xp)->toBe(100_000);
-});
-
-it('falls back to the stored figure when a vehicle has no module rows', function () {
-    $user = User::factory()->create();
-    $account = WotAccount::factory()->for($user)->create();
-    WotVehicle::factory()->create(['tank_id' => 901, 'tier' => 9]);
-    $target = WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => 901]);
-    $step = WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => 901, 'tier' => 9,
-        'position' => 0, 'module_xp_remaining' => 42_000]);
-
-    // Without this, a vehicle the encyclopedia hasn't described would read as
-    // fully upgraded.
-    expect($step->outstandingModuleXp())->toBe(42_000)
-        ->and($step->moduleOptions())->toBeEmpty();
-});
-
-/**
- * The game's own tech-tree order, which is neither alphabetical nor by size —
- * so it has to be asserted, not assumed.
- */
-it('sorts vehicle lists by the tech-tree nation order', function () {
-    $user = User::factory()->create();
-    $account = WotAccount::factory()->for($user)->create();
-
-    // Deliberately created back-to-front.
-    foreach ([['italy', 1], ['usa', 2], ['poland', 3], ['germany', 4], ['ussr', 5]] as [$nation, $id]) {
-        WotVehicle::factory()->create(['tank_id' => $id, 'name' => "Tank {$id}", 'tier' => 10, 'nation' => $nation]);
-        WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => $id]);
-    }
-
-    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
-        ->where('targets.0.nation', 'usa')
-        ->where('targets.1.nation', 'germany')
-        ->where('targets.2.nation', 'ussr')
-        ->where('targets.3.nation', 'poland')
-        ->where('targets.4.nation', 'italy'),
-    );
-});
-
-it('sinks completed targets below the nation order', function () {
-    $user = User::factory()->create();
-    $account = WotAccount::factory()->for($user)->create();
-    WotVehicle::factory()->create(['tank_id' => 1, 'nation' => 'usa', 'tier' => 10]);
-    WotVehicle::factory()->create(['tank_id' => 2, 'nation' => 'italy', 'tier' => 10]);
-    // USA would normally lead, but a finished target is out of the working list.
-    WotGrindTarget::factory()->for($account, 'account')->completed()->create(['tank_id' => 1]);
-    WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => 2]);
-
-    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
-        ->where('targets.0.nation', 'italy')
-        ->where('targets.1.nation', 'usa'),
-    );
 });
 
 it('sorts an unknown nation last rather than first', function () {
@@ -384,91 +34,285 @@ it('sorts an unknown nation last rather than first', function () {
         ->and(WotVehicle::rankOf(null))->toBe(11);
 });
 
-it('totals the active grinding columns', function () {
-    [$eight, $nine, $ten] = techLine();
-    $user = User::factory()->create();
-    $account = WotAccount::factory()->for($user)->create();
-    $target = WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => $ten->tank_id]);
-
-    WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => 80, 'tier' => 8,
-        'position' => 0, 'research_xp' => 149_400, 'module_xp_remaining' => 30_000,
-        'banked_xp' => 40_000, 'is_active' => true]);
-    WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => 90, 'tier' => 9,
-        'position' => 1, 'research_xp' => 225_000, 'module_xp_remaining' => 20_000,
-        'banked_xp' => 5_000, 'is_active' => true]);
-    // Not active — must stay out of every column.
-    WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => 100, 'tier' => 10,
-        'position' => 2, 'banked_xp' => 999_999, 'module_xp_remaining' => 999_999]);
-
-    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
-        ->where('totals.active.steps', 2)
-        ->where('totals.active.banked_xp', 45_000)
-        ->where('totals.active.module_xp_remaining', 50_000)
-        ->where('totals.active.research_cost', 374_400)
-        ->where('totals.active.xp_required', 424_400)
-        // (149,400 + 30,000 - 40,000) + (225,000 + 20,000 - 5,000)
-        ->where('totals.active.xp_remaining', 379_400)
-        // 45,000 banked of 424,400 required. Free XP is no longer subtracted
-        // here — it is a statement about modules now, and a planned module is
-        // still XP that has to be found.
-        ->where('totals.active.progress', 10.6),
-    );
-});
-
-/**
- * Averaging the per-row percentages would let a tiny grind pull as hard on the
- * figure as a tier 10 one. Here row one is 100% and row two 0%; an average says
- * 50%, the weighted figure says 1%.
- */
-it('weights total progress by XP rather than averaging the rows', function () {
-    [$eight, $nine, $ten] = techLine();
-    $user = User::factory()->create();
-    $account = WotAccount::factory()->for($user)->create();
-    $target = WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => $ten->tank_id]);
-
-    WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => 80, 'tier' => 8,
-        'position' => 0, 'research_xp' => 1_000, 'banked_xp' => 1_000, 'is_active' => true]);
-    WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => 90, 'tier' => 9,
-        'position' => 1, 'research_xp' => 99_000, 'banked_xp' => 0, 'is_active' => true]);
-
-    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
-        ->where('totals.active.progress', 1),
-    );
-});
-
 it('reports full progress when nothing is active', function () {
     $user = User::factory()->create();
     WotAccount::factory()->for($user)->create();
 
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
-        ->where('totals.active.steps', 0)
+        ->where('totals.active.tanks', 0)
         ->where('totals.active.xp_required', 0)
         ->where('totals.active.progress', 100),
     );
 });
 
 /**
+ * Active Grinding is a list of tanks, and being on it is the whole of what
+ * "playing this" means — there is no separate tick for the same fact anywhere,
+ * which is what stopped the old per-step flag showing one tank twice.
+ */
+it('adds a tank to Active Grinding', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 80), ['is_playing' => true])->assertRedirect();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->has('active', 1)
+        ->where('active.0.tank_id', 80)
+        ->where('totals.playing', 1),
+    );
+});
+
+it('drops a tank from Active Grinding', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 80), ['is_playing' => true]);
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 80), ['is_playing' => false])->assertRedirect();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->has('active', 0)
+        ->where('totals.playing', 0),
+    );
+});
+
+/**
+ * The row is the XP board's own cell for that tank, not a second reckoning of
+ * it. Both figures are asserted against both tabs here, because the pair
+ * disagreeing is the whole failure this change exists to make impossible.
+ */
+it('builds an Active Grinding row from the tank XP board cell', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 80), [
+        'is_playing' => true,
+        'banked_xp' => 49_850,
+    ])->assertRedirect();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('active.0.module_xp', 50_000)
+        ->where('xp.rows.0.cells.8.module_xp', 50_000)
+        ->has('active.0.unlocks', 1)
+        ->where('active.0.unlocks.0.tank_id', 90)
+        ->where('active.0.unlocks.0.xp', 149_400)
+        ->where('xp.rows.0.cells.8.unlocks.xp', 149_400)
+        // Its own modules plus what it unlocks, less what is banked.
+        ->where('active.0.xp_required', 199_400)
+        ->where('active.0.banked_xp', 49_850)
+        ->where('active.0.xp_remaining', 149_550)
+        ->where('active.0.progress', 25),
+    );
+});
+
+/**
+ * A tank under two tier Xs is two grinds from one seat, and both are owed. The
+ * old board picked one by display order and hid the other.
+ */
+it('lists every unlock a branching tank leads to, and totals them', function () {
+    $user = User::factory()->create();
+    branchedLines($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 80), ['is_playing' => true]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->has('active.0.unlocks', 2)
+        ->where('active.0.unlocks.0.tank_id', 90)
+        ->where('active.0.unlocks.1.tank_id', 91)
+        // No module rows on this fixture, so the unlocks are the whole bill.
+        ->where('active.0.xp_required', 298_800),
+    );
+});
+
+/**
+ * Researching a module spends banked XP in game, so the balance drops by
+ * exactly what it cost — which is the point of ticking modules at all, against
+ * keeping an "XP to max" total by hand.
+ */
+it('drops banked XP by the module cost when one is researched', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 80), ['is_playing' => true, 'banked_xp' => 100_000]);
+    $this->actingAs($user)->patch(route('wot.grinding.research-module', 80), ['module_id' => 100, 'researched' => true])
+        ->assertRedirect();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('active.0.banked_xp', 60_000)
+        ->where('active.0.module_xp', 10_000),
+    );
+});
+
+it('gives the XP back when a module is un-ticked', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 80), ['is_playing' => true, 'banked_xp' => 100_000]);
+    $this->actingAs($user)->patch(route('wot.grinding.research-module', 80), ['module_id' => 100, 'researched' => true]);
+    $this->actingAs($user)->patch(route('wot.grinding.research-module', 80), ['module_id' => 100, 'researched' => false]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('active.0.banked_xp', 100_000)
+        ->where('active.0.module_xp', 50_000),
+    );
+});
+
+it('does not charge twice for a module already researched', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 80), ['is_playing' => true, 'banked_xp' => 100_000]);
+    $this->actingAs($user)->patch(route('wot.grinding.research-module', 80), ['module_id' => 100, 'researched' => true]);
+    $this->actingAs($user)->patch(route('wot.grinding.research-module', 80), ['module_id' => 100, 'researched' => true]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('active.0.banked_xp', 60_000),
+    );
+});
+
+/**
+ * A module bought with Free XP leaves less banked than it cost, so the balance
+ * runs out rather than going negative.
+ */
+it('floors banked XP at zero', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 80), ['is_playing' => true, 'banked_xp' => 10_000]);
+    $this->actingAs($user)->patch(route('wot.grinding.research-module', 80), ['module_id' => 100, 'researched' => true]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('active.0.banked_xp', 0),
+    );
+});
+
+/**
+ * Banked XP is a fact about a grind in progress. A tank you are not playing has
+ * no balance for a tick to spend, however much is recorded against it — and the
+ * XP board offers that tick on every tank in the tree.
+ */
+it('leaves banked XP alone on a tank that is not being ground', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 80), ['banked_xp' => 100_000]);
+    $this->actingAs($user)->patch(route('wot.grinding.research-module', 80), ['module_id' => 100, 'researched' => true]);
+
+    expect(WotTankPurchase::where('wot_account_id', $account->id)->where('tank_id', 80)->first()->banked_xp)
+        ->toBe(100_000);
+});
+
+it('totals the Active Grinding columns', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 80), ['is_playing' => true, 'banked_xp' => 49_850]);
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['is_playing' => true, 'banked_xp' => 75_000]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('totals.active.tanks', 2)
+        ->where('totals.active.banked_xp', 124_850)
+        ->where('totals.active.module_xp', 150_000)
+        ->where('totals.active.research_cost', 374_400)
+        ->where('totals.active.xp_required', 524_400)
+        ->where('totals.active.xp_remaining', 399_550)
+        // The headline card reads the same figure.
+        ->where('totals.banked_xp', 124_850),
+    );
+});
+
+/**
+ * Averaging the rows would let a 50,000 XP module grind pull as hard on the
+ * figure as a tier X that has barely started.
+ */
+it('weights total progress by XP rather than averaging the rows', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 80), ['is_playing' => true, 'banked_xp' => 199_400]);
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['is_playing' => true, 'banked_xp' => 0]);
+
+    // Highest tier first within a line, so the untouched tier IX leads.
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('active.0.progress', 0)
+        ->where('active.1.progress', 100)
+        // Averaged it would read 50; weighted by what each still owes, 38.
+        ->where('totals.active.progress', 38),
+    );
+});
+
+/**
+ * The picker offers what the tree knows about, which is also what guarantees
+ * every tank you can add has a cell to read its figures from. It carries the
+ * flag, tier and type badge every other vehicle list here wears, so it ships
+ * what those need.
+ */
+it('offers only tanks on the tree that are not already being ground', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 80), ['is_playing' => true]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->has('options', 2)
+        ->where('options.0.tank_id', 100)
+        ->where('options.1.tank_id', 90)
+        // The written form of the name, as everywhere else: Tgt X, not Target X.
+        ->where('options.0.name', 'Tgt X')
+        ->where('options.0.tier', 10)
+        ->where('options.0.nation', 'ussr')
+        ->where('options.0.type', 'mediumTank'),
+    );
+});
+
+/**
+ * The picker opens on tanks in the garage that still owe XP, rather than on the
+ * four hundred the tree holds — so it has to say, per tank, whether it is owned
+ * and what is left on it.
+ */
+it('says which tanks are in the garage with XP still on them', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['is_purchased' => true]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('options.1.tank_id', 90)
+        ->where('options.1.is_purchased', true)
+        // Its own modules, plus the unlock it still leads to.
+        ->where('options.1.xp_remaining', 325_000)
+        // The tier VIII below owes nothing now: the tier IX was researched from
+        // it, so its unlock is settled and its modules are assumed taken.
+        ->where('options.2.tank_id', 80)
+        ->where('options.2.is_purchased', false)
+        ->where('options.2.xp_remaining', 0),
+    );
+});
+
+it('rejects a banked XP figure the board could never produce', function (array $payload) {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), $payload)->assertSessionHasErrors();
+})->with([
+    'negative' => [['banked_xp' => -1]],
+    'absurd' => [['banked_xp' => 100_000_001]],
+]);
+
+/**
  * A three-tier line with the tier VIII in the garage.
  *
- * The purchase board is built from the tech tree rather than from targets, so
- * the steps here matter to the other tabs, not this one. What this line owns is
- * decided by what has been played — the tier VIII stands in for "the vehicle
- * being ground in", which is what its position-zero step used to mean.
+ * What the line owns is decided by what has been played: the tier VIII stands
+ * in for the vehicle being ground in.
  */
 function purchaseLine(User $user): array
 {
     [$eight, $nine, $ten] = techLine();
     $account = WotAccount::factory()->for($user)->create();
-    $target = WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => $ten->tank_id]);
-
-    foreach ([[80, 8, 0], [90, 9, 1], [100, 10, 2]] as [$tank, $tier, $position]) {
-        WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => $tank,
-            'tier' => $tier, 'position' => $position]);
-    }
 
     played($account, $eight->tank_id);
 
-    return [$account, $target, $ten];
+    return [$account, $ten];
 }
 
 it('lays the purchase board out as one column per tier', function () {
@@ -492,6 +336,53 @@ it('lays the purchase board out as one column per tier', function () {
         // The owned vehicle is not an outlay.
         ->where('purchase.rows.0.credits_remaining', 9_500_000)
         ->where('totals.credits_required', 9_500_000),
+    );
+});
+
+/**
+ * One line running the whole height of the tree, tier I up to tier XI, which is
+ * the only fixture here whose bottom is a real tier I. The three-tier lines
+ * make roots out of tier VIII vehicles, so anything about the start of a line
+ * wants testing against both.
+ */
+function tallLine(User $user): WotAccount
+{
+    $account = WotAccount::factory()->for($user)->create();
+
+    $above = null;
+
+    foreach (range(11, 1) as $tier) {
+        $above = WotVehicle::factory()->create([
+            'tank_id' => $tier * 10,
+            'name' => "Rung {$tier}",
+            'short_name' => "R{$tier}",
+            'tier' => $tier,
+            'next_tanks' => $above ? [$above->tank_id => 100_000] : null,
+        ]);
+    }
+
+    return $account;
+}
+
+/**
+ * Research is ticked on the XP board, against the unlock that leads to a tank.
+ * The bottom of a line has no unlock leading to it and so no tick anywhere,
+ * which would leave it unbuyable — the cart only appears on a researched tank.
+ * Nothing researches into it, so there is nothing to research.
+ */
+it('treats the bottom of a line as researched, because nothing researches into it', function () {
+    $user = User::factory()->create();
+    tallLine($user);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('purchase.rows.0.cells.1.is_root', true)
+        ->where('purchase.rows.0.cells.1.is_unlocked', true)
+        // Bought is a separate statement, and nothing here has made it.
+        ->where('purchase.rows.0.cells.1.is_purchased', false)
+        // Everything above it is researched from the tier below, so it stays
+        // the player's to tick.
+        ->where('purchase.rows.0.cells.2.is_root', false)
+        ->where('purchase.rows.0.cells.2.is_unlocked', false),
     );
 });
 
@@ -694,21 +585,6 @@ it('fills in the tiers a line has already researched past', function () {
     WotVehicle::factory()->create(['tank_id' => 70, 'tier' => 7, 'nation' => 'ussr',
         'price_credit' => 1_400_000, 'next_tanks' => [80 => 98_000]]);
 
-    // The long line starts at tier VII, so its tier VIII is a step still to be
-    // bought — which is what keeps that column on the board at all.
-    $long = WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => 100]);
-    foreach ([[70, 7, 0], [80, 8, 1], [90, 9, 2], [100, 10, 3]] as [$tank, $tier, $position]) {
-        WotGrindStep::create(['wot_grind_target_id' => $long->id, 'tank_id' => $tank,
-            'tier' => $tier, 'position' => $position]);
-    }
-
-    // The short line branches off the same tier IX and has no steps below it.
-    $short = WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => 101]);
-    foreach ([[90, 9, 0], [101, 10, 1]] as [$tank, $tier, $position]) {
-        WotGrindStep::create(['wot_grind_target_id' => $short->id, 'tank_id' => $tank,
-            'tier' => $tier, 'position' => $position]);
-    }
-
     played($account, 70);
 
     // Same nation and tier, so rows come back in name order — and the name a
@@ -794,15 +670,6 @@ function branchedLines(User $user): array
         'nation' => 'ussr', 'price_credit' => 6_100_000, 'next_tanks' => null]);
     WotVehicle::factory()->create(['tank_id' => 101, 'short_name' => 'B X', 'tier' => 10,
         'nation' => 'ussr', 'price_credit' => 6_100_000, 'next_tanks' => null]);
-
-    foreach ([[100, [70, 80, 90, 100]], [101, [70, 80, 91, 101]]] as [$targetTank, $path]) {
-        $target = WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => $targetTank]);
-
-        foreach ($path as $position => $tank) {
-            WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => $tank,
-                'tier' => (int) floor($tank / 10), 'position' => $position]);
-        }
-    }
 
     // Both lines start from a tier VII already in the garage, so the shared
     // tier VIII above it is the first thing either of them still has to buy.
@@ -1011,33 +878,6 @@ it('shows a line you own outright, owing nothing', function () {
         ->where('purchase.rows.0.credits_remaining', 0)
         ->where('purchase.bought_tiers', [8, 9, 10])
         ->where('totals.credits_required', 0),
-    );
-});
-
-/**
- * Targets drive the other tabs. They used to decide what this one showed too,
- * which is why a line you owned but never tracked had no row at all.
- */
-it('builds the purchase board without reference to grind targets', function () {
-    [$eight, $nine, $ten] = techLine();
-    $user = User::factory()->create();
-    $account = WotAccount::factory()->for($user)->create();
-
-    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
-        ->has('purchase.rows', 1)
-        ->where('purchase.rows.0.credits_remaining', 11_900_000),
-    );
-
-    // Tracking it changes the other tabs, and must change nothing here.
-    $target = WotGrindTarget::factory()->for($account, 'account')->create(['tank_id' => $ten->tank_id]);
-    foreach ([[80, 8, 0], [90, 9, 1], [100, 10, 2]] as [$tank, $tier, $position]) {
-        WotGrindStep::create(['wot_grind_target_id' => $target->id, 'tank_id' => $tank,
-            'tier' => $tier, 'position' => $position]);
-    }
-
-    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
-        ->has('purchase.rows', 1)
-        ->where('purchase.rows.0.credits_remaining', 11_900_000),
     );
 });
 
@@ -1501,11 +1341,113 @@ it('settles an unlock once the next tank is researched', function () {
 
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
         ->where('xp.rows.0.cells.8.unlocks.is_unlocked', true)
+        // Researched but not bought, which is the state the lock stays the
+        // player's to un-tick in.
+        ->where('xp.rows.0.cells.8.unlocks.is_purchased', false)
         // The unlock drops out, and so do the tier VIII's own modules: you
         // researched the tier IX from it, so you took its modules on the way.
         ->where('xp.rows.0.cells.8.module_xp', 0)
         ->where('xp.rows.0.cells.9.module_xp', 100_000)
         ->where('xp.rows.0.xp_remaining', 485_000),
+    );
+});
+
+/**
+ * The tick moved to the XP board, but the flag it writes is the same one Tanks
+ * to Purchase reads to gate its cart — so a tick on one tab has to land on the
+ * other without anything else being done.
+ */
+it('shows a tank ticked on the XP board as researched on Tanks to Purchase', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['is_unlocked' => true])->assertRedirect();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('purchase.rows.0.cells.9.is_unlocked', true)
+        // Researching is not buying, and the bill is unchanged by it.
+        ->where('purchase.rows.0.cells.9.is_purchased', false)
+        ->where('purchase.rows.0.credits_remaining', 11_900_000),
+    );
+});
+
+/**
+ * The half of the control that had nowhere to live before: the purchase board
+ * only ever offered the lock on a cell you had not bought, so un-ticking an
+ * unlock and watching its XP come back is new behaviour rather than a move.
+ */
+it('un-ticks an unlock and puts its XP back on the board', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['is_unlocked' => true]);
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['is_unlocked' => false])->assertRedirect();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('xp.rows.0.cells.8.unlocks.is_unlocked', false)
+        // The tier VIII's modules come back with it: the assumption that you
+        // took them on the way rests on having researched past the vehicle.
+        ->where('xp.rows.0.cells.8.module_xp', 50_000)
+        ->where('xp.rows.0.xp_remaining', 684_400),
+    );
+});
+
+/**
+ * What the lock is drawn flat by. Buying a tank researches it, so an un-tick
+ * would write false and change nothing on screen — the control says so instead
+ * of accepting a click that does not take.
+ */
+it('says when the tank an unlock leads to is already bought', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    // The not-bought half of this is asserted where the unlock is ticked
+    // researched, above. It is not asserted here as a before-and-after because
+    // AccountProgress memoises per account and is bound for the request: two
+    // renders in one test share the container, so the second reads the first's
+    // answer. Patch, then render once.
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['is_purchased' => true]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('xp.rows.0.cells.8.unlocks.is_purchased', true)
+        ->where('xp.rows.0.cells.8.unlocks.is_unlocked', true),
+    );
+});
+
+it('cannot un-research a tank that is already bought', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['is_purchased' => true]);
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['is_unlocked' => false]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        // Owning a vehicle you never researched is not a state the game has.
+        ->where('xp.rows.0.cells.8.unlocks.is_unlocked', true)
+        ->where('purchase.rows.0.cells.9.is_unlocked', true),
+    );
+});
+
+/**
+ * Researched is a fact about a tank, not about a route to it, and the tick for
+ * it now lives on a board that reads it unioned across every line. Read per
+ * line instead, a tank settled under a line you have played showed as
+ * unresearched on a line you had not — with no tick on either board to fix it,
+ * because the line that owns the unlock reads it as bought and draws it flat.
+ */
+it('shows a tank researched on one line as researched on every line', function () {
+    $user = User::factory()->create();
+    [$account] = branchedLines($user);
+
+    played($account, 100);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('purchase.rows.1.name', 'B X')
+        ->where('purchase.rows.1.cells.8.is_unlocked', true)
+        // Owing for it is still B's, which is the other half of the cell and
+        // the one that stays a per-line question.
+        ->where('purchase.rows.1.cells.8.is_purchased', false)
+        ->where('purchase.rows.1.credits_remaining', 11_900_000),
     );
 });
 
@@ -1812,6 +1754,33 @@ it('lays the Blueprints board out as fragments per vehicle', function () {
         ->where('blueprints.rows.0.cells.9.fragments', 0)
         ->where('blueprints.rows.0.fragments', 0)
         ->where('totals.blueprint_fragments', 0),
+    );
+});
+
+/**
+ * Blueprints are a tier II-X system, so the board stops where the fragments do
+ * — unlike the other three, which owe XP and credits at every tier.
+ */
+it('gives the Blueprints board columns for tiers II to X only', function () {
+    $user = User::factory()->create();
+    $account = tallLine($user);
+
+    // Held against the tier XI, which the board no longer has a cell for.
+    WotTankPurchase::create(['wot_account_id' => $account->id, 'tank_id' => 110, 'blueprint_fragments' => 30]);
+    WotTankPurchase::create(['wot_account_id' => $account->id, 'tank_id' => 20, 'blueprint_fragments' => 4]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('blueprints.tiers', [2, 3, 4, 5, 6, 7, 8, 9, 10])
+        ->has('blueprints.rows.0.cells', 9)
+        // The tier I is off the board but still on the line, so the tier II
+        // above it is researched from something.
+        ->where('blueprints.rows.0.cells.2.is_researchable', true)
+        ->where('blueprints.rows.0.cells.2.fragments', 4)
+        // Fragments on a tier XI are not counted towards anything.
+        ->where('blueprints.rows.0.fragments', 4)
+        ->where('totals.blueprint_fragments', 4)
+        // The rule is this board's alone.
+        ->where('xp.tiers', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]),
     );
 });
 

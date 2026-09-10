@@ -7,14 +7,20 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * Whether the signed-in player has researched and bought one vehicle, and what
- * they will actually pay for it.
+ * Everything the signed-in player has said about one vehicle: whether it is
+ * researched and bought, what they will actually pay for it, and whether they
+ * are grinding it right now.
+ *
+ * The table is named for the first of those because it was the first. Being on
+ * the Active Grinding list is not a purchase, but it is a per-tank fact keyed
+ * the same way and read by the same four boards, and a table of its own would
+ * have bought nothing but a fifth lookup.
  *
  * A row exists only once something has been said about the tank; everything
  * else falls back to defaults derived from what the account has played. See
  * PurchaseBoard.
  */
-#[Fillable(['wot_account_id', 'tank_id', 'is_unlocked', 'is_purchased', 'price_credit', 'research_xp', 'blueprint_fragments'])]
+#[Fillable(['wot_account_id', 'tank_id', 'is_unlocked', 'is_purchased', 'price_credit', 'research_xp', 'blueprint_fragments', 'is_playing', 'banked_xp'])]
 class WotTankPurchase extends Model
 {
     /**
@@ -31,6 +37,8 @@ class WotTankPurchase extends Model
             'research_xp' => 'integer',
             'blueprint_fragments' => 'integer',
             'price_credit' => 'integer',
+            'is_playing' => 'boolean',
+            'banked_xp' => 'integer',
         ];
     }
 

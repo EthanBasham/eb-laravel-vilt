@@ -62,9 +62,7 @@ class FreeXpBoard
         /*
          * Every module on the board in one query, rather than one query per
          * vehicle. 67 lines of up to eleven tiers each is several hundred
-         * vehicles, and moduleOptions() on the grind step does it per step —
-         * which is fine for the dozen steps of a path and would be hundreds of
-         * round trips here.
+         * vehicles, and asking per vehicle would be hundreds of round trips.
          *
          * Stock modules come along too, unlike the dropdown that shows them:
          * they are the roots of the research graph, so leaving them out would

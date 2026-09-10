@@ -15,14 +15,15 @@ use App\Models\WotVehicle;
  * still have to pay, and for what" — so no XP, modules or banked figures reach
  * it, and a line whose last vehicle is bought drops out entirely.
  *
- * Rows are not limited to tracked grind targets. Which lines exist is
- * TechTreeLines' question; this class only decorates them with prices.
+ * Which lines exist is TechTreeLines' question; this class only decorates them
+ * with prices.
  */
 class PurchaseBoard
 {
     public function __construct(
         private readonly TechTreeLines $lines,
         private readonly LineOwnership $ownership,
+        private readonly AccountProgress $progress,
     ) {}
 
     /**
@@ -47,7 +48,7 @@ class PurchaseBoard
         // Claimed in display order, so the row that owns a shared vehicle is
         // the one you meet first reading down the board. TechTreeLines already
         // sorts, which is why nothing re-sorts here.
-        $rows = $this->claimShared($this->lineRows($minTier, $purchases, $played));
+        $rows = $this->claimShared($this->lineRows($minTier, $purchases, $played, $this->progress->for($account)));
 
         return [
             'rows' => $rows->all(),
@@ -77,33 +78,41 @@ class PurchaseBoard
      *
      * @param  Collection<int, WotTankPurchase>  $purchases
      * @param  Collection<int, int>  $played
+     * @param  array<int, array{is_purchased: bool, is_unlocked: bool}>  $researched
      * @return Collection<int, array<string, mixed>>
      */
-    private function lineRows(int $minTier, Collection $purchases, Collection $played): Collection
+    private function lineRows(int $minTier, Collection $purchases, Collection $played, array $researched): Collection
     {
         return $this->lines->lines($minTier)
-            ->map(fn (array $line): array => $this->row($line, $purchases, $played));
+            ->map(fn (array $line): array => $this->row($line, $purchases, $played, $researched));
     }
 
     /**
      * @param  array<string, mixed>  $line
      * @param  Collection<int, WotTankPurchase>  $purchases
      * @param  Collection<int, int>  $played
+     * @param  array<int, array{is_purchased: bool, is_unlocked: bool}>  $researched
      * @return array<string, mixed>
      */
-    private function row(array $line, Collection $purchases, Collection $played): array
+    private function row(array $line, Collection $purchases, Collection $played, array $researched): array
     {
         // Ownership is read per vehicle and then inferred down the line, which
         // is what makes a line you finished read as finished and a line you
         // have never touched cost full price. LineOwnership owns that rule, so
-        // this board and XP Remaining can never disagree about it.
+        // this board and XP Remaining bill the same tanks.
         $owned = $this->ownership->along($line['vehicles'], $purchases, $played);
+
+        $byTier = $line['vehicles'];
 
         $cells = $line['vehicles']
             ->map(fn (WotVehicle $v): array => $this->cell(
                 $v,
                 $purchases->get($v->tank_id),
                 $owned[$v->tank_id],
+                $researched[$v->tank_id]['is_unlocked'] ?? $owned[$v->tank_id]['is_unlocked'],
+                // Nothing on this line researches into it, so there is no
+                // unlock to tick anywhere and none is owed.
+                ! $byTier->has($v->tier - 1),
             ))
             ->sortBy('tier')
             ->values();
@@ -118,10 +127,22 @@ class PurchaseBoard
     }
 
     /**
+     * The two halves of a cell come from different places on purpose.
+     *
+     * What you owe is a per-line question — a tank bought on one line is still
+     * owed on another that has not reached it, which is what stops a converging
+     * pair charging twice — so is_purchased comes from LineOwnership.
+     *
+     * Whether it is researched is a fact about the tank, and since the tick for
+     * it now lives on XP Remaining it has to be read the way that board reads
+     * it: unioned across every line by AccountProgress. Taken per line instead,
+     * a tank researched under a line you have played showed as unresearched on
+     * a line you had not, and there was no tick on either board to fix it with.
+     *
      * @param  array{is_purchased: bool, is_unlocked: bool}  $owned
      * @return array<string, mixed>
      */
-    private function cell(WotVehicle $vehicle, ?WotTankPurchase $purchase, array $owned): array
+    private function cell(WotVehicle $vehicle, ?WotTankPurchase $purchase, array $owned, bool $isUnlocked, bool $isRoot): array
     {
         return [
             'tank_id' => $vehicle->tank_id,
@@ -135,7 +156,11 @@ class PurchaseBoard
             'is_discounted' => $purchase?->price_credit !== null
                 && (int) $purchase->price_credit !== (int) $vehicle->price_credit,
             'is_purchased' => $owned['is_purchased'],
-            'is_unlocked' => $owned['is_unlocked'],
+            'is_unlocked' => $isUnlocked,
+            // Read-only here: the lock is ticked on XP Remaining, against the
+            // unlock that leads to this tank. A root has no such unlock, which
+            // the cell says rather than leaving a lock that cannot be opened.
+            'is_root' => $isRoot,
             /*
              * Filled in by claimShared() once the rows are named and sorted.
              * Seeded here so every cell has the same shape whether it ends up

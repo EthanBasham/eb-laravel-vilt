@@ -22,6 +22,19 @@ use App\Models\WotVehicle;
  */
 class BlueprintBoard
 {
+    /**
+     * The tiers a fragment can be spent on.
+     *
+     * Blueprints exist for tiers II-X only: a tier I is researched from
+     * nothing, and tier XI sits above where the system stops. Neither gets a
+     * column here — an empty cell you can type a number into is worse than no
+     * cell at all — which is a rule this board enforces alone. The other three
+     * still show the whole line, because XP and credits are owed at every tier.
+     */
+    private const MIN_TIER = 2;
+
+    private const MAX_TIER = 10;
+
     public function __construct(
         private readonly TechTreeLines $lines,
         private readonly AccountProgress $progress,
@@ -56,6 +69,10 @@ class BlueprintBoard
                 $byTier = $line['vehicles'];
 
                 $cells = $byTier
+                    // Narrowed after $byTier is captured, not before: the cell
+                    // still asks the unfiltered line whether a tier II is
+                    // researched from a tier I.
+                    ->filter(fn (WotVehicle $v, int $tier): bool => $tier >= self::MIN_TIER && $tier <= self::MAX_TIER)
                     ->map(fn (WotVehicle $v, int $tier): array => $this->cell(
                         $v,
                         // The vehicle below it on this line. Where there is

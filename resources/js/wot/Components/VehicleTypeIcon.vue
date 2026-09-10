@@ -15,6 +15,17 @@ const props = defineProps({
  * (#DFD9B7) so the badge follows whatever text color wraps it, matching how
  * every other muted label on this page (tier, dim text) is colored.
  */
+/*
+ * Drawn at 80% of the tankopedia's own sizes, which sat a shade large beside
+ * this page's 14px text once the badge started appearing in narrow chips as
+ * well as in row headings.
+ *
+ * Artillery is exempt. Its square is the smallest glyph of the five to start
+ * with, and taking a fifth off it left it reading as a speck rather than as a
+ * shape.
+ */
+const SHRINK = 0.8;
+
 const TYPES = {
     lightTank: {
         label: 'Light Tank',
@@ -49,11 +60,24 @@ const TYPES = {
         viewBox: '0 0 8 8',
         width: 8,
         height: 8,
+        scale: 1,
         path: 'M0 0h8v8H0z',
     },
 };
 
-const known = computed(() => TYPES[props.type]);
+const known = computed(() => {
+    const type = TYPES[props.type];
+
+    if (! type) {
+        return null;
+    }
+
+    const scale = type.scale ?? SHRINK;
+
+    // The viewBox is left alone, so preserveAspectRatio keeps every glyph its
+    // own shape however these two are rounded.
+    return { ...type, width: type.width * scale, height: type.height * scale };
+});
 </script>
 
 <template>

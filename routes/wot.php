@@ -15,12 +15,6 @@ use App\Http\Controllers\Wot\NewsController;
 Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
 
 Route::get('/grinding', [GrindController::class, 'index'])->name('grinding');
-Route::post('/grinding/targets', [GrindController::class, 'store'])->name('grinding.store');
-Route::delete('/grinding/targets/{target}', [GrindController::class, 'destroy'])->name('grinding.destroy');
-Route::patch('/grinding/targets/{target}/complete', [GrindController::class, 'complete'])->name('grinding.complete');
-Route::patch('/grinding/steps/{step}', [GrindController::class, 'updateStep'])->name('grinding.step');
-Route::patch('/grinding/steps/{step}/modules', [GrindController::class, 'updateModule'])->name('grinding.module');
-Route::patch('/grinding/settings', [GrindController::class, 'updateSettings'])->name('grinding.settings');
 Route::patch('/grinding/filters', [GrindController::class, 'updateFilters'])->name('grinding.filters');
 // Bound by tank_id rather than by model: a purchase row is created on first
 // use, so there is nothing to bind to until then.

@@ -3,14 +3,13 @@ import { router } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
 
 const props = defineProps({
-    stepId: { type: Number, default: null },
     field: { type: String, required: true },
     modelValue: { type: [Number, String], default: 0 },
     align: { type: String, default: 'text-right' },
-    // Steps are the common case, so they stay the default. The purchase board
-    // edits vehicles instead, which are keyed by tank rather than by step.
-    url: { type: String, default: '' },
-    only: { type: Array, default: () => ['active', 'targets', 'totals'] },
+    // Every field on this page edits a tank, so there is no default worth
+    // guessing at — only which of them the caller happens to be editing.
+    url: { type: String, required: true },
+    only: { type: Array, default: () => ['active', 'totals'] },
     /*
      * Resting border, background and text colours, as utility classes.
      *
@@ -30,8 +29,8 @@ const props = defineProps({
      *
      * Supplied by the parent rather than built here: applying one of these
      * means knowing the shape of the props the field feeds, and this component
-     * is used against both the step rows and the purchase board. Keeping that
-     * knowledge at the call site is what lets it stay usable against either.
+     * is used against four different boards. Keeping that knowledge at the call
+     * site is what lets it stay usable against any of them.
      */
     optimistic: { type: Function, default: null },
 });
@@ -75,7 +74,6 @@ const commit = () => {
     if (next === Number(props.modelValue ?? 0)) return;
 
     saving.value = true;
-    const url = props.url || `/wot/grinding/steps/${props.stepId}`;
 
     const options = {
         preserveScroll: true,
@@ -88,7 +86,7 @@ const commit = () => {
         options.optimistic = (pageProps) => props.optimistic(pageProps, next);
     }
 
-    router.patch(url, { [props.field]: next }, options);
+    router.patch(props.url, { [props.field]: next }, options);
 };
 </script>
 

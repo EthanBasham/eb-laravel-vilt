@@ -27,6 +27,10 @@ class UpdateTankPurchaseRequest extends FormRequest
             // Reference only — what you hold, not what it buys. The ceiling is
             // headroom rather than a game rule.
             'blueprint_fragments' => ['sometimes', 'integer', 'min:0', 'max:2000'],
+            // Membership of the Active Grinding list; there is no other tick
+            // for "playing this", so adding and dropping are both this flag.
+            'is_playing' => ['sometimes', 'boolean'],
+            'banked_xp' => ['sometimes', 'integer', 'min:0', 'max:100000000'],
         ];
     }
 }

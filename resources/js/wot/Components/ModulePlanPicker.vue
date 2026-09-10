@@ -6,8 +6,8 @@ import { computed, ref } from 'vue';
  * The Free XP board's cell: which of a vehicle's upgrade modules to buy with
  * Free XP.
  *
- * Distinct from ModulePicker, which ticks a module *researched* on a tracked
- * grind step and spends banked XP doing it. This one records an intention and
+ * Distinct from ModuleResearchPicker, which ticks a module *researched* and
+ * spends the tank's banked XP doing it. This one records an intention and
  * changes nothing else.
  */
 const props = defineProps({

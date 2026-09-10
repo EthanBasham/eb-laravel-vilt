@@ -36,6 +36,12 @@ class LineOwnership
      *
      * An explicit purchase record wins over the inference either way.
      *
+     * The bottom of a line is researched by definition: nothing researches into
+     * it, so there is nothing to research. Written as "no vehicle a tier below
+     * on this line" rather than as tier I, because that is the exact inverse of
+     * "an unlock leads here" — the same predicate BlueprintBoard draws a dash
+     * for, and the reason the XP board has no tick to offer for such a vehicle.
+     *
      * @param  Collection<int, WotVehicle>  $vehicles  one line's vehicles
      * @param  Collection<int, WotTankPurchase>  $purchases  keyed by tank id
      * @param  Collection<int, int>  $played  tank ids, flipped to keys
@@ -45,6 +51,7 @@ class LineOwnership
     {
         $state = [];
         $owned = false;
+        $byTier = $vehicles->keyBy('tier');
 
         // Highest tier first: the inference travels downwards, from the vehicle
         // you have battles in to everything you researched through to reach it.
@@ -65,8 +72,11 @@ class LineOwnership
 
             $state[$vehicle->tank_id] = [
                 'is_purchased' => $purchased,
-                // Buying implies researching, whatever the stored flag says.
-                'is_unlocked' => $purchased || ($purchase?->is_unlocked ?? false),
+                // Buying implies researching, whatever the stored flag says,
+                // and so does being the vehicle the line starts from.
+                'is_unlocked' => $purchased
+                    || ! $byTier->has($vehicle->tier - 1)
+                    || ($purchase?->is_unlocked ?? false),
             ];
 
             $owned = $owned || $played->has($vehicle->tank_id);

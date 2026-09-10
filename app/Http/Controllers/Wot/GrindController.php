@@ -5,17 +5,14 @@ namespace App\Http\Controllers\Wot;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response as HttpResponse;
-use Illuminate\Validation\Rule;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Wot\BoardFiltersRequest;
-use App\Http\Requests\Wot\UpdateGrindStepRequest;
 use App\Http\Requests\Wot\UpdateModulePlanRequest;
 use App\Http\Requests\Wot\UpdateModuleResearchRequest;
 use App\Http\Requests\Wot\UpdateResearchXpRequest;
 use App\Http\Requests\Wot\UpdateTankPurchaseRequest;
+use App\Models\WotAccount;
 use App\Models\WotGrindSetting;
-use App\Models\WotGrindStep;
-use App\Models\WotGrindTarget;
 use App\Models\WotTankModule;
 use App\Models\WotTankPurchase;
 use App\Models\WotVehicle;
@@ -23,7 +20,6 @@ use App\Models\WotVehicleModule;
 use App\Services\Wargaming\AccountProgress;
 use App\Services\Wargaming\GrindBoard;
 use App\Services\Wargaming\ModuleTree;
-use App\Services\Wargaming\TechTree;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -37,98 +33,14 @@ class GrindController extends Controller
             return Inertia::render('Connect');
         }
 
-        return Inertia::render('Grinding', [
-            ...$board->for($account),
-            // Only vehicles with a research line can be a target; premiums and
-            // gifts sit outside the tree entirely.
-            'options' => WotVehicle::query()
-                ->whereNotIn('tank_id', $account->grindTargets()->pluck('tank_id'))
-                ->where('is_premium', false)
-                ->whereIn('tier', [8, 9, 10])
-                ->get(['tank_id', 'name', 'tier', 'nation'])
-                // Same tech-tree nation order as every other vehicle list here.
-                ->sortBy(fn (WotVehicle $v): array => [$v->nationRank(), -$v->tier, $v->name])
-                ->map(fn (WotVehicle $v): array => [
-                    'tank_id' => $v->tank_id,
-                    'label' => "{$v->name} (T{$v->tier}, {$v->nation})",
-                ])->values(),
-        ]);
-    }
-
-    /**
-     * Adds a target and generates its path from the tech tree.
-     */
-    public function store(Request $request, TechTree $tree): RedirectResponse
-    {
-        $account = $request->user()->wotAccount;
-
-        abort_unless($account, 404);
-
-        $validated = $request->validate([
-            'tank_id' => ['required', 'integer', Rule::exists('wot_vehicles', 'tank_id')],
-        ]);
-
-        $target = WotGrindTarget::updateOrCreate(
-            ['wot_account_id' => $account->id, 'tank_id' => $validated['tank_id']],
-            ['sort_order' => (int) $account->grindTargets()->max('sort_order') + 1],
-        );
-
-        $target->steps()->delete();
-
-        // Paths start from the last vehicle already played, so a new target
-        // doesn't arrive listing tiers finished years ago.
-        $owned = $account->vehicleSnapshots()->distinct()->pluck('tank_id')->all();
-
-        foreach ($tree->pathTo($validated['tank_id'], $owned) as $step) {
-            WotGrindStep::create([
-                'wot_grind_target_id' => $target->id,
-                'tank_id' => $step['tank_id'],
-                'tier' => $step['tier'],
-                'position' => $step['position'],
-                'research_xp' => $step['research_xp'],
-                'price_credit' => $step['price_credit'],
-            ]);
-        }
-
-        return back(fallback: route('wot.grinding'));
-    }
-
-    public function updateStep(UpdateGrindStepRequest $request, WotGrindStep $step): RedirectResponse
-    {
-        $this->authorizeStep($request, $step);
-
-        $step->update($request->validated());
-
-        return back(fallback: route('wot.grinding'));
-    }
-
-    /**
-     * Ticks a module researched, or un-ticks it.
-     *
-     * The model does the arithmetic: banked XP drops by the module's cost,
-     * because that is what happens in game when you research it. That is the
-     * point of the feature — the alternative was doing the subtraction by hand.
-     */
-    public function updateModule(Request $request, WotGrindStep $step): RedirectResponse
-    {
-        $this->authorizeStep($request, $step);
-
-        $validated = $request->validate([
-            'module_id' => ['required', 'integer'],
-            'researched' => ['required', 'boolean'],
-        ]);
-
-        $step->setModuleResearched($validated['module_id'], $validated['researched']);
-
-        return back(fallback: route('wot.grinding'));
+        return Inertia::render('Grinding', $board->for($account));
     }
 
     /**
      * Marks a vehicle researched or bought, or overrides what it costs.
      *
-     * Keyed on the tank rather than on a grind step: the tier XI above a target
-     * belongs to no path, and a tank worth buying need not be one you are
-     * currently grinding towards.
+     * Keyed on the tank, like every write on this page: the board is the whole
+     * tech tree, and a tank worth buying need not be one you are playing.
      */
     public function updatePurchase(UpdateTankPurchaseRequest $request, int $tankId): RedirectResponse
     {
@@ -178,9 +90,9 @@ class GrindController extends Controller
     /**
      * Puts a module on the Free XP plan, or takes it off.
      *
-     * Keyed on the tank rather than on a grind step, like updatePurchase(): the
-     * Free XP board is the whole tech tree, and a module worth spending on need
-     * not sit on a line you are currently tracking.
+     * Keyed on the tank, like updatePurchase(): the Free XP board is the whole
+     * tech tree, and a module worth spending on need not sit on a line you are
+     * playing.
      *
      * firstOrNew, then save inside the model — a vehicle you have never touched
      * has no plan row, and the first tick is what creates one.
@@ -249,9 +161,13 @@ class GrindController extends Controller
      * Marks a module researched on a vehicle, or un-marks it.
      *
      * The XP Remaining counterpart to updateModulePlan(), and keyed the same
-     * way — on the tank, not on a grind step, because the board is the whole
-     * tree. The model drops the module from the Free XP plan when it is
+     * way. The model drops the module from the Free XP plan when it is
      * researched; nothing here needs to know that.
+     *
+     * It does have to know about banked XP, which is the one thing the model
+     * cannot see: researching a module spends it, so the balance drops by
+     * exactly what the module cost. That was the point of ticking modules here
+     * rather than keeping an "XP to max" total by hand.
      */
     public function updateModuleResearch(UpdateModuleResearchRequest $request, int $tankId): RedirectResponse
     {
@@ -260,12 +176,63 @@ class GrindController extends Controller
         abort_unless($account, 404);
         abort_unless(WotVehicle::where('tank_id', $tankId)->exists(), 404);
 
-        WotTankModule::firstOrNew([
+        $tankModule = WotTankModule::firstOrNew([
             'wot_account_id' => $account->id,
             'tank_id' => $tankId,
-        ])->setModuleResearched($request->integer('module_id'), $request->boolean('researched'));
+        ]);
+
+        $moduleId = $request->integer('module_id');
+        $researched = $request->boolean('researched');
+
+        /*
+         * Read before the write, so a repeated tick is not charged twice.
+         *
+         * Against a default of false rather than the board's assumption: what
+         * moves the balance is a module you have said something about. The two
+         * only differ once a successor is unlocked — the grind is over by then,
+         * and a tank that far along is not on the Active Grinding list.
+         */
+        $wasResearched = WotTankModule::isResearched($tankModule, $moduleId, false);
+
+        $tankModule->setModuleResearched($moduleId, $researched);
+
+        if ($researched !== $wasResearched) {
+            $this->spendBankedXp($account, $tankId, $moduleId, $researched);
+        }
 
         return back(fallback: route('wot.grinding'));
+    }
+
+    /**
+     * Moves a tank's banked XP by the cost of a module just ticked or un-ticked.
+     *
+     * Only for a tank on the Active Grinding list. Banked XP is a fact about a
+     * grind in progress, and this used to live on the step behind that list, so
+     * a tank you are not playing has no balance for a tick to spend. Floored at
+     * zero: a module bought with Free XP leaves less banked than it cost, and a
+     * negative balance would be nonsense on the page.
+     */
+    private function spendBankedXp(WotAccount $account, int $tankId, int $moduleId, bool $researched): void
+    {
+        $purchase = WotTankPurchase::where('wot_account_id', $account->id)
+            ->where('tank_id', $tankId)
+            ->where('is_playing', true)
+            ->first();
+
+        $module = WotVehicleModule::where('tank_id', $tankId)
+            ->where('module_id', $moduleId)
+            ->onlyUpgrades()
+            ->first();
+
+        if (! $purchase || ! $module) {
+            return;
+        }
+
+        $purchase->banked_xp = $researched
+            ? max(0, (int) $purchase->banked_xp - (int) $module->price_xp)
+            : (int) $purchase->banked_xp + (int) $module->price_xp;
+
+        $purchase->save();
     }
 
     /**
@@ -290,49 +257,11 @@ class GrindController extends Controller
         return back(fallback: route('wot.grinding'));
     }
 
-    public function destroy(Request $request, WotGrindTarget $target): RedirectResponse
-    {
-        abort_unless($target->wot_account_id === $request->user()->wotAccount?->id, 404);
-
-        $target->delete();
-
-        return back(fallback: route('wot.grinding'));
-    }
-    public function complete(Request $request, WotGrindTarget $target): RedirectResponse
-    {
-        abort_unless($target->wot_account_id === $request->user()->wotAccount?->id, 404);
-
-        $target->update(['completed_at' => $target->is_complete ? null : now()]);
-
-        return back(fallback: route('wot.grinding'));
-    }
-    public function updateSettings(Request $request): RedirectResponse
-    {
-        $account = $request->user()->wotAccount;
-
-        abort_unless($account, 404);
-
-        $validated = $request->validate([
-            'credits_available' => ['required', 'integer', 'min:0', 'max:10000000000'],
-            'garage_slots_vacant' => ['required', 'integer', 'min:0', 'max:5000'],
-        ]);
-
-        WotGrindSetting::updateOrCreate(['wot_account_id' => $account->id], $validated);
-
-        return back(fallback: route('wot.grinding'));
-    }
-
     /**
      * Remembers where a board's filter row was left.
      *
      * Merged into whatever is stored rather than replacing it, so a client that
      * sends one changed filter does not silently reset the other three.
-     *
-     * Deliberately a separate endpoint from updateSettings(): that one takes
-     * two required figures typed into a form and pressed Save, this one fires
-     * on its own as you click filters, and folding them together would mean
-     * every filter click had to resend the planning figures to survive their
-     * `required` rules.
      *
      * 204 rather than the `back()` every other action here returns, because the
      * caller is a standalone `useHttp` request rather than an Inertia visit:
@@ -359,17 +288,5 @@ class GrindController extends Controller
         $settings->save();
 
         return response()->noContent();
-    }
-
-    /**
-     * Steps are bound by primary key, so ownership is checked through the
-     * target — otherwise any signed-in user could edit another's board.
-     */
-    private function authorizeStep(Request $request, WotGrindStep $step): void
-    {
-        abort_unless(
-            $step->target?->wot_account_id === $request->user()->wotAccount?->id,
-            404,
-        );
     }
 }

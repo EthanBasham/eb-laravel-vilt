@@ -179,6 +179,14 @@ class XpBoard
             'is_discounted' => $discounted !== null && (int) $discounted !== $full,
             // Researched already, so nothing is owed however much it lists at.
             'is_unlocked' => $owned[$next->tank_id]['is_unlocked'] ?? false,
+            /*
+             * Bought, so its research state follows the purchase and is not
+             * this board's to un-tick: the lock renders flat and Tanks to
+             * Purchase is where that is undone. Read from the same union
+             * is_unlocked is, or one tank could read researched on one row and
+             * unbought on another.
+             */
+            'is_purchased' => $owned[$next->tank_id]['is_purchased'] ?? false,
             // Filled in by claimShared(), like the cell's own flag.
             'is_shared' => false,
         ];

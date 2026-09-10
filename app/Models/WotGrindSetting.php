@@ -7,10 +7,13 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * Board-wide state that belongs to no single target: the two planning
- * figures, and where each board's filter row was left.
+ * Where each board's filter row was left, per account.
+ *
+ * It also carried two planning figures — credits to hand and vacant garage
+ * slots — which were typed into a form nobody read the output of. The columns
+ * went with the form.
  */
-#[Fillable(['wot_account_id', 'credits_available', 'garage_slots_vacant', 'purchase_filters', 'freexp_filters', 'xp_filters', 'blueprints_filters'])]
+#[Fillable(['wot_account_id', 'purchase_filters', 'freexp_filters', 'xp_filters', 'blueprints_filters'])]
 class WotGrindSetting extends Model
 {
     /**
@@ -21,8 +24,6 @@ class WotGrindSetting extends Model
     protected function casts(): array
     {
         return [
-            'credits_available' => 'integer',
-            'garage_slots_vacant' => 'integer',
             'purchase_filters' => 'array',
             'freexp_filters' => 'array',
             'xp_filters' => 'array',

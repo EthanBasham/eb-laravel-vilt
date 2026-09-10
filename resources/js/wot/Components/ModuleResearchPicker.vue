@@ -6,11 +6,11 @@ import { computed, ref } from 'vue';
  * The XP Remaining board's module control: which of a vehicle's upgrade modules
  * are already researched.
  *
- * A third module dropdown, and deliberately not a fourth prop on either of the
- * others. ModulePicker spends banked XP on a tracked grind step; ModulePlanPicker
- * records a Free XP intention; this one records a fact about the garage. They
- * write different columns and mean different things, and a single component
- * switching on a mode would read as one control with three personalities.
+ * Serves the Active Grinding table as well, which is what a cell there is made
+ * of. ModulePlanPicker is the one it is deliberately not merged with: that
+ * records a Free XP intention, this records a fact about the garage. They write
+ * different columns and mean different things, and a single component switching
+ * on a mode would read as one control with two personalities.
  */
 const props = defineProps({
     cell: { type: Object, required: true },
@@ -28,9 +28,10 @@ const toggle = (module) => {
         researched: !module.is_researched,
     }, {
         preserveScroll: true,
-        // freexp too: researching a module takes it off the Free XP plan, so
-        // that board's figures move even though nothing there was touched.
-        only: ['xp', 'freexp', 'totals'],
+        // The other boards move too: researching a module takes it off the
+        // Free XP plan, and spends the banked XP that Active Grinding shows —
+        // so both change even though nothing on either was touched.
+        only: ['active', 'xp', 'freexp', 'totals'],
         onFinish: () => (busy.value = null),
     });
 };

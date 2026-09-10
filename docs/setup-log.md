@@ -2641,3 +2641,151 @@ rewritten to pin the replacement — one that a tick does not spread, one that p
 does and that un-ticking survives it.
 
 Suite: **184 passed, 1047 assertions.**
+
+
+## 2026-09-10 — Active Grinding is the tech tree too, and grind targets are gone
+
+Asked to explain the Targets list, because *"I'm not confident it is really needed. I feel it may be
+a remnant of a misunderstanding of prior work."*
+
+Half right. Not a misunderstanding — a migration that stopped one step short. The board began as a
+projection of tracked targets, and four commits then rebuilt each tab on the tech tree, every one of
+them moving a fact off `wot_grind_steps` and onto a tank-keyed row. `free_xp_planned` went to
+`wot_tank_modules`, `blueprint_fragments` to `wot_tank_purchases`. Two never made the trip:
+`banked_xp` and `is_active`. Because they stayed, the whole target apparatus stayed with them, and
+so did a second copy of figures the tree already owned:
+
+| Fact | Steps | Tech-tree boards |
+| --- | --- | --- |
+| Modules researched | `researched_modules` via `PATCH /steps/{step}/modules` | `wot_tank_modules` via `PATCH /research/{tank}/modules` |
+| Discounted unlock XP | `research_xp_remaining` | `wot_tank_purchases.research_xp` |
+| Module XP outstanding | `module_xp_remaining` | derived live |
+| Credits | `price_credit`, frozen when the target was added | derived live |
+
+Nothing synced them. Ticking a gun on Active Grinding did not move XP Remaining, and vice versa.
+`activeSteps()` flat-mapped every target's steps with no dedupe, so a tank on two paths appeared
+twice with two banked-XP figures — the exact thing `claimShared()` exists to prevent everywhere else.
+
+### The reframe
+
+**Membership of the Active Grinding list is the flag.** Given the lifecycle — add a tank, grind it
+while ticking modules and typing banked XP, tick the unlock on XP Remaining when the next tank is
+paid for, drop it from the list, buy the tank — there is nothing a separate "playing" tick could say
+that adding and removing does not. So `is_playing` and `banked_xp` are columns on
+`wot_tank_purchases`, and the target concept is gone entirely.
+
+`GrindBoard` now builds Active Grinding **out of the XP board's own cells**. The row that claims a
+tank supplies its modules; the unlocks come from every row it appears on. The two tabs cannot
+disagree, because there is only one reckoning.
+
+A consequence worth having: a tank under two tier Xs now **lists both unlocks**. Both are owed and
+both are grinds you would do from that seat; the old board picked one by display order and hid the
+other. `xp_required` is their sum plus modules, so the column and the total always agree. The tree
+holds 50 such branch points, though this account currently owes only one branch at each.
+
+Ticking a module still spends banked XP — that was the point of ticking them at all — but the
+arithmetic moved to `updateModuleResearch()`, so it fires from either tab and only for a tank on the
+list. A tank you are not playing has no balance to spend.
+
+### Deleted
+
+`WotGrindTarget`, `WotGrindStep`, `UpdateGrindStepRequest`, `WotGrindTargetFactory`, `ModulePicker.vue`,
+`TechTree::pathTo()`, five routes, six controller methods, and **`wot:import-grind-sheet`** with its
+`grind-sheet.json`. That import was a one-off and had already run; the workbook stays in `docs/`.
+Two claims made earlier in this log are now false: the import note above, and the
+`only: ['active', 'targets', 'totals']` convention — `targets` is not a prop any more.
+
+`wot_grind_settings` survives, and is created by the same migration as the two dropped tables, so
+that migration stays untouched in history.
+
+### Migration
+
+`is_playing` and `banked_xp` added, the steps folded onto their tanks — greatest banked XP per tank,
+playing if any step was active — then both tables dropped. Aggregated in PHP because `max()` over a
+boolean is not portable to the SQLite the tests run on.
+
+Carried over exactly: **9 tanks, 1,001,318 XP banked**, which is the same total this log recorded
+when the spreadsheet was first imported. Backup of both tables taken before the drop at
+`~/grind-tables-backup-2026-09-10.sql`; `down()` restores the columns but not the rows, which were
+derived rather than entered.
+
+### Tests
+
+`GrindingTest` lost 26 tests and its `moduleStep()` fixture, and gained 14 covering the list, the
+row built from the cell, the branching unlocks, and the banked-XP arithmetic from the XP tab. The
+first change made was stripping the targets and steps out of `purchaseLine()` and `branchedLines()`
+and running the suite — it passed untouched, which proved the four boards had never read them and
+made the rest of the deletion safe.
+
+Suite: **235 passed, 1696 assertions.**
+
+### Planning removed
+
+Same day: *"Please remove the Planning section as it doesn't really make sense to me."*
+
+Two figures lived in it. `garage_slots_vacant` was written and never read — no board, card or filter
+ever asked what it said. `credits_available` had exactly one reader, the *"381.2M short"* line under
+the Credits needed card, and the form was its only editor.
+
+Both are gone, along with the shortfall line, `PATCH /grinding/settings`, `updateSettings()` and the
+two columns. The card now shows what the filtered board costs and nothing else. The comparison had
+been getting less useful anyway: since Tanks to Purchase started billing the whole tech tree rather
+than a handful of targets, "440.9M needed against 59.8M to hand" measured a lifetime of research
+against one afternoon's budget.
+
+`wot_grind_settings` stays — the four filter columns beside these are the rest of it.
+
+Suite: **234 passed, 1694 assertions.**
+
+### The picker becomes a list
+
+*"I want to change the Add a Tank You're Playing form to have nation filters, tier filters, and type
+filters... Then instead of a dropdown, it should list out the tanks' (short_name) in a horizontal
+list with nation flag, tier, and type all displayed."*
+
+419 tanks in a `<select>` was a scroll, and told you nothing about any of them until you found it.
+Now it is the same chip row the boards carry — nation flags, Roman tiers, the tankopedia type badges
+— above a wrapped list of buttons, each wearing flag, short name, tier and type. Clicking one starts
+the grind; there is no Add button and no form left to submit.
+
+**The filters invert the boards' polarity.** Those are a view you come back to, so they hold what is
+*hidden* and start with everything on. This is a list you are trying to find one tank in, where
+narrowing to a nation should cost one click rather than nine — so it holds a *selection*, and empty
+means all. The chips still read as what is on screen: nothing picked lights all of them, and the
+first click is what starts cutting.
+
+Two things the cells could not supply, so `options` is read from `wot_vehicles` instead: `short_name`
+(the written form — "Obj. 279 (e)", not "Object 279 early") and `type`. Adding both to every XP cell
+would have cost hundreds of fields to serve one list.
+
+That change made vehicle-list ordering depend on each vehicle's own nation rather than its line's,
+which the `techLine()` fixture had been leaving to the factory's random pick — so the fixture now
+states one. Live: 419 tanks, all five types, all eleven nations.
+
+Suite: **234 passed, 1702 assertions.**
+
+### Icons shrunk, and the picker opens on the garage
+
+Three follow-ups in one pass.
+
+**Type badges at 80%.** They sat a shade large beside 14px text once they started appearing in
+narrow chips as well as in row headings. `VehicleTypeIcon` now scales every glyph, so every use on
+the page follows. **Artillery is exempt** and stays at full size, as asked: its square is the
+smallest glyph of the five to start with, and a fifth off it read as a speck. The `viewBox` is untouched, so `preserveAspectRatio` keeps each glyph its own
+shape however the two numbers round.
+
+**The picker's chips start unlit.** They were lit by default, on the reasoning that a chip should
+read as what is on screen. That only held while "nothing picked" meant "everything shown" — which is
+the other half of this change.
+
+**Nothing picked now opens on the garage**: tanks that are bought, still owe XP, and are not already
+being ground. Live, that is **35 tanks against 419** — the tree is four hundred vehicles and almost
+none of them are a real answer to "what could I start next", so it sits behind the first filter click
+rather than in front of it. The heading and the count say which of the two lists you are looking at.
+
+`options` gained `is_purchased` — unioned across lines by `AccountProgress`, like the lock on Tanks
+to Purchase, because owning a tank is a fact about the tank — and `xp_remaining`, which is the same
+`owed()` the Active Grinding rows total, now extracted so the picker and the table cannot disagree
+about what a tank has left.
+
+Suite: **235 passed, 1720 assertions.**

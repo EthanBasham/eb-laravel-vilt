@@ -1,19 +1,18 @@
 <script setup>
-import { Head, router, useForm, usePage } from '@inertiajs/vue3';
-import { IconEngine, IconLock, IconLockOpen, IconShoppingCart, IconTank } from '@tabler/icons-vue';
+import { Head, router, usePage } from '@inertiajs/vue3';
+import { IconEngine, IconLock, IconLockOpen, IconShoppingCart } from '@tabler/icons-vue';
 import { computed, ref } from 'vue';
 import AppShell from '../Components/AppShell.vue';
 import EditableNumber from '../Components/EditableNumber.vue';
-import ModulePicker from '../Components/ModulePicker.vue';
 import ModulePlanPicker from '../Components/ModulePlanPicker.vue';
 import ModuleResearchPicker from '../Components/ModuleResearchPicker.vue';
 import NationFlag from '../Components/NationFlag.vue';
+import ResearchLock from '../Components/ResearchLock.vue';
 import VehicleTypeIcon from '../Components/VehicleTypeIcon.vue';
 import { useBoardFilters } from '../composables/useBoardFilters';
 
 const props = defineProps({
     active: { type: Array, default: () => [] },
-    targets: { type: Array, default: () => [] },
     settings: { type: Object, required: true },
     totals: { type: Object, required: true },
     purchase: { type: Object, required: true },
@@ -33,34 +32,82 @@ const views = [
 ];
 const view = ref('active');
 
-const expanded = ref([]);
-const toggle = (id) => {
-    expanded.value = expanded.value.includes(id)
-        ? expanded.value.filter((x) => x !== id)
-        : [...expanded.value, id];
-};
-
-const open = computed(() => props.targets.filter((t) => !t.is_complete));
-
-const addForm = useForm({ tank_id: '' });
-const addTarget = () => addForm.post('/wot/grinding/targets', {
+/*
+ * Being on the Active Grinding list is the whole of "playing this tank" — there
+ * is no separate tick for it anywhere. So adding and dropping are one flag, and
+ * both go through the same per-tank endpoint every other board writes to.
+ *
+ * The four boards move with it: the tank leaves the picker, and its banked XP
+ * joins or leaves the headline card.
+ */
+const setPlaying = (tankId, is_playing) => router.patch(`/wot/grinding/purchases/${tankId}`, { is_playing }, {
     preserveScroll: true,
-    onSuccess: () => addForm.reset(),
+    only: ['active', 'options', 'totals'],
 });
 
-const settingsForm = useForm({
-    credits_available: props.settings.credits_available,
-    garage_slots_vacant: props.settings.garage_slots_vacant,
-});
-const saveSettings = () => settingsForm.patch('/wot/grinding/settings', { preserveScroll: true });
+/*
+ * The picker's filters, and the only ones on this page held as a *selection*
+ * rather than as a hidden set.
+ *
+ * The boards are a view you come back to, so they start with everything on and
+ * remember what you switched off. This is four hundred tanks you are trying to
+ * find one in, where narrowing to a nation should cost one click rather than
+ * nine. So every chip starts unlit, and picking one is what cuts.
+ */
+const pickedNations = ref([]);
+const pickedTiers = ref([]);
+const pickedTypes = ref([]);
 
-const removeTarget = (t) => {
-    if (window.confirm(`Stop tracking ${t.name}?`)) {
-        router.delete(`/wot/grinding/targets/${t.id}`, { preserveScroll: true });
+/*
+ * Returns the next selection rather than mutating one: a ref reaching the
+ * template is auto-unwrapped, so a helper called from a @click is handed the
+ * array and has nothing to assign back through. The call sites assign, which
+ * `<script setup>` compiles back onto the ref.
+ */
+const withPick = (picked, value) => (picked.includes(value)
+    ? picked.filter((v) => v !== value)
+    : [...picked, value]);
+
+// What a chip shows, against what a filter allows: an untouched dimension lets
+// everything through while its chips all sit unlit.
+const allows = (picked, value) => !picked.length || picked.includes(value);
+
+const pickerNations = computed(() => nationsOf(props.options));
+const pickerTiers = computed(() => [...new Set(props.options.map((o) => o.tier))].sort((a, b) => a - b));
+
+// Fixed order rather than whatever the list happens to hold, so the row does
+// not reshuffle as tanks come off it. Light to heavy, then the two that are not
+// tanks — the tankopedia's own order, and the badges read as a progression.
+const TYPES = ['lightTank', 'mediumTank', 'heavyTank', 'AT-SPG', 'SPG'];
+const pickerTypes = computed(() => {
+    const present = new Set(props.options.map((o) => o.type));
+
+    return TYPES.filter((type) => present.has(type));
+});
+
+const hasPick = computed(() => pickedNations.value.length
+    + pickedTiers.value.length
+    + pickedTypes.value.length > 0);
+
+/*
+ * What the picker opens on: tanks in the garage that still owe XP and are not
+ * already being ground — which is the shape of "something I could start next".
+ *
+ * The whole tree is four hundred tanks and almost none of them are a real
+ * answer, so it is behind the first filter click rather than in front of it.
+ */
+const grindable = computed(() => props.options.filter((o) => o.is_purchased && o.xp_remaining > 0));
+
+const pickable = computed(() => {
+    if (! hasPick.value) {
+        return grindable.value;
     }
-};
 
-const toggleComplete = (t) => router.patch(`/wot/grinding/targets/${t.id}/complete`, {}, { preserveScroll: true });
+    return props.options.filter((o) => allows(pickedNations.value, o.nation)
+        && allows(pickedTiers.value, o.tier)
+        && allows(pickedTypes.value, o.type));
+});
+
 
 const n = (v) => new Intl.NumberFormat().format(v ?? 0);
 
@@ -134,7 +181,12 @@ const patchPurchase = (pageProps, tankId, payload) => ({
  */
 const setPurchase = (tankId, payload) => router.patch(`/wot/grinding/purchases/${tankId}`, payload, {
     preserveScroll: true,
-    only: ['purchase', 'totals'],
+    // Buying a tank researches it, and researching moves the other three
+    // boards — the unlock settles, the modules below it stop being owed, the
+    // Free XP plan follows them and Blueprints counts the line done. They are
+    // all built on every request anyway, so asking for them costs only bytes,
+    // where leaving them out costs a tab that is quietly out of date.
+    only: ['xp', 'freexp', 'purchase', 'blueprints', 'totals'],
     optimistic: (pageProps) => patchPurchase(pageProps, tankId, payload),
 });
 
@@ -152,6 +204,25 @@ const optimisticPrice = (tankId) => (pageProps, next) => patchPurchase(pageProps
 const priceTone = (cell) => (cell.is_unlocked
     ? 'border-wot-good/50 bg-wot-sunken text-wot-good hover:border-wot-good'
     : 'border-wot-border bg-wot-sunken text-wot-text');
+
+/*
+ * The lock on this board reports; it does not set. Research is ticked on XP
+ * Remaining, against the unlock leading to the tank — so the title says where
+ * that is rather than describing a click this icon does not take.
+ *
+ * A line's first vehicle has no unlock leading to it and so no tick anywhere,
+ * which is why the server settles it as researched and why it says so here
+ * instead of showing a lock that could never be opened.
+ */
+const researchedTitle = (cell) => {
+    if (cell.is_root) {
+        return `${cell.name} — the start of the line, researched from nothing.`;
+    }
+
+    return cell.is_unlocked
+        ? `${cell.name} — researched. Changed on XP Remaining.`
+        : `${cell.name} — not researched. Tick it on XP Remaining, against the unlock that leads here.`;
+};
 
 /*
  * Purchase filters.
@@ -363,16 +434,24 @@ const bpRowFragments = (row) => bpShownTiers.value.reduce((sum, t) => sum + bpCe
 
 /*
  * "Done" is about research, not about fragments: a line you have finished is
- * one blueprints cannot help, however many you happen to hold against it. So
- * this reads the XP board's rows rather than its own — the two boards are the
- * same 67 lines in the same order, keyed the same way.
+ * one blueprints cannot help, however many you happen to hold against it.
+ *
+ * Read off this board's own cells rather than the XP tab's rows, which is what
+ * it did until the board narrowed to tiers II-X. XP Remaining still runs tier I
+ * to XI and still counts module XP, and fragments buy none of that — so a line
+ * researched to the top read as unfinished here over an outstanding tier XI
+ * unlock or an unresearched tier I gun.
+ *
+ * A cell is done in the three cases the grid already draws grey or as a dash:
+ * the tank is researched, nothing researches into it, or another row owns it. A
+ * row of nothing but those is a row fragments cannot touch.
+ *
+ * Every cell, not the visible ones: hiding a tier column must not decide which
+ * lines the board has.
  */
-const xpRowByKey = computed(() => Object.fromEntries(props.xp.rows.map((r) => [r.key, r])));
+const bpCellDone = (cell) => cell.is_shared || !cell.is_researchable || cell.is_unlocked;
 
-// Every tier, not the visible ones: xpRowRemaining reads the XP tab's own tier
-// filter, and hiding a column over there must not decide what this tab shows.
-const bpLineDone = (row) => Object.values(xpRowByKey.value[row.key]?.cells ?? {})
-    .every((cell) => xpCellXp(cell) === 0);
+const bpLineDone = (row) => Object.values(row.cells).every(bpCellDone);
 
 const bpHasDoneLines = computed(() => props.blueprints.rows.some(bpLineDone));
 
@@ -381,19 +460,6 @@ const bpShownRows = computed(() => props.blueprints.rows.filter(
 ));
 const bpTierTotal = (tier) => bpShownRows.value.reduce((sum, r) => sum + bpCellFragments(r.cells[tier]), 0);
 const bpGrandTotal = computed(() => bpShownRows.value.reduce((sum, r) => sum + bpRowFragments(r), 0));
-
-/*
- * Credits shortfall is the number that decides whether a plan is realistic, so
- * it follows the board rather than the server's total.
- *
- * The server now bills the entire tech tree, which is the honest number for a
- * board that shows the entire tech tree and a useless one to hold against your
- * balance. Reading the filtered total instead means narrowing to a nation, or
- * hiding what you own, answers "what would finishing this cost me?".
- *
- * Declared after grandTotal because it reads it.
- */
-const creditGap = computed(() => grandTotal.value - props.settings.credits_available);
 </script>
 
 <template>
@@ -404,7 +470,7 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
             <div>
                 <h1 class="text-3xl">Grinding</h1>
                 <p class="mt-1 text-sm text-wot-dim">
-                    {{ totals.open }} open {{ totals.open === 1 ? 'target' : 'targets' }}
+                    {{ totals.playing }} {{ totals.playing === 1 ? 'tank' : 'tanks' }} being ground
                 </p>
             </div>
         </div>
@@ -427,12 +493,7 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
             </div>
             <div class="border border-wot-border bg-wot-panel p-3">
                 <dt class="text-xs uppercase tracking-wider text-wot-dim">Credits needed</dt>
-                <dd class="mt-1 text-xl tabular-nums" :class="creditGap > 0 ? 'text-wot-bad' : 'text-wot-good'">
-                    {{ short(grandTotal) }}
-                </dd>
-                <p class="mt-0.5 text-xs text-wot-dim">
-                    {{ creditGap > 0 ? `${short(creditGap)} short` : 'covered' }}
-                </p>
+                <dd class="mt-1 text-xl tabular-nums text-wot-heading">{{ short(grandTotal) }}</dd>
             </div>
         </dl>
 
@@ -456,7 +517,7 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
             <h2 id="active-heading" class="sr-only">Active grinding</h2>
 
             <p v-if="!active.length" class="border border-dashed border-wot-border p-8 text-center text-sm text-wot-dim">
-                No tanks marked as being played. Mark a step active on the XP Remaining tab.
+                Nothing being ground. Add a tank below.
             </p>
 
             <div v-else class="overflow-x-auto border border-wot-border bg-wot-panel">
@@ -464,30 +525,47 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
                     <thead class="bg-wot-sunken">
                         <tr>
                             <th scope="col" class="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Tank</th>
-                            <th scope="col" class="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Towards</th>
                             <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">XP banked</th>
                             <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">To max</th>
                             <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">To next tank</th>
                             <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Remaining</th>
                             <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Progress</th>
+                            <th scope="col" class="w-10 px-4 py-3" />
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-wot-border-soft">
-                        <tr v-for="row in active" :key="row.id" class="hover:bg-wot-sunken">
+                        <tr v-for="row in active" :key="row.tank_id" class="hover:bg-wot-sunken">
                             <td class="px-4 py-2">
                                 <NationFlag :nation="row.nation" class="me-2" />
                                 <span class="text-wot-heading">{{ row.name }}</span>
                                 <span class="ms-2 text-xs text-wot-dim">T{{ row.tier }}</span>
                             </td>
-                            <td class="px-4 py-2 text-wot-muted">{{ row.target_name }}</td>
                             <!-- The one number no API can supply. -->
                             <td class="px-4 py-2 text-right">
-                                <EditableNumber :step-id="row.id" field="banked_xp" :model-value="row.banked_xp" />
+                                <EditableNumber
+                                    field="banked_xp"
+                                    :model-value="row.banked_xp"
+                                    :url="`/wot/grinding/purchases/${row.tank_id}`"
+                                />
                             </td>
+                            <!-- The XP board's own picker, against the XP
+                                 board's own store: a module ticked here is
+                                 ticked there, which is the whole point of
+                                 building this table out of its cells. -->
                             <td class="px-4 py-2 text-right">
-                                <ModulePicker :step-id="row.id" :modules="row.modules" :outstanding="row.module_xp_remaining" />
+                                <ModuleResearchPicker :cell="row" />
                             </td>
-                            <td class="px-4 py-2 text-right tabular-nums text-wot-muted">{{ n(row.research_cost) }}</td>
+                            <!-- Every unlock this tank leads to that is still
+                                 owed. Usually one; a tank under two tier Xs
+                                 owes both, and both are grinds you would do
+                                 from this seat. -->
+                            <td class="px-4 py-2 text-right">
+                                <span v-if="!row.unlocks.length" class="text-wot-muted">—</span>
+                                <div v-for="u in row.unlocks" :key="u.tank_id" class="whitespace-nowrap tabular-nums text-wot-muted">
+                                    <span v-if="row.unlocks.length > 1" class="me-2 text-xs text-wot-dim">{{ u.name }}</span>
+                                    {{ n(u.xp) }}
+                                </div>
+                            </td>
                             <td class="px-4 py-2 text-right tabular-nums text-wot-heading">{{ n(row.xp_remaining) }}</td>
                             <td class="px-4 py-2 text-right">
                                 <div class="flex items-center justify-end gap-2">
@@ -497,15 +575,28 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
                                     <span class="w-12 text-right tabular-nums text-wot-muted">{{ row.progress }}%</span>
                                 </div>
                             </td>
+                            <td class="px-4 py-2 text-right">
+                                <button
+                                    type="button"
+                                    class="text-xs uppercase tracking-wider text-wot-dim transition-colors hover:text-wot-bad"
+                                    :title="`Stop grinding ${row.name}`"
+                                    :aria-label="`Stop grinding ${row.name}`"
+                                    @click="setPlaying(row.tank_id, false)"
+                                >
+                                    &times;
+                                </button>
+                            </td>
                         </tr>
                     </tbody>
 
                     <tfoot v-if="active.length > 1" class="border-t-2 border-wot-border bg-wot-sunken">
                         <tr>
-                            <th scope="row" class="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Total</th>
-                            <td class="px-4 py-3 text-xs text-wot-dim">{{ totals.active.steps }} tanks</td>
+                            <th scope="row" class="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">
+                                Total
+                                <span class="ms-2 font-normal normal-case tracking-normal text-wot-dim">{{ totals.active.tanks }} tanks</span>
+                            </th>
                             <td class="px-4 py-3 text-right tabular-nums text-wot-good">{{ n(totals.active.banked_xp) }}</td>
-                            <td class="px-4 py-3 text-right tabular-nums text-wot-muted">{{ n(totals.active.module_xp_remaining) }}</td>
+                            <td class="px-4 py-3 text-right tabular-nums text-wot-muted">{{ n(totals.active.module_xp) }}</td>
                             <td class="px-4 py-3 text-right tabular-nums text-wot-muted">{{ n(totals.active.research_cost) }}</td>
                             <td class="px-4 py-3 text-right tabular-nums font-bold text-wot-heading">{{ n(totals.active.xp_remaining) }}</td>
                             <td class="px-4 py-3 text-right">
@@ -516,96 +607,12 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
                                     <span class="w-12 text-right tabular-nums text-wot-muted">{{ totals.active.progress }}%</span>
                                 </div>
                             </td>
+                            <td class="px-4 py-3" />
                         </tr>
                     </tfoot>
                 </table>
             </div>
 
-            <!-- The tracked targets, and what each path still needs.
-                 
-                 They live on this tab because it is the one about what you are
-                 actually doing: the other four are the tech tree, and a target
-                 is a plan laid over it rather than part of it.
-
-                 The per-step controls are down to banked XP and Playing. Module
-                 research, next-tank XP, fragments and credits all moved onto
-                 tree boards, keyed by tank rather than by step, and leaving
-                 second copies here would have been two ways to write one figure.
-            -->
-            <h3 class="mt-8 text-base">Targets</h3>
-
-            <div class="mt-2 overflow-x-auto border border-wot-border bg-wot-panel">
-                <table class="min-w-full divide-y divide-wot-border text-sm">
-                    <thead class="bg-wot-sunken">
-                        <tr>
-                            <th scope="col" class="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Target</th>
-                            <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">XP remaining</th>
-                            <th scope="col" class="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Steps</th>
-                            <th scope="col" class="w-24 px-4 py-3" />
-                        </tr>
-                    </thead>
-
-                    <tbody class="divide-y divide-wot-border-soft">
-                        <template v-for="t in targets" :key="t.id">
-                            <tr class="cursor-pointer hover:bg-wot-sunken" :class="t.is_complete ? 'opacity-50' : ''" @click="toggle(t.id)">
-                                <td class="px-4 py-2">
-                                    <span aria-hidden="true" class="me-1 inline-block w-3 text-wot-dim">{{ expanded.includes(t.id) ? '▾' : '▸' }}</span>
-                                    <NationFlag :nation="t.nation" class="me-2" />
-                                    <span class="text-wot-heading">{{ t.name }}</span>
-                                    <span class="ms-2 text-xs text-wot-dim">T{{ t.tier }}</span>
-                                </td>
-                                <td class="px-4 py-2 text-right tabular-nums text-wot-muted">{{ n(t.xp_remaining) }}</td>
-                                <td class="px-4 py-2 text-right tabular-nums text-wot-dim">{{ t.steps.length }}</td>
-                                <td class="px-4 py-2 text-right" @click.stop>
-                                    <button type="button" class="text-xs uppercase tracking-wider text-wot-dim hover:text-wot-good" @click="toggleComplete(t)">
-                                        {{ t.is_complete ? 'Reopen' : 'Done' }}
-                                    </button>
-                                    <button type="button" class="ms-2 text-xs uppercase tracking-wider text-wot-dim hover:text-wot-bad" @click="removeTarget(t)">
-                                        Remove
-                                    </button>
-                                </td>
-                            </tr>
-
-                            <tr v-if="expanded.includes(t.id)">
-                                <td colspan="4" class="bg-wot-sunken/60 px-4 py-3">
-                                    <table class="min-w-full text-xs">
-                                        <thead>
-                                            <tr class="text-wot-dim">
-                                                <th scope="col" class="py-1 text-left font-bold uppercase tracking-wider">Step</th>
-                                                <th scope="col" class="py-1 text-right font-bold uppercase tracking-wider">Banked</th>
-                                                <th scope="col" class="py-1 text-right font-bold uppercase tracking-wider">Playing</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <tr v-for="s in t.steps" :key="s.id" class="text-wot-muted">
-                                                <td class="py-1">
-                                                    <span class="text-wot-text">T{{ s.tier }} {{ s.name }}</span>
-                                                </td>
-                                                <td class="py-1 text-right"><EditableNumber :step-id="s.id" field="banked_xp" :model-value="s.banked_xp" /></td>
-                                                <td class="py-1 text-right">
-                                                    <input
-                                                        type="checkbox"
-                                                        class="border"
-                                                        :checked="s.is_active"
-                                                        :aria-label="`Currently playing ${s.name}`"
-                                                        @change="router.patch(`/wot/grinding/steps/${s.id}`, { is_active: $event.target.checked }, { preserveScroll: true, only: ['active', 'targets', 'totals'] })"
-                                                    >
-                                                </td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </td>
-                            </tr>
-                        </template>
-
-                        <tr v-if="!targets.length">
-                            <td colspan="4" class="px-4 py-8 text-center text-wot-dim">
-                                No targets yet. Add one below, or run <code>php artisan wot:import-grind-sheet</code>.
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
         </section>
 
         <!-- 2. XP Remaining ------------------------------------------------------
@@ -678,8 +685,8 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
                         XP for this tank's modules
                     </span>
                     <span class="inline-flex items-center gap-1.5">
-                        <IconTank :size="15" stroke-width="2" aria-hidden="true" />
-                        XP to unlock the next tank
+                        <IconLockOpen :size="15" stroke-width="2" aria-hidden="true" />
+                        XP to unlock the next tank — tick the lock once it is researched
                     </span>
                 </div>
             </div>
@@ -741,13 +748,12 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
                                             <ModuleResearchPicker v-else :cell="row.cells[tier]" />
                                         </div>
                                         <div v-if="row.cells[tier].unlocks" class="flex items-center justify-end gap-1.5">
-                                            <IconTank
-                                                :size="14"
-                                                stroke-width="2"
-                                                class="shrink-0"
-                                                :class="row.cells[tier].unlocks.is_unlocked ? 'text-wot-dim/50' : 'text-wot-dim'"
-                                                aria-hidden="true"
-                                            />
+                                            <!-- The tick that settles this
+                                                 unlock, leading the row rather
+                                                 than trailing it: it is the
+                                                 thing you do, and the number
+                                                 beside it is what it zeroes. -->
+                                            <ResearchLock :unlocks="row.cells[tier].unlocks" />
 
                                             <!-- Already researched, so nothing is
                                                  owed however much it lists at. -->
@@ -979,25 +985,24 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
                                                  the middle of the taller box.
 
                                                  Icons only, to keep the cell narrow —
-                                                 which leaves title and aria-label as the
-                                                 only things naming the action, the
-                                                 tooltip for a pointer and the label for a
-                                                 screen reader that would otherwise
-                                                 announce nothing but "button". -->
-                                            <button
-                                                type="button"
-                                                class="inline-flex shrink-0 items-center justify-center border border-wot-border p-1 text-wot-dim transition-colors"
-                                                :class="row.cells[tier].is_unlocked ? 'hover:text-wot-bad' : 'hover:text-wot-text'"
-                                                :title="row.cells[tier].is_unlocked
-                                                    ? `${row.cells[tier].name} — researched. Mark as not researched.`
-                                                    : `${row.cells[tier].name} — not researched. Mark as unlocked.`"
-                                                :aria-label="row.cells[tier].is_unlocked
-                                                    ? `Mark ${row.cells[tier].name} as not researched`
-                                                    : `Mark ${row.cells[tier].name} as unlocked`"
-                                                @click="setPurchase(row.cells[tier].tank_id, { is_unlocked: !row.cells[tier].is_unlocked })"
+                                                 which leaves the title as the only thing
+                                                 naming the tank, the tooltip for a
+                                                 pointer and an sr-only line for a screen
+                                                 reader.
+
+                                                 The lock reads, it does not set: research
+                                                 is ticked on XP Remaining, against the
+                                                 unlock that leads to the tank. It stays
+                                                 on show because it still gates the cart
+                                                 and tints the price, and hiding it would
+                                                 leave both unexplained. -->
+                                            <span
+                                                class="inline-flex shrink-0 items-center justify-center border border-wot-border p-1 text-wot-dim"
+                                                :title="researchedTitle(row.cells[tier])"
                                             >
-                                                <component :is="row.cells[tier].is_unlocked ? IconLock : IconLockOpen" :size="14" stroke-width="2.25" />
-                                            </button>
+                                                <component :is="row.cells[tier].is_unlocked ? IconLock : IconLockOpen" :size="14" stroke-width="2.25" aria-hidden="true" />
+                                                <span class="sr-only">{{ researchedTitle(row.cells[tier]) }}</span>
+                                            </span>
 
                                             <!-- A previewed sale price is derived, not
                                                  stored, so it shows as text: typing into
@@ -1362,50 +1367,119 @@ const creditGap = computed(() => grandTotal.value - props.settings.credits_avail
             </div>
         </section>
 
-        <!-- Active Grinding only. The other four tabs are the tech tree laid
-             out one way or another, and neither adding a grind target nor
-             typing a credit balance is a question you ask of the tree — they
-             belong to what you are playing now, which is what this tab is.
+        <!-- Active Grinding only. Saying what you are playing is not a question
+             you ask of the tech tree, which is all the other four tabs are. -->
+        <div v-if="view === 'active'" class="mt-8">
+            <div class="border border-wot-border bg-wot-panel p-4">
+                <h2 class="text-base">Add a tank you're playing</h2>
+                <p class="mt-1 text-xs text-wot-dim">
+                    {{ hasPick
+                        ? 'Everything on the tree that matches. Its figures are read off the XP Remaining board.'
+                        : 'In your garage, part ground. Pick a nation, tier or type to search the whole tree.' }}
+                </p>
 
-             Note the consequence: credits_available is only editable here, even
-             though the shortfall under Credits needed is measured against it on
-             every tab. -->
-        <div v-if="view === 'active'" class="mt-8 grid gap-6 lg:grid-cols-2">
-            <form class="border border-wot-border bg-wot-panel p-4" @submit.prevent="addTarget">
-                <h2 class="text-base">Add a target</h2>
-                <p class="mt-1 text-xs text-wot-dim">The path is built from the tech tree, starting at the last vehicle you've played.</p>
+                <!-- The board filter rows' chips, with their polarity inverted:
+                     lit means picked, and picking nothing opens on the garage
+                     rather than on the tree. See the note on pickedNations. -->
+                <div class="mt-3 space-y-2 border border-wot-border bg-wot-sunken p-3">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                        <span class="w-12 shrink-0 text-xs font-bold uppercase tracking-wider text-wot-dim">Nation</span>
+                        <button
+                            v-for="nation in pickerNations"
+                            :key="nation"
+                            type="button"
+                            class="border p-1 leading-none transition-colors"
+                            :class="pickedNations.includes(nation) ? 'border-wot-gold' : 'border-wot-border opacity-30 hover:opacity-70'"
+                            :aria-pressed="pickedNations.includes(nation)"
+                            @click="pickedNations = withPick(pickedNations, nation)"
+                        >
+                            <NationFlag :nation="nation" />
+                        </button>
+                        <button v-if="pickedNations.length" type="button"
+                                class="ms-1 text-xs uppercase tracking-wider text-wot-dim hover:text-wot-text"
+                                @click="pickedNations = []">
+                            All
+                        </button>
+                    </div>
 
-                <div class="mt-3 flex flex-wrap gap-2">
-                    <select v-model="addForm.tank_id" class="min-w-64 flex-1 border px-2 py-1.5 text-sm">
-                        <option value="">Choose a vehicle…</option>
-                        <option v-for="o in options" :key="o.tank_id" :value="o.tank_id">{{ o.label }}</option>
-                    </select>
-                    <button
-                        type="submit"
-                        class="border border-wot-gold bg-wot-gold px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-wot-abyss disabled:opacity-40"
-                        :disabled="!addForm.tank_id || addForm.processing"
-                    >
-                        Add
-                    </button>
+                    <div class="flex flex-wrap items-center gap-1.5">
+                        <span class="w-12 shrink-0 text-xs font-bold uppercase tracking-wider text-wot-dim">Tier</span>
+                        <button
+                            v-for="tier in pickerTiers"
+                            :key="tier"
+                            type="button"
+                            class="min-w-9 border px-2 py-0.5 text-xs font-bold tracking-wider transition-colors"
+                            :class="pickedTiers.includes(tier) ? 'border-wot-gold text-wot-gold' : 'border-wot-border text-wot-dim hover:text-wot-text'"
+                            :aria-pressed="pickedTiers.includes(tier)"
+                            :aria-label="`Tier ${ROMAN[tier]}`"
+                            @click="pickedTiers = withPick(pickedTiers, tier)"
+                        >
+                            {{ ROMAN[tier] }}
+                        </button>
+                        <button v-if="pickedTiers.length" type="button"
+                                class="ms-1 text-xs uppercase tracking-wider text-wot-dim hover:text-wot-text"
+                                @click="pickedTiers = []">
+                            All
+                        </button>
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-1.5">
+                        <span class="w-12 shrink-0 text-xs font-bold uppercase tracking-wider text-wot-dim">Type</span>
+                        <button
+                            v-for="type in pickerTypes"
+                            :key="type"
+                            type="button"
+                            class="inline-flex h-6 min-w-9 items-center justify-center border px-2 transition-colors"
+                            :class="pickedTypes.includes(type) ? 'border-wot-gold text-wot-gold' : 'border-wot-border text-wot-dim hover:text-wot-text'"
+                            :aria-pressed="pickedTypes.includes(type)"
+                            @click="pickedTypes = withPick(pickedTypes, type)"
+                        >
+                            <VehicleTypeIcon :type="type" />
+                        </button>
+                        <button v-if="pickedTypes.length" type="button"
+                                class="ms-1 text-xs uppercase tracking-wider text-wot-dim hover:text-wot-text"
+                                @click="pickedTypes = []">
+                            All
+                        </button>
+                    </div>
                 </div>
-            </form>
 
-            <form class="border border-wot-border bg-wot-panel p-4" @submit.prevent="saveSettings">
-                <h2 class="text-base">Planning</h2>
-                <div class="mt-3 flex flex-wrap gap-4">
-                    <label class="text-xs uppercase tracking-wider text-wot-dim">
-                        Credits available
-                        <input v-model="settingsForm.credits_available" type="number" min="0" class="mt-1 block w-40 border px-2 py-1.5 text-sm normal-case tracking-normal">
-                    </label>
-                    <label class="text-xs uppercase tracking-wider text-wot-dim">
-                        Vacant garage slots
-                        <input v-model="settingsForm.garage_slots_vacant" type="number" min="0" class="mt-1 block w-32 border px-2 py-1.5 text-sm normal-case tracking-normal">
-                    </label>
-                    <button type="submit" class="self-end border border-wot-border px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-wot-dim hover:border-wot-gold hover:text-wot-gold">
-                        Save
-                    </button>
+                <!-- Capped and scrolled: unfiltered this is every tank on every
+                     line, and a list that long would push the page out from
+                     under the table it belongs to. -->
+                <div class="mt-3 max-h-64 overflow-y-auto">
+                    <p v-if="!pickable.length" class="border border-dashed border-wot-border p-6 text-center text-sm text-wot-dim">
+                        {{ hasPick
+                            ? 'Nothing left to add in those nations, tiers and types.'
+                            : 'Nothing in the garage is part ground. Pick a nation, tier or type to search the whole tree.' }}
+                    </p>
+
+                    <ul v-else role="list" class="flex flex-wrap gap-1.5">
+                        <li v-for="o in pickable" :key="o.tank_id">
+                            <button
+                                type="button"
+                                class="inline-flex items-center gap-1.5 whitespace-nowrap border border-wot-border px-2 py-1 text-xs text-wot-text transition-colors hover:border-wot-gold hover:text-wot-gold"
+                                :title="o.xp_remaining
+                                    ? `Start grinding ${o.name} — ${n(o.xp_remaining)} XP still on it`
+                                    : `Start grinding ${o.name}`"
+                                @click="setPlaying(o.tank_id, true)"
+                            >
+                                <NationFlag :nation="o.nation" />
+                                {{ o.name }}
+                                <span class="text-wot-dim">T{{ o.tier }}</span>
+                                <VehicleTypeIcon :type="o.type" class="text-wot-dim" />
+                            </button>
+                        </li>
+                    </ul>
                 </div>
-            </form>
+
+                <p class="mt-2 text-xs text-wot-dim">
+                    {{ hasPick
+                        ? `${pickable.length} of ${options.length} tanks`
+                        : `${pickable.length} ${pickable.length === 1 ? 'tank' : 'tanks'} with XP still on them` }}
+                </p>
+            </div>
+
         </div>
     </AppShell>
 </template>
