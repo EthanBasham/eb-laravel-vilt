@@ -51,15 +51,68 @@ return new class extends Migration
     /**
      * Reverse the migrations.
      *
-     * Drops the columns only. The two tables are not recreated here — their own
-     * migration does that if this is ever rolled back far enough — and their rows
-     * could not come back either way, since the paths were derived from the tech
-     * tree rather than entered.
+     * The tables come back empty. Their rows cannot: the paths were derived from
+     * the tech tree rather than entered, and the progress on them now lives on
+     * the tanks.
+     *
+     * They have to come back all the same, which is the trap here. Rollback runs
+     * newest first, and three migrations older than this one still reach for
+     * wot_grind_steps on the way down — 180304 re-adds blueprint_fragments to
+     * it, 154504 re-adds free_xp_planned, and 050232 drops researched_modules
+     * off it. So this recreates the schema as it stood the moment up() ran:
+     * the original columns, less the two that were already gone, plus the one
+     * that had been added since. Each of those three then finds what it expects.
      */
     public function down(): void
     {
         Schema::table('wot_tank_purchases', function (Blueprint $table) {
             $table->dropColumn(['is_playing', 'banked_xp']);
+        });
+
+        Schema::create('wot_grind_targets', function (Blueprint $table) {
+            $table->id();
+
+            $table->foreignId('wot_account_id')->constrained()->cascadeOnDelete();
+
+            // The vehicle being worked towards — usually a tier X.
+            $table->unsignedBigInteger('tank_id');
+
+            $table->unsignedInteger('sort_order')->default(0);
+            $table->timestamp('completed_at')->nullable();
+            $table->text('notes')->nullable();
+
+            $table->timestamps();
+
+            $table->unique(['wot_account_id', 'tank_id']);
+            $table->index(['wot_account_id', 'completed_at']);
+        });
+
+        Schema::create('wot_grind_steps', function (Blueprint $table) {
+            $table->id();
+
+            $table->foreignId('wot_grind_target_id')->constrained()->cascadeOnDelete();
+
+            // The vehicle you play at this stage — not the one it unlocks.
+            $table->unsignedBigInteger('tank_id');
+            $table->unsignedTinyInteger('tier');
+
+            // Position along the path, lowest tier first.
+            $table->unsignedTinyInteger('position');
+
+            $table->unsignedInteger('research_xp')->nullable();
+            $table->unsignedInteger('research_xp_remaining')->nullable();
+            $table->unsignedInteger('module_xp_remaining')->default(0);
+            $table->unsignedInteger('banked_xp')->default(0);
+            $table->unsignedBigInteger('price_credit')->nullable();
+            $table->boolean('is_active')->default(false);
+
+            // Added after the table by 050232, and dropped again by its down().
+            $table->json('researched_modules')->nullable();
+
+            $table->timestamps();
+
+            $table->unique(['wot_grind_target_id', 'position']);
+            $table->index('is_active');
         });
     }
 
