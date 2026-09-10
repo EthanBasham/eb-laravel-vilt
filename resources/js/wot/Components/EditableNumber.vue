@@ -1,6 +1,6 @@
 <script setup>
 import { router } from '@inertiajs/vue3';
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 
 const props = defineProps({
     field: { type: String, required: true },
@@ -61,9 +61,26 @@ const onInput = (event) => {
     event.target.value = raw.value;
 };
 
-const focus = () => {
+/*
+ * Focusing a field selects what is in it, so a click and a keystroke replace
+ * the figure. These hold numbers transcribed off the game's own screen — you
+ * are always writing a new one, never amending a digit of the old.
+ *
+ * After nextTick because focusing switches the field from its grouped display
+ * to bare digits, and selecting before Vue has written that would select the
+ * string that is about to be replaced.
+ *
+ * Bound to click as well as focus: a click's mouseup lands after the focus
+ * event and would otherwise drop the selection, leaving a caret where the
+ * pointer was. Focus alone covers tabbing in.
+ */
+const selectAll = (event) => nextTick(() => event.target.select());
+
+const focus = (event) => {
     editing.value = true;
     raw.value = digits(raw.value);
+
+    selectAll(event);
 };
 
 const commit = () => {
@@ -118,6 +135,7 @@ const commit = () => {
         :disabled="saving"
         @input="onInput"
         @focus="focus"
+        @click="selectAll"
         @blur="commit"
         @keyup.enter="$event.target.blur()"
     >

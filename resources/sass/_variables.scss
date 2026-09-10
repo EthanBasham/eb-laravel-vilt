@@ -20,3 +20,22 @@ $transition-base: 250ms ease-in-out;
 $z-dropdown: 30;
 $z-header: 40;
 $z-modal: 50;
+
+/*
+ * The brand values _base.scss needs for ::selection and the focus ring.
+ *
+ * Stated here rather than read from @theme, which is where they also live as
+ * --color-brand-*. Tailwind v4 only emits the theme variables a utility class
+ * actually uses, and no class uses these three — so `var(--color-brand-100)`
+ * resolved to nothing, the declaration was invalid at computed-value time, and
+ * both rules silently did nothing. Selecting text highlighted it in
+ * transparent, and preflight had already removed the focus outline these were
+ * meant to put back.
+ *
+ * Kept in step with the ramp in resources/css/app.css by hand. That is the cost
+ * of the rule this file states at the top: a value only SASS reads belongs to
+ * SASS.
+ */
+$brand-100: oklch(0.93 0.032 275);
+$brand-500: oklch(0.6 0.18 275);
+$brand-900: oklch(0.29 0.1 275);

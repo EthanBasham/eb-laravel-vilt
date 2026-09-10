@@ -1,6 +1,6 @@
 <script setup>
 import { Head, router, usePage } from '@inertiajs/vue3';
-import { IconEngine, IconLock, IconLockOpen, IconShoppingCart } from '@tabler/icons-vue';
+import { IconEngine, IconLock, IconLockOpen, IconRestore, IconShoppingCart } from '@tabler/icons-vue';
 import { computed, ref } from 'vue';
 import ActiveGrindingTable from '../Components/ActiveGrindingTable.vue';
 import AppShell from '../Components/AppShell.vue';
@@ -704,11 +704,12 @@ const bpGrandTotal = computed(() => bpShownRows.value.reduce((sum, r) => sum + b
                                                 <button
                                                     v-if="row.cells[tier].unlocks.is_discounted"
                                                     type="button"
-                                                    class="inline-flex shrink-0 items-center justify-center border border-wot-border p-1 text-xs leading-none text-wot-dim transition-colors hover:text-wot-bad"
+                                                    class="inline-flex shrink-0 items-center justify-center border border-wot-border p-1 text-wot-dim transition-colors hover:text-wot-bad"
                                                     :title="`Reset to the ${n(row.cells[tier].unlocks.full_xp)} full cost of the ${row.cells[tier].unlocks.name}`"
+                                                    :aria-label="`Reset to the full cost of the ${row.cells[tier].unlocks.name}`"
                                                     @click="resetResearchXp(row.cells[tier].unlocks.tank_id)"
                                                 >
-                                                    &times;
+                                                    <IconRestore :size="14" stroke-width="2.25" />
                                                 </button>
                                             </template>
                                         </div>
@@ -951,11 +952,12 @@ const bpGrandTotal = computed(() => bpShownRows.value.reduce((sum, r) => sum + b
                                             <button
                                                 v-if="row.cells[tier].is_discounted"
                                                 type="button"
-                                                class="inline-flex shrink-0 items-center justify-center border border-wot-border p-1 text-xs leading-none text-wot-dim transition-colors hover:text-wot-bad"
+                                                class="inline-flex shrink-0 items-center justify-center border border-wot-border p-1 text-wot-dim transition-colors hover:text-wot-bad"
                                                 :title="`Reset to the ${n(row.cells[tier].api_price)} shop price`"
+                                                :aria-label="`Reset ${row.cells[tier].name} to the shop price`"
                                                 @click="setPurchase(row.cells[tier].tank_id, { price_credit: null })"
                                             >
-                                                &times;
+                                                <IconRestore :size="14" stroke-width="2.25" />
                                             </button>
 
                                             <!-- Researched vehicles only: buying one that

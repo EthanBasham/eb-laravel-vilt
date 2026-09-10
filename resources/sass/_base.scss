@@ -2,6 +2,8 @@
 // there's no markup to hang a class on (::selection, :focus-visible on
 // everything, etc.).
 
+@use 'variables' as vars;
+
 html {
     scroll-behavior: smooth;
 }
@@ -13,14 +15,14 @@ html {
 }
 
 ::selection {
-    background-color: var(--color-brand-100);
-    color: var(--color-brand-900);
+    background-color: vars.$brand-100;
+    color: vars.$brand-900;
 }
 
 // A visible focus ring on every keyboard-focused control, so accessibility
 // doesn't depend on remembering a focus-visible: utility on each one.
 // Tailwind's preflight removes the UA default outline; this puts one back.
 :focus-visible {
-    outline: 2px solid var(--color-brand-500);
+    outline: 2px solid vars.$brand-500;
     outline-offset: 2px;
 }

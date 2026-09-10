@@ -2823,3 +2823,49 @@ renders even when the account payloads are what failed. `sidePanels()` is `local
 says so.
 
 Suite: **236 passed, 1747 assertions.**
+
+### Selection was never disabled — the colour was missing
+
+*"If I click into them and hit Ctrl+A, it doesn't select the text... In fact none of the text on any
+of the pages are selectable. I assume there is some sort of CSS attribute causing this."*
+
+There was no such attribute. Text was selecting the whole time; the highlight was invisible.
+
+`_base.scss` styled `::selection` with `var(--color-brand-100)` on `var(--color-brand-900)`, both
+declared in the `@theme` block in `app.css`. **Tailwind v4 only emits the theme variables a utility
+class actually uses**, and no class uses those two — so the variables were absent from the built CSS,
+`var()` resolved to nothing, and the declaration was invalid at computed-value time. Background fell
+back to `transparent`.
+
+The same fault had taken out something quieter: `:focus-visible` painted its outline in
+`var(--color-brand-500)`, also unemitted. Preflight removes the UA outline, so **every keyboard focus
+ring on the site had been missing too**, on both bundles. Of the ten brand tokens, the build emitted
+50, 200, 600 and 700 — exactly the four a utility class references.
+
+Fixed where this project's own rule already said to put them: `_variables.scss`, which opens with
+*"if only a .scss rule needs it, it belongs here."* Three SASS variables, resolved at compile time
+and immune to tree-shaking. The cost is keeping them in step with the ramp in `app.css` by hand,
+which is the trade that rule already accepted.
+
+Worth remembering as a class of bug: a `@theme` token referenced only from SASS is a token that does
+not exist at runtime, and it fails silently.
+
+### Three smaller things in the same pass
+
+**Focusing a figure selects it.** These fields hold numbers transcribed off the game's own screen —
+you are always writing a new one, never amending a digit — so a click and a keystroke now replace the
+value. Bound to click as well as focus, because a click's mouseup lands after the focus event and
+would otherwise drop the selection; and deferred a tick, because focusing swaps the field from its
+grouped display to bare digits.
+
+**Both reset buttons are `IconRestore`.** Asked for on the XP cost; the credits one beside it does
+the identical thing — put an overridden figure back to its source — and leaving one a `&times;` glyph
+would have read as an oversight.
+
+**"All modules researched"** in the module dropdown. What you know at the end of a grind is that the
+vehicle is finished, not which module you finished last, and saying so was five ticks and five round
+trips. One request, server-side: modules already researched are skipped, and the banked XP charged is
+one subtraction of what was genuinely outstanding. `spendBankedXp()` takes XP rather than a module id
+now, which is what lets a whole vehicle's worth be one adjustment.
+
+Suite: **239 passed, 1772 assertions.**

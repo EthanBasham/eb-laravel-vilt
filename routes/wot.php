@@ -22,6 +22,7 @@ Route::patch('/grinding/purchases/{tankId}', [GrindController::class, 'updatePur
 Route::patch('/grinding/modules/{tankId}', [GrindController::class, 'updateModulePlan'])->name('grinding.module-plan');
 Route::patch('/grinding/modules/{tankId}/top-gun', [GrindController::class, 'planTopGun'])->name('grinding.top-gun');
 Route::patch('/grinding/research/{tankId}/modules', [GrindController::class, 'updateModuleResearch'])->name('grinding.research-module');
+Route::patch('/grinding/research/{tankId}/modules/all', [GrindController::class, 'researchAllModules'])->name('grinding.research-all');
 Route::patch('/grinding/research/{tankId}', [GrindController::class, 'updateResearchXp'])->name('grinding.research-xp');
 
 Route::post('/refresh', [DashboardController::class, 'refresh'])->name('dashboard.refresh');

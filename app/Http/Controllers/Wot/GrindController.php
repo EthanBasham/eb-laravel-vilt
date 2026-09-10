@@ -197,8 +197,47 @@ class GrindController extends Controller
         $tankModule->setModuleResearched($moduleId, $researched);
 
         if ($researched !== $wasResearched) {
-            $this->spendBankedXp($account, $tankId, $moduleId, $researched);
+            $price = (int) WotVehicleModule::where('tank_id', $tankId)
+                ->where('module_id', $moduleId)
+                ->onlyUpgrades()
+                ->value('price_xp');
+
+            $this->spendBankedXp($account, $tankId, $researched ? $price : -$price);
         }
+
+        return back(fallback: route('wot.grinding'));
+    }
+
+    /**
+     * Marks every upgrade module on a vehicle researched, in one write.
+     *
+     * The elite tank case, which the dropdown otherwise asks you to tick four
+     * or five times: what you know is "this one is finished", not which module
+     * you finished last. Modules already researched are skipped rather than
+     * re-ticked, so the banked XP charged is only what is genuinely outstanding.
+     */
+    public function researchAllModules(Request $request, int $tankId): RedirectResponse
+    {
+        $account = $request->user()->wotAccount;
+
+        abort_unless($account, 404);
+        abort_unless(WotVehicle::where('tank_id', $tankId)->exists(), 404);
+
+        $tankModule = WotTankModule::firstOrNew([
+            'wot_account_id' => $account->id,
+            'tank_id' => $tankId,
+        ]);
+
+        $outstanding = WotVehicleModule::where('tank_id', $tankId)
+            ->onlyUpgrades()
+            ->get()
+            ->reject(fn (WotVehicleModule $module): bool => WotTankModule::isResearched($tankModule, $module->module_id, false));
+
+        foreach ($outstanding as $module) {
+            $tankModule->setModuleResearched($module->module_id, true);
+        }
+
+        $this->spendBankedXp($account, $tankId, (int) $outstanding->sum('price_xp'));
 
         return back(fallback: route('wot.grinding'));
     }
@@ -211,26 +250,27 @@ class GrindController extends Controller
      * a tank you are not playing has no balance for a tick to spend. Floored at
      * zero: a module bought with Free XP leaves less banked than it cost, and a
      * negative balance would be nonsense on the page.
+     *
+     * Takes the XP rather than a module, so ticking a whole vehicle's worth is
+     * one adjustment rather than one per module.
      */
-    private function spendBankedXp(WotAccount $account, int $tankId, int $moduleId, bool $researched): void
+    private function spendBankedXp(WotAccount $account, int $tankId, int $xp): void
     {
+        if ($xp === 0) {
+            return;
+        }
+
         $purchase = WotTankPurchase::where('wot_account_id', $account->id)
             ->where('tank_id', $tankId)
             ->where('is_playing', true)
             ->first();
 
-        $module = WotVehicleModule::where('tank_id', $tankId)
-            ->where('module_id', $moduleId)
-            ->onlyUpgrades()
-            ->first();
-
-        if (! $purchase || ! $module) {
+        if (! $purchase) {
             return;
         }
 
-        $purchase->banked_xp = $researched
-            ? max(0, (int) $purchase->banked_xp - (int) $module->price_xp)
-            : (int) $purchase->banked_xp + (int) $module->price_xp;
+        // Negative to give it back, which is what an un-tick sends.
+        $purchase->banked_xp = max(0, (int) $purchase->banked_xp - $xp);
 
         $purchase->save();
     }

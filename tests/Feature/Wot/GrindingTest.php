@@ -141,6 +141,55 @@ it('drops banked XP by the module cost when one is researched', function () {
     );
 });
 
+/**
+ * The elite tank in one click, and the reason it is one request: the banked XP
+ * it spends is one subtraction of what was genuinely outstanding.
+ */
+it('marks every module on a vehicle researched at once', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 80), ['is_playing' => true, 'banked_xp' => 100_000]);
+    $this->actingAs($user)->patch(route('wot.grinding.research-all', 80))->assertRedirect();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('active.0.module_xp', 0)
+        // The gun and the engine together, and only those: the stock chassis
+        // was never something to research.
+        ->where('active.0.banked_xp', 50_000)
+        ->where('xp.rows.0.cells.8.module_xp', 0),
+    );
+});
+
+it('does not charge again for modules already researched', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 80), ['is_playing' => true, 'banked_xp' => 100_000]);
+    $this->actingAs($user)->patch(route('wot.grinding.research-module', 80), ['module_id' => 100, 'researched' => true]);
+    $this->actingAs($user)->patch(route('wot.grinding.research-all', 80));
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        // 40,000 for the gun, then only the engine's 10,000 left to pay.
+        ->where('active.0.banked_xp', 50_000)
+        ->where('active.0.module_xp', 0),
+    );
+});
+
+it('will not let one account finish another account modules', function () {
+    $owner = User::factory()->create();
+    $account = freeXpLine($owner);
+
+    $intruder = User::factory()->create();
+    WotAccount::factory()->for($intruder)->create(['account_id' => 999_999]);
+
+    $this->actingAs($intruder)->patch(route('wot.grinding.research-all', 80))->assertRedirect();
+
+    // The route is keyed on the tank, so what protects the owner is that the
+    // write lands on the account doing it.
+    expect(WotTankModule::where('wot_account_id', $account->id)->count())->toBe(0);
+});
+
 it('gives the XP back when a module is un-ticked', function () {
     $user = User::factory()->create();
     freeXpLine($user);

@@ -26,6 +26,7 @@ const open = ref(false);
 const busy = ref(null);
 
 const done = computed(() => props.cell.modules.filter((m) => m.is_researched).length);
+const outstanding = computed(() => props.cell.modules.filter((m) => !m.is_researched));
 
 const toggle = (module) => {
     busy.value = module.module_id;
@@ -37,6 +38,23 @@ const toggle = (module) => {
         // Whatever the page around it calls its boards: researching a module
         // takes it off the Free XP plan and spends the banked XP Active
         // Grinding shows, so both move even though neither was touched.
+        only: props.only,
+        onFinish: () => (busy.value = null),
+    });
+};
+
+/*
+ * The elite tank in one click. What you know at the end of a grind is that the
+ * vehicle is finished, not which module you finished last, and ticking five
+ * boxes to say so is five round trips and five chances to lose count.
+ *
+ * Server-side in one write rather than a loop of toggles here, so the banked XP
+ * it spends is one subtraction of what was genuinely outstanding.
+ */
+const researchAll = () => {
+    busy.value = 'all';
+    router.patch(`/wot/grinding/research/${props.cell.tank_id}/modules/all`, {}, {
+        preserveScroll: true,
         only: props.only,
         onFinish: () => (busy.value = null),
     });
@@ -99,6 +117,19 @@ const n = (v) => new Intl.NumberFormat().format(v ?? 0);
                     </label>
                 </li>
             </ul>
+
+            <!-- Offered only while something is outstanding: on a finished
+                 vehicle it would be a button that does nothing. -->
+            <button
+                v-if="outstanding.length"
+                type="button"
+                class="mt-2 w-full border border-wot-border px-2 py-1 text-xs font-bold uppercase tracking-wider text-wot-dim transition-colors hover:border-wot-gold hover:text-wot-gold disabled:opacity-40"
+                :disabled="busy !== null"
+                :title="`Mark all ${outstanding.length} remaining modules on the ${cell.name} researched, spending ${n(cell.module_xp)} banked XP`"
+                @click="researchAll"
+            >
+                All modules researched
+            </button>
 
             <div class="mt-2 flex items-center justify-between border-t border-wot-border-soft pt-2 text-xs">
                 <span class="tabular-nums text-wot-dim">{{ n(cell.module_xp) }} of {{ n(cell.module_xp_total) }} left</span>
