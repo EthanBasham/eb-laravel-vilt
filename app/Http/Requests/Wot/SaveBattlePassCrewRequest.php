@@ -15,6 +15,22 @@ use Illuminate\Validation\Rule;
 class SaveBattlePassCrewRequest extends FormRequest
 {
     /**
+     * Read '-' as no season.
+     *
+     * It is how the roster writes a tanker with no season, and the page sends a
+     * null for it already. Accepting it here as well means a client that posts
+     * the text as typed is not refused for it — a null is what sorts such a
+     * tanker to the bottom of the roster, which is where '-' is meant to put
+     * them.
+     */
+    protected function prepareForValidation(): void
+    {
+        if (trim((string) $this->input('season')) === '-') {
+            $this->merge(['season' => null]);
+        }
+    }
+
+    /**
      * Get the validation rules that apply to the request.
      *
      * @return array<string, mixed>

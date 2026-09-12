@@ -3189,3 +3189,174 @@ in both branches of `CrewCell.vue` — it looks redundant and is not.
 
 The legend gained a row: one underline and a double underline are now shown separately,
 where the asterisks were one line reading "asterisks below a letter".
+
+---
+
+## 2026-09-12 — Crew cells spell C G D R L, whatever order the encyclopedia gives
+
+The encyclopedia's crew order is not consistent between vehicles — an AT-1 lists commander,
+driver, gunner; most tanks list commander, gunner, driver — so a column of cells reordered
+itself per tank and had to be read one tank at a time. Every cell now spells its letters in
+the order of `config('wargaming.crew_roles')`, which is what makes a missing radio operator
+or a second loader visible as a break in a pattern rather than as something to go looking for.
+
+`CrewBoard::members()` sorts by role rank with `slot` as the tiebreaker, so a vehicle's two
+loaders keep the order the encyclopedia gave them instead of shuffling — which would undo the
+point of a fixed order for exactly the vehicles that have most to say.
+
+**The sort deliberately does not touch `slot`.** That is the encyclopedia's position and what
+every stored member is keyed by, so reordering what is shown never moves what is written; the
+editor still posts each seat under the slot it belongs to. There is a test for precisely that,
+because the failure mode if it ever stops being true is silent: a crew's figures would migrate
+between seats on save.
+
+An unrecognised role sorts last rather than first, following the rule vehicle nations already
+use — a role added by a future patch should appear after the five known ones, not displace the
+commander.
+
+---
+
+## 2026-09-12 — Selects go back to the browser's own arrow
+
+`@tailwindcss/forms` sets `appearance: none` on every `select` and paints its own chevron as
+a background image, reserving room for it with `padding-right: 2.5rem`. Every select in this
+app carries `px-2` — a *utility*, which outranks that base-layer padding — so the reservation
+was wiped while the chevron stayed, and the arrow painted on top of the option text.
+
+It had been there since the garage filters and went unnoticed because the options were words:
+the chevron sat over the tail of "Medium tank" and read as part of the control. The crew
+editor's zero-skills select is what exposed it — its widest option is a single digit, which
+makes the box about 26px against a chevron of about 21px.
+
+**Padding could not be the fix.** A rule in `@layer base` loses to a utility whatever it sets,
+so reserving the space again would have meant `!important`, or smuggling the rule into the
+utilities layer to out-specify `px-2`, or editing every call site. The first two are precisely
+the cascade trap the comment above that block already warns about, and the third leaves the
+next select someone writes broken again.
+
+So `.wot select` now sets `appearance: auto` and `background-image: none`. A native control
+carries its arrow inside its own intrinsic width, so the box is correct whatever padding a
+component asks for and however long the options are, and with no background image there is
+nothing left to overlap. The border, background and text colours set just above still apply;
+what changes is that the arrow is the browser's rather than the plugin's.
+
+Worth knowing if this ever looks wrong on a phone: Safari has historically been the least
+willing to let author styles reach a natively-rendered select. If it renders light there, the
+alternative is to keep `appearance: none` and reserve the space with an important padding
+declaration — uglier in the cascade, identical everywhere.
+
+---
+
+## 2026-09-12 — `appearance: auto` on selects is reverted; the arrow gets its padding back
+
+Reverses the entry above, same day. Handing a select back to the browser also hands it the
+**popup**, which then stops honouring the `.wot select option` colours set a few lines below
+it — so the closed control was fixed and the open list was wrong, which is a worse trade than
+the overlap it cured.
+
+`appearance: none` and the plugin's chevron are back, and the room for it is reserved with
+`padding-inline-end: 2.25rem !important` on `.wot select`.
+
+**The `!important` is the point, not an accident.** A normal declaration in `@layer base`
+loses to `px-2` whatever it sets; an important one in a lower layer beats a normal one in a
+higher, which is the single direction cascade layers run backwards. The alternative that
+avoids the keyword — a rule smuggled into `@layer utilities` to out-specify `px-2` — performs
+exactly the same override while hiding it where nobody would look for it.
+
+What it costs: a select can no longer set its own inline-end padding from a utility. Nothing
+needs to, and anything that did would be reopening the overlap.
+
+2.25rem clears a 1.5em chevron sitting 0.5rem in, at both the 14px these run at and the 16px
+a select inherits without `text-sm`.
+
+---
+
+## 2026-09-12 — Zero-skills is a three-way switch, not a dropdown
+
+Three values, every one of them a single character, so they sit out in the open: the answer
+is readable without opening anything, and setting one is a click instead of two. It is also
+the control that exposed the chevron overlap two entries above, and a switch has no chevron
+to overlap with.
+
+Real radio inputs under styled labels rather than buttons wearing ARIA — grouping by `name`,
+arrow-key movement between the three, and the announcement all come free from the platform.
+The input is `sr-only` and never `hidden`: the latter would take it out of the tab order along
+with the pixels, which is the usual way this pattern is broken. The label carries
+`focus-within:ring-1` so keyboard focus is visible on the box the eye is actually on rather
+than on an input nobody can see.
+
+The other three controls in that row stay as they are. Skill level has seven values and is a
+genuine list; max is a boolean; banked XP is a number.
+
+---
+
+## 2026-09-12 — Crews, second pass: editor, inventory and the Battle Pass roster
+
+Iteration on the Crews area after first use. Grouped here rather than entry-by-entry.
+
+### Crew editor
+
+- **Seat column is the role name alone.** The single letter was redundant in a table already
+  labelled by name. Secondary roles stack beneath it, one `+ Role` per line — the AT-1's
+  three-job commander reads as three things rather than a sentence.
+- **Columns run Seat · Zero-skills · Max · Skill level · Banked XP.**
+
+### Recruits & Books
+
+- **A third to recruits, two thirds to books** (`lg:grid-cols-3` + `lg:col-span-2`), and
+  `items-start` so neither panel stretches to the other's height — a stretched short table
+  reads as a table missing rows.
+- **Boosted recruits are labelled `N-Skill Boosted Crew`.** Keys unchanged, so nothing stored
+  moved.
+- **The books table totals XP, not books.** Each type header shows one book's value as `(20k)`
+  / `(100k)` / `(250k)`; a row's Total XP is quantity × value, worked out in the page so it
+  moves the moment a cell saves. The count kept a home in the panel heading. Figures are per
+  crew member, which is how a book's value is quoted. The specials remain in neither total.
+  Server-side the row payload lost its precomputed total, and `totals` became per-type counts
+  plus `books` and `xp`.
+
+### The chevron detour
+
+Recruit and book counts were briefly native number inputs with up/down chevrons, via a
+`stepper` mode on `EditableNumber`. The number sat hard against the chevrons, and nothing
+tried closed the gap reliably: padding lands outside the spin buttons, and a margin on
+`::-webkit-inner-spin-button` produced no visible space either. **Reverted to text inputs.**
+
+What survived is the `stepper` prop itself: bare digits rather than grouped, select-all only
+on the click that focuses the field, and never disabled while a save is in flight.
+
+Also left behind, deliberately: the `input[type='number']` rules in `AppShell`'s base layer.
+They are not dead — the Dashboard's minimum-battles field is a number input and now gets the
+sunken background and dark chevrons from them.
+
+### Battle Pass roster
+
+- **The add form is the table's first row**, so each field sits under its own column, with a
+  `+` where the rows have their trash can and a dashed rule beneath. A `<form>` cannot wrap a
+  `<tr>`, so the form is declared outside the table and joined by `form="…"`. The table's
+  borders are set per section rather than with `divide-y`: collapsed table borders prefer
+  solid over dashed, so a table-level divide would overpaint the rule.
+- **A rejected add now says why**, under the name field. It used to fail silently.
+- **Gender is an M / F switch**, M by default; config carries a letter beside the name,
+  mirroring `crew_roles`. There is no way back to blank once set.
+- **Season accepts `-` for no season**, stored as null — the roster already sorts newest
+  season first with null last, which is exactly where `-` should land. The request maps a
+  posted `-` to null as well. A blank and `-` are therefore indistinguishable.
+- **Text inputs match the selects' height** (`px-2 py-1`).
+
+### Choosing a tank
+
+The In tank dropdown — a thousand-plus options — is replaced by a **Choose Tank** button that
+opens `TankPicker.vue`, built after Grinding's "Add a tank you're playing": nation, tier and
+type chips over a capped, scrolled list of tank chips. The vehicle prop gained `type` for it.
+
+Two deliberate departures from that picker:
+
+- **It opens on nothing** and asks for a filter. Grinding can offer the garage as a shortlist;
+  nothing here predicts which tank a tanker will be posted to.
+- **Each chip row is single-choice.** The grinding picker is for browsing, where several
+  nations at once is a fair question; this one is for finding a tank you already know, so a
+  second nation replaces the first. All clears a row. Rows are marked up as radio groups.
+
+Filters persist between opens, since a season's tankers are often entered a nation at a time.
+A roster row saves its choice at once; the add row only fills in the pending tanker.

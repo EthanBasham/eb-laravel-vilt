@@ -14,6 +14,8 @@ The encyclopedia's `member_id` repeats within a vehicle — an IS-7 carries two 
 
 A seat can also cover more than one job (the IS-7's fourth is a Loader who is also the Radio Operator). The board spells one letter per *body*, so the letter count equals the number of people to train; the extra roles only ever appear in the tooltip and the editor.
 
+Seats are *displayed* in role order — C G D R L, the order of `config('wargaming.crew_roles')` — and not in the encyclopedia's own order, which differs between vehicles (an AT-1 lists its driver before its gunner). A column of cells that all read the same way is one a discrepancy jumps out of. `CrewBoard::members()` sorts by `roleRank()` with `slot` as the tiebreaker, so a vehicle's two loaders keep their relative order. The sort never touches `slot`: what is shown is reordered, what is written is not.
+
 ## An empty tank has no row
 No crew is the absence of a `wot_tank_crews` row, not a row of zeroes. That absence is the board's red state, so the editor's empty action DELETEs. Writing zeroed members instead paints the cell as a crew that merely happens to be untrained, which is a different thing to report.
 

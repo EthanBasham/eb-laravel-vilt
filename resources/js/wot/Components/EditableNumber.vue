@@ -33,6 +33,16 @@ const props = defineProps({
      * site is what lets it stay usable against any of them.
      */
     optimistic: { type: Function, default: null },
+    /*
+     * A small count rather than a transcribed figure, for the Recruits & Books
+     * tables. Still a plain text field — up/down chevrons were tried here and
+     * taken back out.
+     *
+     * The field shows bare digits rather than grouped ones, selects its
+     * contents only on the click that focuses it, and is never disabled while
+     * a save is in flight.
+     */
+    stepper: { type: Boolean, default: false },
 });
 
 const raw = ref(String(props.modelValue ?? 0));
@@ -50,7 +60,7 @@ const digits = (v) => String(v ?? '').replace(/[^\d]/g, '');
 // Grouped while idle, bare while editing. These run to seven figures and are
 // genuinely hard to read unseparated, but separators in a field you're typing
 // into fight the cursor.
-const display = computed(() => (editing.value
+const display = computed(() => (editing.value || props.stepper
     ? raw.value
     : new Intl.NumberFormat().format(Number(digits(raw.value) || 0))));
 
@@ -76,16 +86,56 @@ const onInput = (event) => {
  */
 const selectAll = (event) => nextTick(() => event.target.select());
 
+/*
+ * Whether the next click is the one that put focus here. A stepper only selects
+ * on that click: once the field has focus, a later click is placing the caret,
+ * and re-selecting would take that away.
+ */
+let focusedByClick = false;
+
 const focus = (event) => {
     editing.value = true;
     raw.value = digits(raw.value);
+    focusedByClick = true;
 
     selectAll(event);
 };
 
+const click = (event) => {
+    if (!props.stepper || focusedByClick) {
+        selectAll(event);
+    }
+
+    focusedByClick = false;
+};
+
+/*
+ * A stepper's change event schedules a save after a short pause.
+ *
+ * On a text field change only fires as the field is left, and blur commits at
+ * once and cancels the timer, so in practice this rarely waits. The value sent
+ * is absolute, so a request overtaken by a later one can never leave the count
+ * wrong.
+ */
+let pendingSave;
+
+const scheduleSave = () => {
+    if (!props.stepper) {
+        return;
+    }
+
+    clearTimeout(pendingSave);
+    pendingSave = setTimeout(save, 400);
+};
+
 const commit = () => {
     editing.value = false;
+    clearTimeout(pendingSave);
 
+    save();
+};
+
+const save = () => {
     const next = Number(digits(raw.value) || 0);
 
     if (next === Number(props.modelValue ?? 0)) return;
@@ -125,17 +175,25 @@ const commit = () => {
         seven-figure price ("6,100,000") at 67.6px of text, 77.6px once px-1 and
         the border are counted, so 80px holds every realistic price.
     -->
+    <!-- A stepper is never disabled while saving: its saves are debounced, and
+         disabling the field mid-save would eat the next chevron click. -->
     <input
         :value="display"
         type="text"
         inputmode="numeric"
         autocomplete="off"
-        class="w-20 border px-1 py-0.5 text-sm tabular-nums transition-colors focus:border-wot-gold"
-        :class="[align, tone, saving ? 'opacity-50' : '']"
-        :disabled="saving"
+        class="w-20 border py-0.5 text-sm tabular-nums transition-colors focus:border-wot-gold"
+        :class="[
+            align,
+            tone,
+            stepper ? 'box-border ps-1 pe-1' : 'px-1',
+            saving && !stepper ? 'opacity-50' : '',
+        ]"
+        :disabled="saving && !stepper"
         @input="onInput"
+        @change="scheduleSave"
         @focus="focus"
-        @click="selectAll"
+        @click="click"
         @blur="commit"
         @keyup.enter="$event.target.blur()"
     >

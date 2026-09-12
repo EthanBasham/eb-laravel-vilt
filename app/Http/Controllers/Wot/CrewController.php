@@ -349,13 +349,16 @@ class CrewController extends Controller
     private function vehicleOptions(): array
     {
         return WotVehicle::query()
-            ->get(['tank_id', 'name', 'short_name', 'tier', 'nation'])
+            ->get(['tank_id', 'name', 'short_name', 'tier', 'nation', 'type'])
             ->map(fn (WotVehicle $vehicle): array => [
                 'tank_id' => $vehicle->tank_id,
                 // short_name, like every other vehicle list here.
                 'name' => $vehicle->short_name ?? $vehicle->name,
                 'tier' => $vehicle->tier,
                 'nation' => $vehicle->nation,
+                // The picker filters and badges by type, like the grinding
+                // page's tank picker it is built after.
+                'type' => $vehicle->type,
             ])
             ->sortBy(fn (array $option): array => [WotVehicle::rankOf($option['nation']), -$option['tier'], $option['name']])
             ->values()

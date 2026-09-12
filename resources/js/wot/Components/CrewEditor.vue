@@ -21,6 +21,13 @@ const props = defineProps({
 
 const emit = defineEmits(['close']);
 
+/*
+ * What a member can have zeroed out: none, or the one or two steps that make
+ * them a zero-skill crew member. Spelled here rather than in the template so
+ * the switch and the server's `max:2` are visibly the same three values.
+ */
+const ZERO_SKILLS = [0, 1, 2];
+
 const dialog = ref(null);
 const saving = ref(false);
 
@@ -32,7 +39,6 @@ const load = (cell) => ({
     is_balanced: cell.is_balanced,
     members: cell.members.map((member) => ({
         slot: member.slot,
-        letter: member.letter,
         name: member.name,
         also: member.also,
         zero_skills: member.zero_skills,
@@ -166,8 +172,8 @@ const clear = () => {
                         <tr class="text-xs uppercase tracking-wider text-wot-dim">
                             <th scope="col" class="py-2 pe-3 text-left font-bold">Seat</th>
                             <th scope="col" class="px-3 py-2 text-left font-bold">Zero-skills</th>
-                            <th scope="col" class="px-3 py-2 text-left font-bold">Skill level</th>
                             <th scope="col" class="px-3 py-2 text-center font-bold">Max</th>
+                            <th scope="col" class="px-3 py-2 text-left font-bold">Skill level</th>
                             <th scope="col" class="ps-3 py-2 text-right font-bold">Banked XP</th>
                         </tr>
                     </thead>
@@ -175,30 +181,70 @@ const clear = () => {
                     <tbody class="divide-y divide-wot-border-soft">
                         <tr v-for="member in draft.members" :key="member.slot">
                             <td class="py-2 pe-3">
-                                <span class="font-bold text-wot-heading">{{ member.letter }}</span>
-                                <span class="ms-2 text-wot-text">{{ member.name }}</span>
-                                <!-- One body, two jobs. The board spells a
-                                     single letter for this seat, so the second
-                                     role is only ever said in words. -->
-                                <span v-if="member.also.length" class="ms-1 text-xs text-wot-dim">
-                                    + {{ member.also.join(', ') }}
-                                </span>
+                                <span class="text-wot-text">{{ member.name }}</span>
+
+                                <!-- One body, several jobs. The board spells a
+                                     single letter for this seat, so the other
+                                     roles are only ever said in words — stacked
+                                     under the primary rather than run along one
+                                     line, so a seat covering three reads as
+                                     three things rather than as a sentence. -->
+                                <ul v-if="member.also.length" role="list" class="text-xs text-wot-dim">
+                                    <li v-for="role in member.also" :key="role">+ {{ role }}</li>
+                                </ul>
                             </td>
 
                             <td class="px-3 py-2">
-                                <!-- :value and @change rather than v-model,
-                                     because a change here can land on every
-                                     seat rather than on this one. -->
-                                <select
-                                    :value="member.zero_skills"
-                                    class="border border-wot-border bg-wot-sunken px-2 py-1 text-sm"
-                                    :aria-label="`Zero-skills on the ${member.name}`"
-                                    @change="setOnMembers(member, 'zero_skills', Number($event.target.value))"
+                                <!--
+                                    Three values, all of them one character, so
+                                    they sit out in the open rather than behind
+                                    a dropdown: the answer is visible without
+                                    opening anything, and setting one is a
+                                    single click instead of two.
+
+                                    Real radios under the labels rather than
+                                    buttons wearing ARIA. The grouping, the
+                                    arrow keys and the announcement all come
+                                    free, and the input is only visually hidden
+                                    — `sr-only`, never `hidden`, which would
+                                    take it out of the tab order with it.
+
+                                    :checked and @change rather than v-model,
+                                    because a change here can land on every seat
+                                    rather than on this one.
+                                -->
+                                <fieldset class="flex gap-1">
+                                    <legend class="sr-only">Zero-skills on the {{ member.name }}</legend>
+
+                                    <label
+                                        v-for="count in ZERO_SKILLS"
+                                        :key="count"
+                                        class="cursor-pointer border px-2.5 py-0.5 text-xs font-bold tabular-nums transition-colors focus-within:ring-1 focus-within:ring-wot-gold"
+                                        :class="member.zero_skills === count
+                                            ? 'border-wot-gold text-wot-gold'
+                                            : 'border-wot-border text-wot-dim hover:text-wot-text'"
+                                    >
+                                        <input
+                                            type="radio"
+                                            class="sr-only"
+                                            :name="`zero-skills-${member.slot}`"
+                                            :value="count"
+                                            :checked="member.zero_skills === count"
+                                            @change="setOnMembers(member, 'zero_skills', count)"
+                                        >
+                                        {{ count }}
+                                    </label>
+                                </fieldset>
+                            </td>
+
+                            <td class="px-3 py-2 text-center">
+                                <input
+                                    :checked="member.is_max"
+                                    type="checkbox"
+                                    class="border"
+                                    :aria-label="`The ${member.name} is maxed`"
+                                    @change="setOnMembers(member, 'is_max', $event.target.checked)"
                                 >
-                                    <option :value="0">None</option>
-                                    <option :value="1">1</option>
-                                    <option :value="2">2</option>
-                                </select>
                             </td>
 
                             <td class="px-3 py-2">
@@ -212,16 +258,6 @@ const clear = () => {
                                         {{ level === 0 ? 'Base — 100%' : level }}
                                     </option>
                                 </select>
-                            </td>
-
-                            <td class="px-3 py-2 text-center">
-                                <input
-                                    :checked="member.is_max"
-                                    type="checkbox"
-                                    class="border"
-                                    :aria-label="`The ${member.name} is maxed`"
-                                    @change="setOnMembers(member, 'is_max', $event.target.checked)"
-                                >
                             </td>
 
                             <td class="ps-3 py-2 text-right">

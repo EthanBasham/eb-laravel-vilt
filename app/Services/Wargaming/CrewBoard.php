@@ -122,6 +122,17 @@ class CrewBoard
      * `member_id` repeats within a vehicle — an IS-7 carries two loaders, and a
      * role could not tell them apart.
      *
+     * They are then ordered by role rather than left in the encyclopedia's own
+     * order, which is not consistent between vehicles: an AT-1 lists its driver
+     * before its gunner, most tanks the other way about. A column of cells that
+     * all spell C G D R L is one a discrepancy jumps out of — a missing radio
+     * operator, or a second loader — where a column that reorders itself per
+     * vehicle has to be read tank by tank.
+     *
+     * `slot` is untouched by the sort. It is the encyclopedia's position and
+     * what every stored member is keyed by, so reordering what is shown never
+     * moves what is written.
+     *
      * A vehicle synced before the crew column existed has no seats at all, and
      * renders as a cell with nothing in it rather than as an error.
      *
@@ -157,7 +168,25 @@ class CrewBoard
                     'banked_xp' => (int) ($member?->banked_xp ?? 0),
                 ];
             })
+            // Slot breaks the tie, so a vehicle's two loaders keep the order
+            // the encyclopedia gave them rather than an arbitrary one.
+            ->sortBy(fn (array $member): array => [$this->roleRank($member['role']), $member['slot']])
+            ->values()
             ->all();
+    }
+
+    /**
+     * Where a role sits in the order every cell spells its letters in.
+     *
+     * Anything unrecognised sorts to the end rather than to the front, so a
+     * role added by a future patch appears after the five known ones instead of
+     * silently displacing the commander — the same rule vehicle nations follow.
+     */
+    private function roleRank(?string $role): int
+    {
+        $order = array_flip(array_keys((array) config('wargaming.crew_roles')));
+
+        return $order[$role] ?? count($order);
     }
 
     /**

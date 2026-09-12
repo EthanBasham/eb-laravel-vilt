@@ -1,12 +1,13 @@
 <script setup>
 import { Head, router, usePage } from '@inertiajs/vue3';
-import { IconTrash } from '@tabler/icons-vue';
+import { IconPlus, IconTrash } from '@tabler/icons-vue';
 import { computed, reactive, ref } from 'vue';
 import AppShell from '../Components/AppShell.vue';
 import CrewCell from '../Components/CrewCell.vue';
 import CrewEditor from '../Components/CrewEditor.vue';
 import EditableNumber from '../Components/EditableNumber.vue';
 import NationFlag from '../Components/NationFlag.vue';
+import TankPicker from '../Components/TankPicker.vue';
 import VehicleTypeIcon from '../Components/VehicleTypeIcon.vue';
 import { useBoardFilters } from '../composables/useBoardFilters';
 
@@ -34,6 +35,16 @@ const view = ref('crews');
 
 const n = (v) => new Intl.NumberFormat().format(v ?? 0);
 const short = (v) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : n(v));
+
+/*
+ * Thousands as the game writes them. A book's value is a label on a column
+ * header rather than a figure to do arithmetic against, and "250k" sits in the
+ * space a header has where "250,000" does not. The trailing .0 is dropped, so
+ * 20k stays 20k and an odd 12,500 would read 12.5k.
+ *
+ * The exact figure is still a hover away, on the header's own title.
+ */
+const inK = (v) => (v >= 1000 ? `${+(v / 1000).toFixed(1)}k` : n(v));
 
 // Tiers are Roman in game and in every community tool, like the grinding board.
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI'];
@@ -100,19 +111,65 @@ const editing = ref(null);
  * recomputed here so a figure updates the moment its cell saves rather than
  * after the round trip — the same reason the grinding boards re-total their own
  * visible cells.
+ *
+ * A row totals XP rather than books: a manual and a booklet are not one book
+ * each in any sense worth adding up, since one is worth twelve and a half of
+ * the other. The count still has a home — it is what the panel heading reports.
+ *
+ * The figure is per crew member, which is how a book's value is quoted: each
+ * book gives its XP to every seat in the set it is spent on.
  */
-const rowTotal = (row) => props.books.types.reduce((sum, type) => sum + (row.quantities[type.key] ?? 0), 0);
+const rowXp = (row) => props.books.types.reduce(
+    (sum, type) => sum + (row.quantities[type.key] ?? 0) * type.xp,
+    0,
+);
 
 /* Battle Pass. */
-const blank = () => ({ name: '', nation: '', season: null, gender: '', status: 'uncollected', tank_id: null, crew_role: '' });
+// Male by default, which is what most of the roster is; the switch is one click
+// either way.
+const blank = () => ({ name: '', nation: '', season: null, gender: 'male', status: 'uncollected', tank_id: null, crew_role: '' });
 const adding = reactive(blank());
 
 const BATTLE_PASS_ONLY = { preserveScroll: true, only: ['battle_pass'] };
 
+/*
+ * '-' is how a tanker with no season is written, and none is what gets stored:
+ * the roster sorts newest season first with the season-less at the bottom, and
+ * a null is what that ordering already puts there. A blank field means the same.
+ *
+ * Anything else is read for its digits, so a stray character never reaches the
+ * server as a season.
+ */
+const toSeason = (value) => {
+    const text = String(value ?? '').trim();
+
+    if (text === '' || text === '-') {
+        return null;
+    }
+
+    const digits = text.replace(/[^\d]/g, '');
+
+    return digits === '' ? null : Number(digits);
+};
+
+/*
+ * Writes the season and puts the field back in step with what was saved. The
+ * prop only redraws the input when its value changes, so typing junk over a
+ * season that was already none would otherwise leave the junk sitting there
+ * looking accepted.
+ */
+const changeSeason = (crew, event) => {
+    const season = toSeason(event.target.value);
+
+    event.target.value = season ?? '-';
+
+    saveCrew(crew, { season });
+};
+
 const addCrew = () => {
     if (!adding.name.trim()) return;
 
-    router.post('/wot/crews/battle-pass', { ...adding, name: adding.name.trim() }, {
+    router.post('/wot/crews/battle-pass', { ...adding, name: adding.name.trim(), season: toSeason(adding.season) }, {
         ...BATTLE_PASS_ONLY,
         onSuccess: () => Object.assign(adding, blank()),
     });
@@ -127,6 +184,39 @@ const removeCrew = (crew) => router.delete(`/wot/crews/battle-pass/${crew.id}`, 
 // Where someone is serving only means anything while they are in a tank, and
 // the server clears both fields when the status moves off it.
 const isPosted = (crew) => crew.status === 'in_tank';
+
+/*
+ * The tank picker, one instance shared by every row and the add row.
+ *
+ * `picking` says who it is open for and what to do with the answer: a roster
+ * row saves straight away, while the add row only fills in `adding`, which is
+ * posted with the rest of the new tanker. Null while it is closed.
+ */
+const picking = ref(null);
+
+const vehiclesById = computed(() => new Map((props.vehicles ?? []).map((v) => [v.tank_id, v])));
+
+// What the button in the In tank column says. The vehicle list is deferred, so a
+// posting can exist before there is a name to show for it.
+const tankLabel = (tankId) => {
+    if (tankId === null || tankId === undefined) {
+        return 'Choose Tank';
+    }
+
+    return vehiclesById.value.get(tankId)?.name ?? 'Loading…';
+};
+
+const chooseTankFor = (crew) => (picking.value = {
+    title: `Choose a tank for ${crew.name}`,
+    selectedId: crew.tank_id,
+    apply: (tankId) => saveCrew(crew, { tank_id: tankId }),
+});
+
+const chooseTankForNew = () => (picking.value = {
+    title: 'Choose a tank for the new crew member',
+    selectedId: adding.tank_id,
+    apply: (tankId) => (adding.tank_id = tankId),
+});
 </script>
 
 <template>
@@ -372,7 +462,18 @@ const isPosted = (crew) => crew.status === 'in_tank';
         </section>
 
         <!-- 2. Recruits & Books -------------------------------------------------->
-        <section v-else-if="view === 'inventory'" class="mt-4 grid gap-6 lg:grid-cols-2" aria-labelledby="inventory-heading">
+        <!--
+            A third to the recruits and two thirds to the books, rather than
+            half each: one is a label and a number, the other is five columns
+            of them, and an even split left the books table scrolling sideways
+            while the recruits table ran to whitespace.
+
+            items-start so neither panel is stretched to the other's height.
+            Grid items fill their row by default, which gave the shorter table
+            a long empty tail below its last row and made it read as a table
+            missing rows.
+        -->
+        <section v-else-if="view === 'inventory'" class="mt-4 grid items-start gap-6 lg:grid-cols-3" aria-labelledby="inventory-heading">
             <h2 id="inventory-heading" class="sr-only">Recruits and books</h2>
 
             <div class="border border-wot-border bg-wot-panel">
@@ -387,7 +488,7 @@ const isPosted = (crew) => crew.status === 'in_tank';
                             <th scope="row" class="px-4 py-2 text-left font-normal text-wot-text">{{ row.label }}</th>
                             <td class="px-4 py-2 text-right">
                                 <EditableNumber
-                                    field="quantity"
+                                    field="quantity" stepper
                                     :model-value="row.quantity"
                                     :url="`/wot/crews/recruits/${row.key}`"
                                     :only="['recruits']"
@@ -398,10 +499,12 @@ const isPosted = (crew) => crew.status === 'in_tank';
                 </table>
             </div>
 
-            <div class="border border-wot-border bg-wot-panel">
+            <div class="border border-wot-border bg-wot-panel lg:col-span-2">
                 <div class="flex items-baseline justify-between border-b border-wot-border px-4 py-3">
                     <h3 class="text-sm">Books</h3>
-                    <span class="text-xs uppercase tracking-wider text-wot-dim">{{ n(books.totals.total) }} held</span>
+                    <!-- Books here, XP in the table: the shelf is counted in
+                         books, but what it is worth is not. -->
+                    <span class="text-xs uppercase tracking-wider text-wot-dim">{{ n(books.totals.books) }} held</span>
                 </div>
 
                 <div class="overflow-x-auto">
@@ -413,8 +516,13 @@ const isPosted = (crew) => crew.status === 'in_tank';
                                     class="px-3 py-2 text-right text-xs font-bold uppercase tracking-wider text-wot-dim"
                                     :title="`${n(type.xp)} XP to each member of a crew`">
                                     {{ type.name }}
+                                    <!-- What one of them is worth, so the XP in
+                                         the Total column is arithmetic the
+                                         reader can follow rather than a figure
+                                         they have to take on trust. -->
+                                    <span class="font-normal normal-case tracking-normal text-wot-muted">({{ inK(type.xp) }})</span>
                                 </th>
-                                <th scope="col" class="px-4 py-2 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Total</th>
+                                <th scope="col" class="px-4 py-2 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">Total XP</th>
                             </tr>
                         </thead>
 
@@ -426,15 +534,15 @@ const isPosted = (crew) => crew.status === 'in_tank';
                                 </th>
                                 <td v-for="type in books.types" :key="type.key" class="px-3 py-2 text-right">
                                     <EditableNumber
-                                        field="quantity"
+                                        field="quantity" stepper
                                         :model-value="row.quantities[type.key]"
                                         :url="`/wot/crews/books/${type.key}/${row.nation}`"
                                         :only="['books']"
                                     />
                                 </td>
                                 <td class="px-4 py-2 text-right tabular-nums"
-                                    :class="rowTotal(row) ? 'text-wot-heading' : 'text-wot-dim'">
-                                    {{ n(rowTotal(row)) }}
+                                    :class="rowXp(row) ? 'text-wot-heading' : 'text-wot-dim'">
+                                    {{ n(rowXp(row)) }}
                                 </td>
                             </tr>
 
@@ -450,7 +558,7 @@ const isPosted = (crew) => crew.status === 'in_tank';
                                 <td :colspan="books.types.length"></td>
                                 <td class="px-4 pb-2 pt-3 text-right">
                                     <EditableNumber
-                                        field="quantity"
+                                        field="quantity" stepper
                                         :model-value="special.quantity"
                                         :url="`/wot/crews/books/${special.key}/universal`"
                                         :only="['books']"
@@ -465,7 +573,12 @@ const isPosted = (crew) => crew.status === 'in_tank';
                                 <td v-for="type in books.types" :key="type.key" class="px-3 py-3 text-right tabular-nums text-wot-muted">
                                     {{ n(books.totals[type.key]) }}
                                 </td>
-                                <td class="px-4 py-3 text-right tabular-nums font-bold text-wot-heading">{{ n(books.totals.total) }}</td>
+                                <!-- The type columns count books; this one is
+                                     what they are worth, like the rows above
+                                     it. The specials are in neither: one is not
+                                     a book, and neither carries a per-member
+                                     figure to be worth anything here. -->
+                                <td class="px-4 py-3 text-right tabular-nums font-bold text-wot-heading">{{ n(books.totals.xp) }}</td>
                             </tr>
                         </tfoot>
                     </table>
@@ -477,9 +590,24 @@ const isPosted = (crew) => crew.status === 'in_tank';
         <section v-else-if="view === 'battle-pass'" class="mt-4" aria-labelledby="battle-pass-heading">
             <h2 id="battle-pass-heading" class="sr-only">Battle Pass crew</h2>
 
+            <!--
+                The add row's form, declared outside the table and joined to its
+                controls by id. A <form> cannot wrap a <tr>, and the row has to be
+                a real row so its fields sit under the same column widths as the
+                roster below. Only the fields that take part in submission need
+                the `form` attribute — the name for `required` and Enter-to-add,
+                the season beside it — since addCrew() reads everything from
+                `adding` rather than from the form data.
+            -->
+            <form id="add-battle-pass-crew" @submit.prevent="addCrew"></form>
+
             <div class="overflow-x-auto border border-wot-border bg-wot-panel">
-                <table class="min-w-full divide-y divide-wot-border text-sm">
-                    <thead class="bg-wot-sunken">
+                <!-- Borders set per section rather than with divide-y on the
+                     table. Tables collapse their borders, and a collapsed edge
+                     picks solid over dashed — so a divide rule on the table would
+                     have quietly overpainted the dashed line under the add row. -->
+                <table class="min-w-full text-sm">
+                    <thead class="border-b border-wot-border bg-wot-sunken">
                         <tr>
                             <th scope="col" class="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Name</th>
                             <th scope="col" class="px-3 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Nation</th>
@@ -489,18 +617,132 @@ const isPosted = (crew) => crew.status === 'in_tank';
                             <th scope="col" class="px-3 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">In tank</th>
                             <th scope="col" class="px-3 py-3 text-left text-xs font-bold uppercase tracking-wider text-wot-dim">Role</th>
                             <th scope="col" class="px-3 py-3 text-right text-xs font-bold uppercase tracking-wider text-wot-dim">
-                                <span class="sr-only">Remove</span>
+                                <span class="sr-only">Actions</span>
                             </th>
                         </tr>
                     </thead>
 
+                    <!-- The add row, heading the roster rather than trailing it:
+                         each field sits in the column it will land in, and a new
+                         tanker is entered where the eye already is. The dashed
+                         rule marks it as a row not yet written. -->
+                    <tbody class="border-b border-dashed border-wot-border">
+                        <tr>
+                            <td class="px-4 py-3 align-top">
+                                <input
+                                    v-model="adding.name"
+                                    form="add-battle-pass-crew"
+                                    type="text"
+                                    required
+                                    placeholder="New crew member"
+                                    class="w-40 border border-wot-border bg-wot-sunken px-2 py-1 text-sm focus:border-wot-gold"
+                                    aria-label="Name of the new crew member"
+                                >
+                                <!-- A rejected add used to fail silently: the
+                                     row never appeared and nothing said why. -->
+                                <p v-if="page.props.errors?.name" class="mt-1 text-xs text-wot-bad" role="alert">
+                                    {{ page.props.errors.name }}
+                                </p>
+                            </td>
+
+                            <td class="px-3 py-3 align-top">
+                                <select v-model="adding.nation" class="border border-wot-border bg-wot-sunken px-2 py-1 text-sm" aria-label="Assumed nation of the new crew member">
+                                    <option value="">—</option>
+                                    <option v-for="(label, slug) in page.props.nations" :key="slug" :value="slug">{{ label }}</option>
+                                </select>
+                            </td>
+
+                            <td class="px-3 py-3 align-top">
+                                <input
+                                    v-model="adding.season"
+                                    form="add-battle-pass-crew"
+                                    type="text"
+                                    placeholder="-"
+                                    class="w-14 border border-wot-border bg-wot-sunken px-2 py-1 text-sm tabular-nums focus:border-wot-gold"
+                                    aria-label="Season of the new crew member"
+                                >
+                            </td>
+
+                            <td class="px-3 py-3 align-top">
+                                <fieldset class="flex gap-1">
+                                    <legend class="sr-only">Gender of the new crew member</legend>
+
+                                    <label
+                                        v-for="(gender, key) in genders"
+                                        :key="key"
+                                        class="cursor-pointer border px-2.5 py-0.5 text-xs font-bold transition-colors focus-within:ring-1 focus-within:ring-wot-gold"
+                                        :class="adding.gender === key
+                                            ? 'border-wot-gold text-wot-gold'
+                                            : 'border-wot-border text-wot-dim hover:text-wot-text'"
+                                        :title="gender.name"
+                                    >
+                                        <input v-model="adding.gender" type="radio" class="sr-only" name="gender-new" :value="key">
+                                        {{ gender.letter }}
+                                    </label>
+                                </fieldset>
+                            </td>
+
+                            <td class="px-3 py-3 align-top">
+                                <select v-model="adding.status" class="border border-wot-border bg-wot-sunken px-2 py-1 text-sm" aria-label="Status of the new crew member">
+                                    <option v-for="(label, key) in statuses" :key="key" :value="key">{{ label }}</option>
+                                </select>
+                            </td>
+
+                            <!-- Offered here too, so the row matches the roster
+                                 column for column. Same rule as below: only
+                                 meaningful in a tank, and cleared by the server
+                                 otherwise. -->
+                            <td class="px-3 py-3 align-top">
+                                <button
+                                    type="button"
+                                    class="inline-flex max-w-44 items-center gap-1.5 border border-wot-border bg-wot-sunken px-2 py-1 text-sm transition-colors hover:border-wot-gold disabled:pointer-events-none disabled:opacity-40"
+                                    :class="adding.tank_id ? 'text-wot-text' : 'text-wot-dim'"
+                                    :disabled="adding.status !== 'in_tank'"
+                                    :aria-label="`Tank the new crew member is serving in: ${tankLabel(adding.tank_id)}`"
+                                    @click="chooseTankForNew"
+                                >
+                                    <NationFlag v-if="vehiclesById.get(adding.tank_id)" :nation="vehiclesById.get(adding.tank_id).nation" />
+                                    <span class="min-w-0 truncate">{{ tankLabel(adding.tank_id) }}</span>
+                                </button>
+                            </td>
+
+                            <td class="px-3 py-3 align-top">
+                                <select
+                                    v-model="adding.crew_role"
+                                    class="border border-wot-border bg-wot-sunken px-2 py-1 text-sm disabled:opacity-40"
+                                    :disabled="adding.status !== 'in_tank'"
+                                    aria-label="Role the new crew member serves as"
+                                >
+                                    <option value="">—</option>
+                                    <option v-for="(role, key) in roles" :key="key" :value="key">{{ role.name }}</option>
+                                </select>
+                            </td>
+
+                            <td class="px-3 py-3 text-right align-top">
+                                <button
+                                    type="submit"
+                                    form="add-battle-pass-crew"
+                                    class="inline-flex items-center justify-center border border-wot-gold p-1 text-wot-gold transition-colors hover:bg-wot-gold hover:text-wot-abyss"
+                                    title="Add crew member"
+                                    aria-label="Add crew member"
+                                >
+                                    <IconPlus :size="14" stroke-width="2.25" />
+                                </button>
+                            </td>
+                        </tr>
+                    </tbody>
+
                     <tbody class="divide-y divide-wot-border-soft">
                         <tr v-for="crew in battle_pass" :key="crew.id" class="hover:bg-wot-sunken">
                             <td class="px-4 py-2">
+                                <!-- px-2 py-1 like the selects beside it: the
+                                     row's controls are a line of boxes and one
+                                     of them being two pixels shorter reads as a
+                                     misalignment rather than as a difference. -->
                                 <input
                                     :value="crew.name"
                                     type="text"
-                                    class="w-40 border border-wot-border bg-wot-sunken px-1 py-0.5 text-sm focus:border-wot-gold"
+                                    class="w-40 border border-wot-border bg-wot-sunken px-2 py-1 text-sm focus:border-wot-gold"
                                     :aria-label="`Name of ${crew.name}`"
                                     @change="saveCrew(crew, { name: $event.target.value })"
                                 >
@@ -519,26 +761,48 @@ const isPosted = (crew) => crew.status === 'in_tank';
                             </td>
 
                             <td class="px-3 py-2">
+                                <!-- No inputmode="numeric": the numeric keypad
+                                     on a phone has no '-', and '-' is a value
+                                     here. -->
                                 <input
-                                    :value="crew.season ?? ''"
+                                    :value="crew.season ?? '-'"
                                     type="text"
-                                    inputmode="numeric"
-                                    class="w-14 border border-wot-border bg-wot-sunken px-1 py-0.5 text-sm tabular-nums focus:border-wot-gold"
+                                    class="w-14 border border-wot-border bg-wot-sunken px-2 py-1 text-sm tabular-nums focus:border-wot-gold"
                                     :aria-label="`Season of ${crew.name}`"
-                                    @change="saveCrew(crew, { season: $event.target.value === '' ? null : Number($event.target.value.replace(/[^\d]/g, '')) })"
+                                    @change="changeSeason(crew, $event)"
                                 >
                             </td>
 
                             <td class="px-3 py-2">
-                                <select
-                                    :value="crew.gender ?? ''"
-                                    class="border border-wot-border bg-wot-sunken px-2 py-1 text-sm"
-                                    :aria-label="`Gender of ${crew.name}`"
-                                    @change="saveCrew(crew, { gender: $event.target.value || null })"
-                                >
-                                    <option value="">—</option>
-                                    <option v-for="(label, key) in genders" :key="key" :value="key">{{ label }}</option>
-                                </select>
+                                <!-- Two values, one letter each, so they sit
+                                     out in the open like the crew editor's
+                                     zero-skills switch rather than behind a
+                                     dropdown. Real radios under the labels: the
+                                     grouping, the arrow keys and the
+                                     announcement all come free. -->
+                                <fieldset class="flex gap-1">
+                                    <legend class="sr-only">Gender of {{ crew.name }}</legend>
+
+                                    <label
+                                        v-for="(gender, key) in genders"
+                                        :key="key"
+                                        class="cursor-pointer border px-2.5 py-0.5 text-xs font-bold transition-colors focus-within:ring-1 focus-within:ring-wot-gold"
+                                        :class="crew.gender === key
+                                            ? 'border-wot-gold text-wot-gold'
+                                            : 'border-wot-border text-wot-dim hover:text-wot-text'"
+                                        :title="gender.name"
+                                    >
+                                        <input
+                                            type="radio"
+                                            class="sr-only"
+                                            :name="`gender-${crew.id}`"
+                                            :value="key"
+                                            :checked="crew.gender === key"
+                                            @change="saveCrew(crew, { gender: key })"
+                                        >
+                                        {{ gender.letter }}
+                                    </label>
+                                </fieldset>
                             </td>
 
                             <td class="px-3 py-2">
@@ -556,18 +820,21 @@ const isPosted = (crew) => crew.status === 'in_tank';
                                 <!-- Only meaningful while they are in a tank,
                                      and the server clears both this and the
                                      role when the status moves off it. -->
-                                <select
-                                    :value="crew.tank_id ?? ''"
-                                    class="max-w-44 border border-wot-border bg-wot-sunken px-2 py-1 text-sm disabled:opacity-40"
-                                    :disabled="!isPosted(crew) || !vehicles"
-                                    :aria-label="`Tank ${crew.name} is serving in`"
-                                    @change="saveCrew(crew, { tank_id: $event.target.value === '' ? null : Number($event.target.value) })"
+                                <!-- A button into the tank picker rather than a
+                                     thousand-option dropdown: the list is
+                                     narrowed by nation, tier and type instead of
+                                     scrolled. -->
+                                <button
+                                    type="button"
+                                    class="inline-flex max-w-44 items-center gap-1.5 border border-wot-border bg-wot-sunken px-2 py-1 text-sm transition-colors hover:border-wot-gold disabled:pointer-events-none disabled:opacity-40"
+                                    :class="crew.tank_id ? 'text-wot-text' : 'text-wot-dim'"
+                                    :disabled="!isPosted(crew)"
+                                    :aria-label="`Tank ${crew.name} is serving in: ${tankLabel(crew.tank_id)}`"
+                                    @click="chooseTankFor(crew)"
                                 >
-                                    <option value="">{{ vehicles ? '—' : 'Loading…' }}</option>
-                                    <option v-for="vehicle in vehicles ?? []" :key="vehicle.tank_id" :value="vehicle.tank_id">
-                                        {{ ROMAN[vehicle.tier] }} · {{ vehicle.name }}
-                                    </option>
-                                </select>
+                                    <NationFlag v-if="vehiclesById.get(crew.tank_id)" :nation="vehiclesById.get(crew.tank_id).nation" />
+                                    <span class="min-w-0 truncate">{{ tankLabel(crew.tank_id) }}</span>
+                                </button>
                             </td>
 
                             <td class="px-3 py-2">
@@ -598,56 +865,21 @@ const isPosted = (crew) => crew.status === 'in_tank';
 
                         <tr v-if="!battle_pass.length">
                             <td colspan="8" class="px-4 py-8 text-center text-sm text-wot-dim">
-                                No Battle Pass crew recorded yet. Add one below.
+                                No Battle Pass crew recorded yet. Add one above.
                             </td>
                         </tr>
                     </tbody>
                 </table>
             </div>
 
-            <form class="mt-3 flex flex-wrap items-end gap-2 border border-wot-border bg-wot-panel p-3" @submit.prevent="addCrew">
-                <label class="flex flex-col gap-1">
-                    <span class="text-xs font-bold uppercase tracking-wider text-wot-dim">Name</span>
-                    <input v-model="adding.name" type="text" required
-                           class="w-40 border border-wot-border bg-wot-sunken px-1 py-0.5 text-sm focus:border-wot-gold">
-                </label>
-
-                <label class="flex flex-col gap-1">
-                    <span class="text-xs font-bold uppercase tracking-wider text-wot-dim">Nation</span>
-                    <select v-model="adding.nation" class="border border-wot-border bg-wot-sunken px-2 py-1 text-sm">
-                        <option value="">—</option>
-                        <option v-for="(label, slug) in page.props.nations" :key="slug" :value="slug">{{ label }}</option>
-                    </select>
-                </label>
-
-                <label class="flex flex-col gap-1">
-                    <span class="text-xs font-bold uppercase tracking-wider text-wot-dim">Season</span>
-                    <input v-model.number="adding.season" type="text" inputmode="numeric"
-                           class="w-14 border border-wot-border bg-wot-sunken px-1 py-0.5 text-sm tabular-nums focus:border-wot-gold">
-                </label>
-
-                <label class="flex flex-col gap-1">
-                    <span class="text-xs font-bold uppercase tracking-wider text-wot-dim">Gender</span>
-                    <select v-model="adding.gender" class="border border-wot-border bg-wot-sunken px-2 py-1 text-sm">
-                        <option value="">—</option>
-                        <option v-for="(label, key) in genders" :key="key" :value="key">{{ label }}</option>
-                    </select>
-                </label>
-
-                <label class="flex flex-col gap-1">
-                    <span class="text-xs font-bold uppercase tracking-wider text-wot-dim">Status</span>
-                    <select v-model="adding.status" class="border border-wot-border bg-wot-sunken px-2 py-1 text-sm">
-                        <option v-for="(label, key) in statuses" :key="key" :value="key">{{ label }}</option>
-                    </select>
-                </label>
-
-                <button
-                    type="submit"
-                    class="border border-wot-gold px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-wot-gold transition-colors hover:bg-wot-gold hover:text-wot-abyss"
-                >
-                    Add crew member
-                </button>
-            </form>
+            <TankPicker
+                :open="picking !== null"
+                :vehicles="vehicles"
+                :selected-id="picking?.selectedId ?? null"
+                :title="picking?.title"
+                @pick="(tankId) => picking?.apply(tankId)"
+                @close="picking = null"
+            />
         </section>
 
         <!-- 4. Guide ------------------------------------------------------------->

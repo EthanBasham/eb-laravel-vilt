@@ -176,12 +176,12 @@ return [
         'zero_skill_commanders' => 'Zero Skill Commanders',
         'zero_skill_crew' => 'Zero Skill Crew',
         'pending_zero_skill_crew' => 'Pending Zero Skill Crew',
-        'boosted_1' => 'Boosted Crew — 1 skill',
-        'boosted_2' => 'Boosted Crew — 2 skills',
-        'boosted_3' => 'Boosted Crew — 3 skills',
-        'boosted_4' => 'Boosted Crew — 4 skills',
-        'boosted_5' => 'Boosted Crew — 5 skills',
-        'boosted_6' => 'Boosted Crew — 6 skills',
+        'boosted_1' => '1-Skill Boosted Crew',
+        'boosted_2' => '2-Skill Boosted Crew',
+        'boosted_3' => '3-Skill Boosted Crew',
+        'boosted_4' => '4-Skill Boosted Crew',
+        'boosted_5' => '5-Skill Boosted Crew',
+        'boosted_6' => '6-Skill Boosted Crew',
         'empty_novelty_crew' => 'Empty Novelty Crew',
     ],
 
@@ -202,9 +202,13 @@ return [
         'in_tank' => 'In tank',
     ],
 
+    /*
+     * Carrying a letter as well as a name, like the crew roles above: the
+     * roster row has space for a two-way switch and not for two words.
+     */
     'crew_genders' => [
-        'male' => 'Male',
-        'female' => 'Female',
+        'male' => ['name' => 'Male', 'letter' => 'M'],
+        'female' => ['name' => 'Female', 'letter' => 'F'],
     ],
 
     /*

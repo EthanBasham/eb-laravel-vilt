@@ -112,10 +112,58 @@ body:has(.wot) {
 @layer base {
     .wot input[type='text'],
     .wot input[type='search'],
+    .wot input[type='number'],
     .wot select {
         background-color: var(--color-wot-sunken);
         border-color: var(--color-wot-border);
         color: var(--color-wot-text);
+    }
+
+    /*
+     * The chevrons on a number field are drawn by the browser, in its light
+     * palette unless told otherwise — pale buttons on the dark field. A dark
+     * colour scheme is the only lever that reaches them.
+     */
+    .wot input[type='number'] {
+        color-scheme: dark;
+    }
+
+    /*
+     * Keep room for the chevron @tailwindcss/forms paints.
+     *
+     * The plugin sets `appearance: none` on every select and draws its own
+     * chevron as a background image, reserving room for it with
+     * `padding-right: 2.5rem`. Every select in this app also carries `px-2` —
+     * a utility, which outranks that base-layer padding — so the reservation is
+     * wiped while the chevron stays, and the arrow paints on top of the text.
+     *
+     * It went unnoticed for as long as the options were words: the chevron sat
+     * over the tail of "Medium tank" and read as part of the control. On the
+     * crew editor's zero-skills select, whose widest option is a single digit,
+     * the box is about 26px and the chevron about 21px of it.
+     *
+     * `!important` is deliberate, and is the only thing here that can win: a
+     * normal declaration in this layer loses to `px-2` whatever it sets, and an
+     * important one in a lower layer beats a normal one in a higher — that is
+     * the one direction cascade layers run backwards. The alternatives were a
+     * rule smuggled into the utilities layer to out-specify `px-2`, which hides
+     * the same override where nobody would look for it, or repeating the
+     * padding on every select ever written.
+     *
+     * The consequence to know about: a select cannot set its own inline-end
+     * padding from a utility any more. Nothing needs to, and anything that did
+     * would be reopening the overlap.
+     *
+     * `appearance: auto` was tried first and reverted. Handing the control back
+     * to the browser also hands it the popup, which then stops honouring the
+     * `option` colours set below — the arrow was fixed and the open list was
+     * not.
+     *
+     * 2.25rem clears a 1.5em chevron sitting 0.5rem in, at both the 14px these
+     * run at and the 16px a select would inherit without `text-sm`.
+     */
+    .wot select {
+        padding-inline-end: 2.25rem !important;
     }
 }
 

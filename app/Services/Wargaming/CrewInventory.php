@@ -105,11 +105,14 @@ class CrewInventory
                 $type['key'] => (int) ($held->get("{$type['key']}:{$nation['nation']}")?->quantity ?? 0),
             ]);
 
-            return [
-                ...$nation,
-                'quantities' => $quantities->all(),
-                'total' => (int) $quantities->sum(),
-            ];
+            /*
+             * Counts only. What a row is worth is quantity times the XP of each
+             * book, and the page works that out for itself so a row re-totals
+             * the moment a cell is typed into rather than after the round trip
+             * — the same bargain the grinding boards strike with their own
+             * footers.
+             */
+            return [...$nation, 'quantities' => $quantities->all()];
         });
     }
 
@@ -132,11 +135,17 @@ class CrewInventory
     }
 
     /**
-     * Column sums, plus the grand total.
+     * Column sums: how many of each book, how many altogether, and what the
+     * whole shelf is worth.
      *
-     * Books only. The specials are counted in neither, because a Personal
-     * Training Manual is not a booklet, a guide or a manual and adding it to
-     * the bottom of those columns would make the total mean nothing.
+     * The two figures answer different questions and the page shows both. The
+     * panel counts books, because that is what you hold; the table totals XP,
+     * because a manual and a booklet are not one book each in any sense that
+     * matters — one is worth twelve and a half of the other.
+     *
+     * Books only. The specials are counted in none of it: a Personal Training
+     * Manual is not a booklet, a guide or a manual, and has no per-member XP to
+     * be worth anything in this reckoning.
      *
      * @param  Collection<int, array<string, mixed>>  $types
      * @param  Collection<int, array<string, mixed>>  $rows
@@ -144,10 +153,16 @@ class CrewInventory
      */
     private function bookTotals(Collection $types, Collection $rows): array
     {
-        $totals = $types->mapWithKeys(fn (array $type): array => [
+        $counts = $types->mapWithKeys(fn (array $type): array => [
             $type['key'] => (int) $rows->sum(fn (array $row): int => $row['quantities'][$type['key']]),
         ]);
 
-        return [...$totals->all(), 'total' => (int) $totals->sum()];
+        return [
+            ...$counts->all(),
+            'books' => (int) $counts->sum(),
+            // Per crew member, which is how a book's value is quoted: each one
+            // gives its XP to every seat in the set it is spent on.
+            'xp' => (int) $types->sum(fn (array $type): int => $counts[$type['key']] * $type['xp']),
+        ];
     }
 }

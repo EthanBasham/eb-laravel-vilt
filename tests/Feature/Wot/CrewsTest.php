@@ -76,21 +76,62 @@ it('sends an unlinked user to the connect screen', function () {
 });
 
 /**
- * The letters are the encyclopedia's, one per seat and in its order — the board
- * has no opinion about what crew a vehicle carries, only about who is in it.
+ * The letters are the encyclopedia's, one per seat — the board has no opinion
+ * about what crew a vehicle carries, only about who is in it.
  */
-it('spells one letter per seat, in the vehicle own order', function () {
+it('spells one letter per seat', function () {
     [$user] = crewUser();
     crewLine();
 
     $this->actingAs($user)->get(route('wot.crews'))->assertInertia(fn ($page) => $page
+        ->has('crews.rows.0.cells.10.members', 5)
         ->where('crews.rows.0.cells.10.members.0.letter', 'C')
-        ->where('crews.rows.0.cells.10.members.1.letter', 'G')
-        ->where('crews.rows.0.cells.10.members.2.letter', 'D')
         ->where('crews.rows.0.cells.10.members.3.letter', 'R')
-        ->where('crews.rows.0.cells.10.members.4.letter', 'L')
         ->where('crews.rows.0.cells.10.members.3.name', 'Radio Operator'),
     );
+});
+
+/**
+ * The encyclopedia's own order is not consistent between vehicles — an AT-1
+ * lists its driver before its gunner, most tanks the other way about. Every
+ * cell spelling C G D R L is what makes a column of them scannable: a missing
+ * radio operator is a gap in a pattern rather than something to read tank by
+ * tank.
+ */
+it('spells the crew in role order, whatever order the encyclopedia lists it', function () {
+    [$user] = crewUser();
+    crewLine();
+    WotVehicle::where('tank_id', 100)->first()->update([
+        'crew' => WotVehicle::factory()->crew(['loader', 'driver', 'commander', 'gunner'])->raw()['crew'],
+    ]);
+
+    $props = $this->actingAs($user)->get(route('wot.crews'))->viewData('page')['props'];
+
+    expect(collect(tenCell($props)['members'])->pluck('letter')->all())->toBe(['C', 'G', 'D', 'L'])
+        // Reordering what is shown must not move what is written: a slot is the
+        // encyclopedia's position and is what every stored member is keyed by.
+        ->and(collect(tenCell($props)['members'])->pluck('slot')->all())->toBe([2, 3, 1, 0]);
+});
+
+/**
+ * Two of the same role keep the order the encyclopedia gave them, so the pair
+ * does not shuffle between renders — which would undo the point of a fixed
+ * order for exactly the vehicles that have most to say.
+ */
+it('keeps two seats of one role in encyclopedia order', function () {
+    [$user, $account] = crewUser();
+    crewLine();
+    WotVehicle::where('tank_id', 100)->first()->update([
+        'crew' => WotVehicle::factory()->crew(['loader', 'commander', ['loader', 'radioman']])->raw()['crew'],
+    ]);
+    crewOn($account, [[0, 1, false], [0, 2, false], [0, 3, false]]);
+
+    $props = $this->actingAs($user)->get(route('wot.crews'))->viewData('page')['props'];
+
+    expect(collect(tenCell($props)['members'])->pluck('letter')->all())->toBe(['C', 'L', 'L'])
+        ->and(collect(tenCell($props)['members'])->pluck('slot')->all())->toBe([1, 0, 2])
+        // The stored member still travels with its own seat.
+        ->and(collect(tenCell($props)['members'])->pluck('skill_level')->all())->toBe([2, 1, 3]);
 });
 
 /**
@@ -374,7 +415,7 @@ it('records books against a nation and universally', function () {
 
     expect(WotCrewBook::where('wot_account_id', $account->id)->count())->toBe(2)
         ->and(collect($props['books']['rows'])->firstWhere('nation', 'ussr')['quantities']['manual'])->toBe(3)
-        ->and(collect($props['books']['rows'])->firstWhere('nation', 'universal')['total'])->toBe(2)
+        ->and(collect($props['books']['rows'])->firstWhere('nation', 'universal')['quantities']['manual'])->toBe(2)
         ->and($props['books']['totals']['manual'])->toBe(5);
 });
 
@@ -391,8 +432,9 @@ it('gives every nation a row, with universal last', function () {
 });
 
 /**
- * A Personal Training Manual is not a booklet, a guide or a manual, so adding
- * it to the bottom of those columns would make the total mean nothing.
+ * A Personal Training Manual is not a booklet, a guide or a manual, and carries
+ * no per-member XP either, so counting it in with the books would make both
+ * totals mean nothing.
  */
 it('keeps the special items out of the book totals', function () {
     [$user] = crewUser();
@@ -402,10 +444,32 @@ it('keeps the special items out of the book totals', function () {
 
     $props = $this->actingAs($user)->get(route('wot.crews'))->viewData('page')['props'];
 
-    expect($props['books']['totals']['total'])->toBe(1)
+    expect($props['books']['totals']['books'])->toBe(1)
+        ->and($props['books']['totals']['xp'])->toBe(100_000)
         ->and(collect($props['books']['specials'])->firstWhere('key', 'personal_training_manual')['quantity'])->toBe(6)
         ->and(collect($props['books']['specials'])->pluck('key')->all())
         ->toBe(['personal_training_manual', 'mentoring_license']);
+});
+
+/**
+ * A manual and a booklet are not one book each in any sense worth adding up —
+ * one is worth twelve and a half of the other — so the table totals what the
+ * shelf is worth and the panel heading keeps the count.
+ */
+it('totals the books by the XP they carry, not by how many there are', function () {
+    [$user] = crewUser();
+
+    $this->actingAs($user)->patch(route('wot.crews.book', ['booklet', 'ussr']), ['quantity' => 3]);
+    $this->actingAs($user)->patch(route('wot.crews.book', ['manual', 'universal']), ['quantity' => 2]);
+
+    $props = $this->actingAs($user)->get(route('wot.crews'))->viewData('page')['props'];
+
+    // 3 booklets at 20,000 and 2 manuals at 250,000.
+    expect($props['books']['totals']['xp'])->toBe(560_000)
+        ->and($props['books']['totals']['books'])->toBe(5)
+        // The page multiplies a row out for itself, so each type has to say
+        // what one of its books is worth.
+        ->and(collect($props['books']['types'])->firstWhere('key', 'manual')['xp'])->toBe(250_000);
 });
 
 it('refuses a book cell that does not exist', function (array $cell) {
@@ -529,6 +593,28 @@ it('lists the roster newest season first', function () {
     );
 });
 
+/**
+ * '-' is how the roster writes a tanker with no season, and it has to land at
+ * the bottom of the list with the rest of them rather than being refused as a
+ * season that is not a number.
+ */
+it('takes a dash as no season and sorts that tanker last', function () {
+    [$user, $account] = crewUser();
+    WotBattlePassCrew::create(['wot_account_id' => $account->id, 'name' => 'Seasoned', 'season' => 9, 'status' => 'uncollected']);
+
+    $this->actingAs($user)->post(route('wot.crews.battle-pass.store'), [
+        'name' => 'Dashed',
+        'season' => '-',
+        'status' => 'uncollected',
+    ])->assertSessionHasNoErrors();
+
+    $this->actingAs($user)->get(route('wot.crews'))->assertInertia(fn ($page) => $page
+        ->where('battle_pass.0.name', 'Seasoned')
+        ->where('battle_pass.1.name', 'Dashed')
+        ->where('battle_pass.1.season', null),
+    );
+});
+
 it('remembers where the crews filters were left', function () {
     [$user, $account] = crewUser();
 
@@ -583,5 +669,7 @@ it('defers the vehicle list the Battle Pass picker needs', function () {
         'X-Inertia-Partial-Data' => 'vehicles',
     ])->json('props.vehicles');
 
-    expect(collect($vehicles)->pluck('tank_id')->all())->toContain(500, 100);
+    expect(collect($vehicles)->pluck('tank_id')->all())->toContain(500, 100)
+        // The picker's type chips and badges read this.
+        ->and(collect($vehicles)->firstWhere('tank_id', 100)['type'])->toBe('mediumTank');
 });
