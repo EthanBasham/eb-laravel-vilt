@@ -21,6 +21,22 @@ const props = defineProps({
     upcoming: { type: Object, default: () => ({ days: [], ongoing: [] }) },
 });
 
+// The badges and marks replace their text labels on screen, so these names
+// carry the meaning for a screen reader and on hover. Mastery uses the
+// encyclopedia's own wording.
+const masteryNames = {
+    third: 'Class III',
+    second: 'Class II',
+    first: 'Class I',
+    ace: 'Ace Tanker',
+};
+
+const markNames = {
+    one: '1 Mark of Excellence',
+    two: '2 Marks of Excellence',
+    three: '3 Marks of Excellence',
+};
+
 // --- Garage table state -----------------------------------------------------
 // All client-side. The whole garage arrives in one payload (a few hundred rows
 // at most), so filtering and sorting here is instant and costs no round trips.
@@ -129,7 +145,14 @@ const columns = [
     { key: 'mastery', label: 'Mastery', align: 'text-center' },
 ];
 
-const masteryLabels = ['—', '3rd', '2nd', '1st', 'Ace'];
+// vehicle.mastery is the raw 0-4 counter Wargaming sends: 0 is none, then
+// Class III up to Ace Tanker. Indexed into the badge filenames.
+const masteryKeys = [null, 'third', 'second', 'first', 'ace'];
+
+// Tier is a rank, and the game writes ranks in Roman. Sorting and filtering
+// still run on the numeric value the API sends — only the display changes.
+const ROMAN_TIERS = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+const roman = (tier) => ROMAN_TIERS[tier] ?? tier;
 
 const number = (value) => (value === null || value === undefined ? '—' : new Intl.NumberFormat().format(value));
 
@@ -277,9 +300,23 @@ const disconnect = () => {
                 <div class="mt-4 grid gap-4 sm:grid-cols-2">
                     <div class="border border-wot-border bg-wot-panel p-4">
                         <h3 class="text-sm">Marks of Excellence</h3>
-                        <dl class="mt-3 flex gap-6">
-                            <div v-for="(count, label) in achievements.marks_of_excellence" :key="label">
-                                <dt class="text-xs uppercase tracking-wider text-wot-dim">{{ label }}</dt>
+                        <dl class="mt-3 flex flex-wrap gap-x-6 gap-y-3">
+                            <div v-for="(count, label) in achievements.marks_of_excellence" :key="label" class="flex items-center gap-2">
+                                <!-- Rendered at their native 24px: the source
+                                     art is that size and upscaling it goes
+                                     soft. -->
+                                <dt>
+                                    <img
+                                        :src="`/images/wot/achievements/moe-${label}.png`"
+                                        :alt="markNames[label]"
+                                        :title="markNames[label]"
+                                        width="24"
+                                        height="24"
+                                        class="h-6 w-6 shrink-0"
+                                        loading="lazy"
+                                        decoding="async"
+                                    >
+                                </dt>
                                 <dd class="text-2xl tabular-nums text-wot-gold">{{ count }}</dd>
                             </div>
                         </dl>
@@ -287,9 +324,25 @@ const disconnect = () => {
 
                     <div class="border border-wot-border bg-wot-panel p-4">
                         <h3 class="text-sm">Mastery badges</h3>
-                        <dl class="mt-3 flex gap-6">
-                            <div v-for="(count, label) in achievements.mastery" :key="label">
-                                <dt class="text-xs uppercase tracking-wider text-wot-dim">{{ label }}</dt>
+                        <dl class="mt-3 flex flex-wrap gap-x-6 gap-y-3">
+                            <div v-for="(count, label) in achievements.mastery" :key="label" class="flex items-center gap-2">
+                                <!-- Wargaming's own badge art, mirrored into
+                                     public/ rather than hotlinked: the source
+                                     URL carries a client version that moves
+                                     with each patch. -->
+                                <dt>
+                                    <img
+                                        :src="`/images/wot/achievements/mastery-${label}.png`"
+                                        :alt="masteryNames[label]"
+                                        :title="masteryNames[label]"
+                                        width="67"
+                                        height="71"
+                                        class="h-9 w-auto shrink-0"
+                                        loading="lazy"
+                                        decoding="async"
+                                    >
+                                </dt>
+
                                 <dd class="text-2xl tabular-nums text-wot-heading">{{ count }}</dd>
                             </div>
                         </dl>
@@ -298,9 +351,9 @@ const disconnect = () => {
             </section>
         </template>
 
-        <section class="mt-12" aria-labelledby="garage-heading">
+        <section class="mt-12" aria-labelledby="tanks-heading">
             <div class="flex flex-wrap items-baseline justify-between gap-2">
-                <h2 id="garage-heading" class="text-xl">Garage</h2>
+                <h2 id="tanks-heading" class="text-xl">Tanks</h2>
                 <p class="text-sm text-wot-dim" aria-live="polite">
                     {{ number(totals.shown) }} of {{ number(totals.all) }} vehicles ·
                     {{ number(totals.battles) }} battles shown
@@ -310,20 +363,20 @@ const disconnect = () => {
             <div class="mt-4 flex flex-wrap items-end gap-3 border border-wot-border bg-wot-panel p-4">
                 <div class="min-w-48 flex-1">
                     <label for="search" class="block text-xs font-medium uppercase tracking-wider text-wot-dim">Search</label>
-                    <input id="search" v-model="search" type="search" placeholder="Vehicle name" class="mt-1 w-full border px-2 py-1.5 text-sm">
+                    <input id="search" v-model="search" type="search" placeholder="Vehicle name" class="mt-1 w-full border border-wot-border bg-wot-sunken px-2 py-1.5 text-sm transition-colors focus:border-wot-gold">
                 </div>
 
                 <div>
                     <label for="tier" class="block text-xs font-medium uppercase tracking-wider text-wot-dim">Tier</label>
-                    <select id="tier" v-model="tier" class="mt-1 border px-2 py-1.5 text-sm">
+                    <select id="tier" v-model="tier" class="mt-1 border border-wot-border bg-wot-sunken px-2 py-1.5 text-sm transition-colors focus:border-wot-gold">
                         <option value="">All</option>
-                        <option v-for="t in tiers" :key="t" :value="t">{{ t }}</option>
+                        <option v-for="t in tiers" :key="t" :value="t">{{ roman(t) }}</option>
                     </select>
                 </div>
 
                 <div>
                     <label for="nation" class="block text-xs font-medium uppercase tracking-wider text-wot-dim">Nation</label>
-                    <select id="nation" v-model="nation" class="mt-1 border px-2 py-1.5 text-sm">
+                    <select id="nation" v-model="nation" class="mt-1 border border-wot-border bg-wot-sunken px-2 py-1.5 text-sm transition-colors focus:border-wot-gold">
                         <option value="">All</option>
                         <option v-for="n in nations" :key="n" :value="n">{{ nationName(n) }}</option>
                     </select>
@@ -331,7 +384,7 @@ const disconnect = () => {
 
                 <div>
                     <label for="type" class="block text-xs font-medium uppercase tracking-wider text-wot-dim">Type</label>
-                    <select id="type" v-model="type" class="mt-1 border px-2 py-1.5 text-sm">
+                    <select id="type" v-model="type" class="mt-1 border border-wot-border bg-wot-sunken px-2 py-1.5 text-sm transition-colors focus:border-wot-gold">
                         <option value="">All</option>
                         <option v-for="t in types" :key="t" :value="t">{{ t }}</option>
                     </select>
@@ -339,7 +392,7 @@ const disconnect = () => {
 
                 <div>
                     <label for="min-battles" class="block text-xs font-medium uppercase tracking-wider text-wot-dim">Min battles</label>
-                    <input id="min-battles" v-model="minBattles" type="number" min="0" step="25" class="mt-1 w-24 border px-2 py-1.5 text-sm">
+                    <input id="min-battles" v-model="minBattles" type="number" min="0" step="25" class="mt-1 w-24 border border-wot-border bg-wot-sunken px-2 py-1.5 text-sm transition-colors focus:border-wot-gold">
                 </div>
 
                 <label class="flex items-center gap-2 pb-2 text-sm text-wot-text">
@@ -389,7 +442,7 @@ const disconnect = () => {
                                 </span>
                                 <span class="ms-2 text-xs text-wot-dim">{{ vehicle.type }}</span>
                             </td>
-                            <td class="px-4 py-2 text-center tabular-nums text-wot-muted">{{ vehicle.tier }}</td>
+                            <td class="px-4 py-2 text-center text-wot-muted">{{ roman(vehicle.tier) }}</td>
                             <td class="px-4 py-2 text-right tabular-nums text-wot-muted">{{ number(vehicle.battles) }}</td>
                             <!-- Coloured against the 50% line, the only number here
                                  a player reads as pass/fail at a glance. -->
@@ -406,10 +459,20 @@ const disconnect = () => {
                             <td class="px-4 py-2 text-center text-wot-gold">
                                 {{ vehicle.marks ? '★'.repeat(vehicle.marks) : '' }}
                             </td>
-                            <td
-                                class="px-4 py-2 text-center"
-                                :class="vehicle.mastery === 4 ? 'text-wot-gold' : 'text-wot-dim'"
-                            >{{ masteryLabels[vehicle.mastery] }}</td>
+                            <td class="px-4 py-2 text-center">
+                                <img
+                                    v-if="masteryKeys[vehicle.mastery]"
+                                    :src="`/images/wot/achievements/mastery-${masteryKeys[vehicle.mastery]}.png`"
+                                    :alt="masteryNames[masteryKeys[vehicle.mastery]]"
+                                    :title="masteryNames[masteryKeys[vehicle.mastery]]"
+                                    width="67"
+                                    height="71"
+                                    class="mx-auto h-6 w-auto"
+                                    loading="lazy"
+                                    decoding="async"
+                                >
+                                <span v-else class="text-wot-dim">—</span>
+                            </td>
                         </tr>
 
                         <tr v-if="!sorted.length">

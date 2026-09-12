@@ -2962,3 +2962,69 @@ No `site.webmanifest` yet, deliberately. 192/512 are manifest icons, not favicon
 requests them until a manifest exists, and adding one here means deciding on `scope`/
 `start_url` under `/wot` for an app that sits behind auth. The files are cheap to keep and
 annoying to regenerate, so they are committed unused rather than dropped.
+
+## 2026-09-12 — Mastery badge art, mirrored from the achievements encyclopedia
+
+The dashboard's Achievements section counted mastery badges and Marks of Excellence as bare
+numbers. Wargaming publishes art for one of the two.
+
+`GET /wot/encyclopedia/achievements/` returns 522 entries, 473 of them with an `image`. Both
+counters the dashboard shows are `type: class` entries whose grades live in `options[]`:
+
+- **`markOfMastery`** — four options, each with its own PNG (`markOfMastery1..4.png`,
+  67×71). Option order is Class III, Class II, Class I, Ace Tanker, which lines up with
+  `AccountDashboard::achievements()`'s `third/second/first/ace` keys.
+- **`marksOnGun`** — three options, **every image field null**. There is no official MoE
+  graphic on this endpoint, and nothing else in the 522 mentions "excellence". That card
+  stays numeric.
+
+Note the endpoint rejects `fields=achievement_id` with `INVALID_FIELDS` (407) — the id is the
+object key, not a field. Easiest to request the whole payload.
+
+### Mirrored, not hotlinked
+
+Saved to `public/images/wot/achievements/mastery-{third,second,first,ace}.png`, named for the
+prop key so the template interpolates the filename directly.
+
+The source URL is
+`http://api.worldoftanks.com/static/2.77.0/wot/encyclopedia/achievement/markOfMastery1.png` —
+note the **`2.77.0`**. That is the game client version and it moves with every patch, so a
+hotlink is a dead image on the next one. The `image` field in a fresh encyclopedia response
+always carries the current version, which is where to re-fetch these from if they ever need
+refreshing; there is no stable unversioned URL.
+
+Same reasoning and same destination shape as the nation flags and vehicle-type icons already
+in `public/images/`.
+
+## 2026-09-12 — Marks of Excellence art, from tomato.gg
+
+Follow-up to the entry above, which left the MoE card numeric because the achievements
+encyclopedia publishes no art for `marksOnGun`.
+
+Checked, in order, before settling:
+
+- **The CDN directory the mastery badges come from.** `marksOnGun.png`, `marksOnGun{1,2,3}.png`
+  and several spellings all 404. The API's null `image` fields are accurate; the files are not
+  merely unlisted.
+- **The mod repositories** (`spoter/spoter-mods`, `sheshiver/InsigniaOnGun`). Both read the
+  marks out of the installed game client at runtime and ship no copies.
+
+What worked: **tomato.gg** serves them at `/markIcons/mark_{1,2,3}.webp` — 24×24 WebP with
+alpha, converted to PNG on the way in and saved as
+`public/images/wot/achievements/moe-{one,two,three}.png`, named for the prop key like the
+mastery badges.
+
+**Provenance is worth knowing.** These are Wargaming's game-client assets rehosted by a
+third-party stats site, not something tomato.gg authored and not something served by an API
+with terms attached. Fine for a private single-user dashboard; swap them for original artwork
+before this is ever public. There is no upstream to re-fetch from if they change — unlike the
+mastery badges, where a fresh encyclopedia response always names the current URL.
+
+Rendered at their native 24px. They are small source images and upscaling them goes soft, so
+the MoE card's icons are deliberately smaller than the mastery card's 36px badges.
+
+### Labels dropped
+
+Both cards now show art and a count, with no text label. The name moved to `alt`/`title`, and
+the image sits in the `<dt>` with the count as its `<dd>` — the badge *is* the term, so the
+list stays a real description list rather than growing a redundant caption.
