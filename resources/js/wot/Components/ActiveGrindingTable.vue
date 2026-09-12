@@ -1,6 +1,7 @@
 <script setup>
 import { IconX } from '@tabler/icons-vue';
 import { router } from '@inertiajs/vue3';
+import { ref } from 'vue';
 import EditableNumber from './EditableNumber.vue';
 import ModuleResearchPicker from './ModuleResearchPicker.vue';
 import NationFlag from './NationFlag.vue';
@@ -35,6 +36,40 @@ const stopGrinding = (tankId) => router.patch(`/wot/grinding/purchases/${tankId}
     only: props.only,
 });
 
+const grid = ref(null);
+
+/**
+ * Tab walks down the XP banked column instead of across the row.
+ *
+ * Typing these in is a column of numbers copied off the garage screen one tank
+ * after another, so the useful next field is the one below, not the module
+ * picker and the stop-grinding button that sit between them in document order.
+ *
+ * Only the hop between inputs is taken over. Tab off the last one (or
+ * Shift+Tab off the first) falls through untouched, so the table is still
+ * something you can leave — and the controls this skips stay reachable by
+ * tabbing backwards into them from below.
+ */
+const onTab = (event) => {
+    const inputs = [...(grid.value?.querySelectorAll('[data-banked-xp]') ?? [])];
+    const index = inputs.indexOf(event.target);
+
+    if (index === -1) {
+        return;
+    }
+
+    const next = inputs[index + (event.shiftKey ? -1 : 1)];
+
+    if (!next) {
+        return;
+    }
+
+    event.preventDefault();
+    // focus() alone; EditableNumber selects its own contents on focus, which is
+    // what makes typing over the old value work.
+    next.focus();
+};
+
 const n = (v) => new Intl.NumberFormat().format(v ?? 0);
 
 // Tiers are Roman in game and in every community tool.
@@ -46,7 +81,7 @@ const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 
         <slot name="empty">Nothing being ground.</slot>
     </p>
 
-    <div v-else class="overflow-x-auto border border-wot-border bg-wot-panel">
+    <div v-else ref="grid" class="overflow-x-auto border border-wot-border bg-wot-panel" @keydown.tab="onTab">
         <table class="min-w-full divide-y divide-wot-border text-sm">
             <thead class="bg-wot-sunken">
                 <tr>
@@ -68,11 +103,14 @@ const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 
                     </td>
                     <!-- The one number no API can supply. -->
                     <td class="px-4 py-2 text-right">
+                        <!-- data-banked-xp falls through onto the input itself,
+                             which is what onTab collects to find the next one. -->
                         <EditableNumber
                             field="banked_xp"
                             :model-value="row.banked_xp"
                             :url="`/wot/grinding/purchases/${row.tank_id}`"
                             :only="only"
+                            data-banked-xp
                         />
                     </td>
                     <!-- The XP board's own picker, against the XP board's own
