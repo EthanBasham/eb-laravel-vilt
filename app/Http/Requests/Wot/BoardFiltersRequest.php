@@ -11,8 +11,9 @@ use Illuminate\Validation\Rule;
  * Serves every grid in the app. `board` picks which column the payload lands in; the rest
  * of the keys are `sometimes`, so a client sends only what changed and a
  * partial payload never clears the rest. hide_owned belongs to the purchase
- * board, only_planned to Free XP and hide_done to XP Remaining, but none is
- * rejected on another — a key a board never sends is simply one it never stores.
+ * board, only_planned and hide_researched to Free XP, hide_done to XP Remaining
+ * and only_crewed to Crews, but none is rejected on another — a key a board
+ * never sends is simply one it never stores.
  */
 class BoardFiltersRequest extends FormRequest
 {
@@ -38,6 +39,7 @@ class BoardFiltersRequest extends FormRequest
             'hide_owned' => ['sometimes', 'boolean'],
             'show_sale' => ['sometimes', 'boolean'],
             'only_planned' => ['sometimes', 'boolean'],
+            'hide_researched' => ['sometimes', 'boolean'],
             'hide_done' => ['sometimes', 'boolean'],
             'only_crewed' => ['sometimes', 'boolean'],
         ];

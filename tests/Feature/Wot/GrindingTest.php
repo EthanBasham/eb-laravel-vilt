@@ -1770,6 +1770,70 @@ it('will not plan Free XP for a module only assumed researched', function () {
     );
 });
 
+/**
+ * Finished means what XP Remaining says it means: every upgrade module
+ * researched, and every tank ahead unlocked. Playing the tier X settles the
+ * line beneath it, so the IX and VIII are done and the X — which still has
+ * modules and leads nowhere to assume them from — is not.
+ */
+it('marks a Free XP cell fully researched once XP Remaining has nothing left on it', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+    played($account, 100);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('freexp.rows.0.cells.8.is_researched', true)
+        ->where('freexp.rows.0.cells.9.is_researched', true)
+        ->where('freexp.rows.0.cells.10.is_researched', false),
+    );
+});
+
+/**
+ * Researching every module is half of it. A vehicle whose successor is still
+ * locked has XP left on XP Remaining, and Free XP could still go to that unlock.
+ */
+it('does not call a vehicle researched while the tank ahead is locked', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+    WotTankModule::create(['wot_account_id' => $account->id, 'tank_id' => 90, 'researched_module_ids' => [200, 201]]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('freexp.rows.0.cells.9.modules.0.is_researched', true)
+        ->where('freexp.rows.0.cells.9.is_researched', false),
+    );
+});
+
+/**
+ * A plan made before the successor was unlocked survives the unlock, but the
+ * cell reads as a dash — so its old figure must not reach any total.
+ */
+it('leaves a finished vehicle plan out of the Free XP totals', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+    WotTankModule::create(['wot_account_id' => $account->id, 'tank_id' => 90, 'planned_module_ids' => [200]]);
+    played($account, 100);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('freexp.rows.0.cells.9.is_researched', true)
+        ->where('freexp.rows.0.planned_xp', 0)
+        ->where('freexp.free_xp_planned', 0)
+        ->where('totals.free_xp_planned', 0),
+    );
+});
+
+it('remembers whether the Free XP board hides researched lines', function () {
+    $user = User::factory()->create();
+    WotAccount::factory()->for($user)->create();
+
+    $this->actingAs($user)->patch(route('wot.grinding.filters'), [
+        'board' => 'freexp', 'hide_researched' => false,
+    ])->assertNoContent();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(
+        fn ($page) => $page->where('settings.freexp_filters.hide_researched', false),
+    );
+});
+
 it('leaves the top gun button nothing to add once the line is assumed finished', function () {
     $user = User::factory()->create();
     $account = gunChainTank($user);

@@ -120,11 +120,18 @@ const resync = () => {
                 Mark {{ unseenCount }} as seen
             </button>
 
+            <!-- Takes the push to the right itself when there is nothing left to
+                 mark seen. ms-auto lives on the Mark button, and without that
+                 button in the row nothing else carried the pinned filter off the
+                 category chips. -->
             <button
                 v-if="pinnedCount || pinnedOnly"
                 type="button"
                 class="border px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors"
-                :class="pinnedOnly ? 'border-wot-gold text-wot-gold' : 'border-wot-border text-wot-dim hover:text-wot-text'"
+                :class="[
+                    pinnedOnly ? 'border-wot-gold text-wot-gold' : 'border-wot-border text-wot-dim hover:text-wot-text',
+                    unseenCount ? '' : 'ms-auto',
+                ]"
                 :aria-pressed="pinnedOnly"
                 @click="togglePinnedOnly"
             >

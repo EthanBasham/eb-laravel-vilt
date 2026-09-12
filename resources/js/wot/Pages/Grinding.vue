@@ -330,12 +330,19 @@ const {
     hiddenNations: fxHiddenNations,
     hiddenTiers: fxHiddenTiers,
     only_planned: onlyPlanned,
+    hide_researched: fxHideResearched,
     toggleNation: fxToggleNation,
     toggleTier: fxToggleTier,
     clearNations: fxClearNations,
     clearTiers: fxClearTiers,
 } = useBoardFilters('freexp', props.settings.freexp_filters, {
-    extra: { only_planned: false },
+    /*
+     * hide_researched starts on, the opposite of only_planned beside it: a line
+     * with nothing left to research is one no Free XP can go to, so it is
+     * settled in the sense XP Remaining's hide_done means, and gets the same
+     * default.
+     */
+    extra: { only_planned: false, hide_researched: true },
 });
 
 const freexpNations = computed(() => nationsOf(props.freexp.rows));
@@ -344,11 +351,20 @@ const fxShownTiers = computed(() => props.freexp.tiers.filter((t) => !fxHiddenTi
 
 // A shared cell is planned and counted on the row that owns it, which keeps the
 // row totals summing to the grand total.
-const fxCellXp = (cell) => (cell && !cell.is_shared ? cell.planned_xp : 0);
+//
+// A finished vehicle counts for nothing, mirroring FreeXpBoard: it reads as a
+// dash, so any plan it still carries must not surface in a total.
+const fxCellXp = (cell) => (cell && !cell.is_shared && !cell.is_researched ? cell.planned_xp : 0);
 const fxRowPlanned = (row) => fxShownTiers.value.reduce((sum, t) => sum + fxCellXp(row.cells[t]), 0);
 
+// Every cell, not the visible ones, for the reason bpLineDone gives: hiding a
+// tier column must not decide which lines the board has.
+const fxLineResearched = (row) => Object.values(row.cells).every((cell) => cell.is_researched);
+
 const fxShownRows = computed(() => props.freexp.rows.filter(
-    (r) => !fxHiddenNations.value.includes(r.nation) && !(onlyPlanned.value && fxRowPlanned(r) === 0),
+    (r) => !fxHiddenNations.value.includes(r.nation)
+        && !(onlyPlanned.value && fxRowPlanned(r) === 0)
+        && !(fxHideResearched.value && fxLineResearched(r)),
 ));
 const fxTierTotal = (tier) => fxShownRows.value.reduce((sum, r) => sum + fxCellXp(r.cells[tier]), 0);
 const fxGrandTotal = computed(() => fxShownRows.value.reduce((sum, r) => sum + fxRowPlanned(r), 0));
@@ -1068,11 +1084,19 @@ const bpGrandTotal = computed(() => bpShownRows.value.reduce((sum, r) => sum + b
                             <input v-model="onlyPlanned" type="checkbox" class="border">
                             Only lines I have planned on
                         </label>
+                        <label class="ms-3 flex items-center gap-2 text-xs text-wot-text">
+                            <input v-model="fxHideResearched" type="checkbox" class="border">
+                            Hide lines with nothing left to research
+                        </label>
                     </div>
                 </div>
 
                 <p v-if="!fxShownRows.length" class="border border-dashed border-wot-border p-8 text-center text-sm text-wot-dim">
-                    {{ onlyPlanned ? 'Nothing planned in the selected nations and tiers.' : 'No lines in the selected nations and tiers.' }}
+                    {{ onlyPlanned
+                        ? 'Nothing planned in the selected nations and tiers.'
+                        : fxHideResearched
+                            ? 'Nothing left to research in the selected nations and tiers.'
+                            : 'No lines in the selected nations and tiers.' }}
                 </p>
 
                 <div v-else class="overflow-x-auto border border-wot-border bg-wot-panel">
@@ -1101,8 +1125,23 @@ const bpGrandTotal = computed(() => bpShownRows.value.reduce((sum, r) => sum + b
                                         <!-- Shared with a line above, where it is the
                                              editable one. The same tank must never be
                                              two dropdowns writing the same plan. -->
+                                        <!-- Finished according to XP Remaining:
+                                             every module researched and every
+                                             tank ahead unlocked, so there is
+                                             nothing to spend Free XP on. -->
                                         <span
-                                            v-if="row.cells[tier].is_shared"
+                                            v-if="row.cells[tier].is_researched"
+                                            class="text-wot-muted"
+                                            :title="`${row.cells[tier].name} — fully researched. Nothing left to spend Free XP on.`"
+                                        >
+                                            <!-- The same em dash ModulePlanPicker shows
+                                                 for a vehicle with no modules at all:
+                                                 both mean nothing here to plan. -->
+                                            —
+                                        </span>
+
+                                        <span
+                                            v-else-if="row.cells[tier].is_shared"
                                             class="tabular-nums text-wot-dim/60"
                                             :title="`${row.cells[tier].name} — shared with ${row.cells[tier].shared_with}, where it is planned.`"
                                         >

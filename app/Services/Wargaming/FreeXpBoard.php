@@ -5,6 +5,7 @@ namespace App\Services\Wargaming;
 use Illuminate\Support\Collection;
 use App\Models\WotAccount;
 use App\Models\WotTankModule;
+use App\Models\WotVehicle;
 use App\Models\WotVehicleModule;
 
 /**
@@ -87,6 +88,7 @@ class FreeXpBoard
                     $modules->get($v->tank_id) ?? collect(),
                     $plans->get($v->tank_id),
                     $owned[$v->tank_id]['modules_researched'] ?? false,
+                    $this->successorsUnlocked($v, $owned),
                 ))
                 ->sortBy('tier')
                 ->values();
@@ -111,6 +113,7 @@ class FreeXpBoard
         Collection $modules,
         ?WotTankModule $tankModule,
         bool $researchedByDefault,
+        bool $successorsUnlocked,
     ): array {
         $planned = array_flip($tankModule?->planned_module_ids ?? []);
 
@@ -161,6 +164,17 @@ class FreeXpBoard
              */
             'total_xp' => (int) $options->sum('price_xp'),
             /*
+             * Nothing left on this vehicle for XP Remaining to count: every
+             * upgrade module researched, and every tank it leads to unlocked.
+             * The board shows a dash for it and, by default, hides a line made
+             * of nothing else — there is no Free XP left to spend on either.
+             *
+             * Read from the same two facts XP Remaining draws, so the boards
+             * cannot disagree about which vehicles are finished.
+             */
+            'is_researched' => $successorsUnlocked
+                && $options->every(fn (array $option): bool => $option['is_researched']),
+            /*
              * Filled in by claimShared(). Seeded so every cell has the same
              * shape whether it ends up shared or not — the client reads these
              * on every cell, and a missing key would read as undefined.
@@ -204,12 +218,38 @@ class FreeXpBoard
                 }
             }
 
+            /*
+             * A finished vehicle counts for nothing, whatever plan it still
+             * carries. A plan made before a successor was unlocked is not
+             * cleared by the unlock, and the cell reads as a dash — summing its
+             * old figure into the row would put a number in the total that is
+             * nowhere on the board above it.
+             */
             $row['planned_xp'] = (int) collect($row['cells'])
-                ->reject(fn (array $c): bool => $c['is_shared'])
+                ->reject(fn (array $c): bool => $c['is_shared'] || $c['is_researched'])
                 ->sum('planned_xp');
 
             return $row;
         });
+    }
+
+    /**
+     * Whether every tank a vehicle leads to is unlocked.
+     *
+     * Only successors the tree knows about count, which is the set XP Remaining
+     * shows unlocks for: a vehicle whose one successor sits outside every line
+     * would otherwise never read as finished on any board. A vehicle that leads
+     * nowhere — the tier X a line ends at — has nothing to unlock, so this is
+     * true for it and its modules alone decide.
+     *
+     * @param  array<int, array{is_purchased: bool, is_unlocked: bool, modules_researched: bool}>  $owned
+     */
+    private function successorsUnlocked(WotVehicle $vehicle, array $owned): bool
+    {
+        return collect(array_keys((array) ($vehicle->next_tanks ?? [])))
+            ->map(fn ($tankId): int => (int) $tankId)
+            ->filter(fn (int $tankId): bool => isset($owned[$tankId]))
+            ->every(fn (int $tankId): bool => $owned[$tankId]['is_unlocked']);
     }
 
     /**

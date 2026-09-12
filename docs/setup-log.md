@@ -3360,3 +3360,57 @@ Two deliberate departures from that picker:
 
 Filters persist between opens, since a season's tankers are often entered a nation at a time.
 A roster row saves its choice at once; the add row only fills in the pending tanker.
+
+---
+
+## 2026-09-12 — Free XP board: finished vehicles are a dash, and finished lines hide
+
+A vehicle XP Remaining has nothing left on now reads `-` on the Free XP board instead of its
+module dropdown, and a line made of nothing but those is hidden by default behind a new
+**Hide lines with nothing left to research** checkbox beside "Only lines I have planned on".
+
+**"Fully researched" is XP Remaining's definition, not a new one:** every upgrade module
+researched *and* every tank the vehicle leads to unlocked. `FreeXpBoard` reads both from the
+same account progress XP Remaining does — the module default and the unlock state — so the
+two boards cannot disagree about which vehicles are done. Only successors the tree knows about
+count; a vehicle that leads nowhere is decided by its modules alone.
+
+Deliberately not "XP Remaining owes zero". An unlock typed down to 0 XP with blueprints costs
+nothing and is still not researched; state is what the board shows, and a figure could be
+zero for other reasons.
+
+**A finished vehicle's planned XP leaves every total**, on the server's `planned_xp` and
+`free_xp_planned` and in the page's footer alike. A plan made before a successor was unlocked
+is not cleared by the unlock, and a row total including a figure that appears nowhere above it
+— the cell is a dash — would be unreadable.
+
+**The filter defaults on**, the opposite of `only_planned` beside it: a finished line is one no
+Free XP can go to, which is the same judgement XP Remaining's `hide_done` makes. It is stored
+as `hide_researched` in `freexp_filters`, and a line counts as finished across every cell, not
+the visible ones, so hiding a tier column never decides which lines the board has.
+
+---
+
+## 2026-09-12 — The finished-vehicle mark is an em dash
+
+Follow-up to the entry above: the Free XP board marks a fully researched vehicle with `—`, not
+`-`. It is the same glyph and the same `text-wot-muted` tone `ModulePlanPicker` already shows
+for a vehicle with no upgrade modules at all, and both mean the same thing on this board —
+nothing here to plan — so they should not be two different marks.
+
+---
+
+## 2026-09-12 — News toolbar alignment, and a crews legend grouped by scope
+
+**News: the Pinned filter holds the right edge.** `ms-auto` lived only on "Mark N as seen",
+so once nothing was unseen that button left the row and nothing carried the Pinned filter off
+the category chips. Pinned now takes `ms-auto` itself whenever the Mark button is absent,
+which leaves the spacing between the two unchanged when both are present.
+
+**Crews: the legend is three labelled rows, broadest cue first** — Colour (the crew's
+zero-skill state), Set (marks on the whole cell), Member (marks on one letter) — in the same
+label column as the filter rows above it. It had been one list flowed into a three-column
+grid, which split the four colours across two rows and put "whole set maxed" nowhere near
+"member maxed". Maxed now leads both the Set and Member rows so the two scopes of the same
+fact sit one above the other. Each row's `<dl>` is `display: contents`, so its items wrap in
+the row's own flex line beside the label.
