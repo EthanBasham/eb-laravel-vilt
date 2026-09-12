@@ -198,7 +198,10 @@ const disconnect = () => {
 
         <!-- Both read local tables, so they render even when the block below
              failed because Wargaming was unreachable. -->
-        <div class="mt-8 grid gap-6 lg:grid-cols-2">
+        <!-- items-start: a grid row stretches its items to match by default,
+             which padded whichever panel had fewer rows with dead space to the
+             other's height. Each sizes to its own content instead. -->
+        <div class="mt-8 grid items-start gap-6 lg:grid-cols-2">
             <NewsPanel :news="news" />
             <UpcomingPanel :upcoming="upcoming" />
         </div>
