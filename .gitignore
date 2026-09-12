@@ -31,3 +31,7 @@ Thumbs.db
 # stays tracked.
 /.claude/
 *.code-workspace
+
+# Staging area for files handed to Claude Code to work with (source images,
+# etc.) — not project state itself.
+/dropins

@@ -2896,3 +2896,69 @@ sidesteps all of that at the cost of the URL bar changing after the jump.
 Verified with `curl --resolve` for both the HTTP→HTTPS hop and the HTTPS→`/wot` hop before
 relying on real DNS propagation.
 
+---
+
+## 2026-09-11 — A favicon for `/wot` only, and a `dropins/` staging directory
+
+**`dropins/` is now the hand-off point for binary source files** — logos, icon art, anything
+that arrives from outside the repo for an agent or a human to process. Gitignored: it holds
+inputs and scratch output, not project state. Whatever survives processing gets committed to
+its real home under `public/`, and the original stays in `dropins/` unmodified.
+
+### Icons are per-section, and that constrains the mechanism
+
+A favicon is a `<link rel="icon">` in each document's `<head>`, not a site-wide setting, so
+the two halves of this app can differ — and they now do. `resources/views/wot.blade.php` is
+already a separate root view from `layouts/app.blade.php` (they load different Vite bundles
+and never share a `<head>`), so there was nothing to untangle.
+
+The trap is `/favicon.ico`: **browsers fetch it blind at the domain root and it cannot be
+scoped to a path.** So the base site deliberately keeps declaring no icon at all and gets the
+root file, while `/wot` declares its own and overrides it. Leaving the SPA is a real page load
+— the "Leave dashboard" link was removed in this same pass, but navigating out by URL still
+counts — so the base icon returns on its own.
+
+`tests/Feature/Wot/FaviconTest.php` asserts both directions, because only asserting the `/wot`
+half would still pass if the icon leaked site-wide.
+
+### Why the shipped file is a 96 KB SVG
+
+The source art is a detailed side-profile illustration with thin outlines. Resized straight to
+16×16 it reads as a smudge: the linework is finer than the pixel budget, so any resampler
+averages it into mush. That is a *design* problem, not a format one — Google's "G" survives
+16px because it is a few bold flat regions, not because it is a vector.
+
+Two routes were tried. A `potrace` single-colour silhouette traced from the alpha channel
+(~7.5 KB) is crisp at every size but throws away the colour. A hand-made five-colour vector of
+the same art keeps everything and was the one worth shipping — at 1.1 MB before treatment.
+
+`svgo --precision=0 --multipass` took that to **96 KB (−91%)** by rounding coordinates alone,
+with RMSE under 1% against the original at 16/32/48 px — visually identical where it is
+actually rendered. Re-tracing from a downscaled raster got to 13–30 KB but visibly thickened
+the outlines, so it was not used.
+
+Two `potrace` gotchas worth not rediscovering, both of which silently invert the result rather
+than erroring:
+
+- **PBM stores ink, not light.** ImageMagick writes a white subject as bit 0 (paper), and
+  `potrace` traces bit 1, so tracing an alpha mask without `-negate` vectorises the
+  *background* — you get a filled rectangle with a tank-shaped hole.
+- **Its output assumes the nonzero fill rule.** Its contours are wound so holes cancel;
+  forcing `fill-rule="evenodd"` swaps solid and void.
+
+### What shipped
+
+`public/images/wot/favicon/`, referenced by plain absolute paths (no `asset()` — no view in
+this project uses it):
+
+| File | Role |
+|---|---|
+| `favicon.svg` | 96 KB, what modern browsers use |
+| `favicon-32.png` | Fallback; the `type` on the SVG link is what makes older browsers skip to it |
+| `apple-touch-icon.png` | 180×180, pre-composited over `--color-wot-abyss` — iOS paints transparency black, which would erase the tank's own outline |
+| `icon-192.png`, `icon-512.png` | **Unreferenced.** Kept for a future web app manifest |
+
+No `site.webmanifest` yet, deliberately. 192/512 are manifest icons, not favicons — nothing
+requests them until a manifest exists, and adding one here means deciding on `scope`/
+`start_url` under `/wot` for an app that sits behind auth. The files are cheap to keep and
+annoying to regenerate, so they are committed unused rather than dropped.
