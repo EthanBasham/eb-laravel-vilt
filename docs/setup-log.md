@@ -2869,3 +2869,30 @@ one subtraction of what was genuinely outstanding. `spendBankedXp()` takes XP ra
 now, which is what lets a whole vehicle's worth be one adjustment.
 
 Suite: **239 passed, 1772 assertions.**
+
+---
+
+## 2026-09-11 — Vanity domain `wothub.ethanbasham.xyz` → `/wot`
+
+Redirect-only vanity domain for the WoT dashboard, so it has a shorter URL to share without
+pretending it's a standalone site (the app is still single-`APP_URL`; see the "Stack
+constraints" note in `CLAUDE.md` on `/wot` being mounted as an island, not a separate app).
+
+**DNS.** Porkbun has no API access set up on this account (see prior eb-portfolio infra
+notes), so the `A` record (`wothub` → `54.211.52.97`) was added manually via the Porkbun
+dashboard, not by anything run here.
+
+**nginx + cert.** New vhost `/etc/nginx/conf.d/wothub.ethanbasham.xyz.conf`, plain 301 to
+`https://laravel-vilt.ethanbasham.xyz/wot` — no PHP-FPM wiring needed since it's a redirect,
+not a proxy. `certbot --nginx -d wothub.ethanbasham.xyz` then added the HTTPS server block and
+the Certbot-managed HTTP→HTTPS redirect on top, same pattern as `laravel-vilt`'s own vhost.
+
+Deliberately a redirect rather than an nginx-level rewrite to serve `/wot` under the new
+hostname directly: the app's `route()`/Vite/Inertia asset URLs are generated from a single
+`APP_URL`, so serving the same content under a second hostname without a redirect would risk
+asset links and Inertia's asset-version check pointing back at the wrong domain. A redirect
+sidesteps all of that at the cost of the URL bar changing after the jump.
+
+Verified with `curl --resolve` for both the HTTP→HTTPS hop and the HTTPS→`/wot` hop before
+relying on real DNS propagation.
+
