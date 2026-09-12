@@ -12,8 +12,8 @@ const props = defineProps({
     unseenCount: { type: Number, default: 0 },
 });
 
-// Cards mark themselves seen once they've been ~60% visible for 1.5s.
-const { track } = useSeenTracker();
+// Cards mark themselves seen once the pointer has rested on one for 1.5s.
+const { track, isMarked } = useSeenTracker();
 
 const markAllSeen = () => {
     router.post('/wot/news/seen-all', {}, { preserveScroll: true });
@@ -130,8 +130,17 @@ const asDate = (iso) => new Date(iso).toLocaleDateString(undefined, { dateStyle:
                      that is both new and pinned. -->
                 <span
                     v-if="!article.is_seen"
-                    class="absolute left-2 top-2 z-10 border border-wot-good bg-wot-good/20 px-1.5 py-0.5 text-xs font-bold uppercase tracking-wider text-wot-good backdrop-blur-sm"
+                    class="absolute left-2 top-2 z-10 flex items-center gap-1 border border-wot-good bg-wot-good/20 px-1.5 py-0.5 text-xs font-bold uppercase tracking-wider text-wot-good backdrop-blur-sm"
                 >
+                    <!-- Drops out of the flow once the hover has counted the
+                         card, so the badge closes up around the word rather
+                         than keeping a gap where the square was. -->
+                    <span
+                        v-if="!isMarked(article.id)"
+                        class="h-1.5 w-1.5 shrink-0 bg-wot-good"
+                        aria-hidden="true"
+                    />
+
                     New
                 </span>
 

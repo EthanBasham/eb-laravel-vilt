@@ -1,10 +1,15 @@
 <script setup>
 import { Link, router } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
+import { useSeenTracker } from '../composables/useSeenTracker';
 
 const props = defineProps({
     news: { type: Object, required: true },
 });
+
+// Rows mark themselves seen once the pointer has rested on one for 1.5s, the
+// same as the cards on /wot/news.
+const { track, isMarked } = useSeenTracker();
 
 const tab = ref('latest');
 
@@ -54,7 +59,12 @@ const togglePin = (article) => {
         </div>
 
         <ul v-if="articles.length" role="list" class="flex-1 divide-y divide-wot-border-soft">
-            <li v-for="article in articles" :key="article.id" class="flex items-stretch">
+            <li
+                v-for="article in articles"
+                :key="article.id"
+                :ref="(el) => track(el, article.id, article.is_seen)"
+                class="flex items-stretch"
+            >
                 <a
                     :href="article.url"
                     target="_blank"
@@ -75,7 +85,11 @@ const togglePin = (article) => {
 
                     <span class="min-w-0 flex-1">
                         <span class="flex items-center gap-1.5">
-                            <span v-if="!article.is_seen" class="h-1.5 w-1.5 shrink-0 bg-wot-good" aria-hidden="true" />
+                            <span
+                                v-if="!article.is_seen && !isMarked(article.id)"
+                                class="h-1.5 w-1.5 shrink-0 bg-wot-good"
+                                aria-hidden="true"
+                            />
                             <span class="truncate text-xs uppercase tracking-wider text-wot-dim">
                                 {{ article.category }} · {{ asDate(article.published_at) }}
                                 <span v-if="!article.is_seen" class="sr-only">(unread)</span>
