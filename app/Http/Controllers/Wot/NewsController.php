@@ -6,6 +6,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Artisan;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Wot\MarkArticlesSeenRequest;
 use App\Models\WotArticle;
@@ -146,6 +147,23 @@ class NewsController extends Controller
         $request->user()->pinnedArticles()->detach($article->id);
 
         return back(fallback: route('wot.news.index'));
+    }
+
+    /**
+     * Runs the scheduled news/event sync immediately, for whenever three times
+     * a day isn't soon enough.
+     *
+     * The command fetches up to a dozen-plus article bodies with a deliberate
+     * pace between requests, so this can take a while — lift the PHP time
+     * limit rather than have it get cut off mid-run.
+     */
+    public function resync(): RedirectResponse
+    {
+        set_time_limit(0);
+
+        Artisan::call('wot:sync-news');
+
+        return back(fallback: route('wot.news.index'))->with('success', 'News and calendar resynced.');
     }
 
     /**

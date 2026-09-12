@@ -1,5 +1,6 @@
 <script setup>
 import { Head, Link, router } from '@inertiajs/vue3';
+import { ref } from 'vue';
 import AppShell from '../Components/AppShell.vue';
 import { useSeenTracker } from '../composables/useSeenTracker';
 
@@ -44,6 +45,18 @@ const togglePin = (article) => {
 };
 
 const asDate = (iso) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' });
+
+// The command fetches several article bodies with a deliberate pace between
+// requests, so this can take a while — disabled state stops a second click
+// from stacking another run on top of one already in flight.
+const resyncing = ref(false);
+const resync = () => {
+    resyncing.value = true;
+    router.post('/wot/news/resync', {}, {
+        preserveScroll: true,
+        onFinish: () => { resyncing.value = false; },
+    });
+};
 </script>
 
 <template>
@@ -206,18 +219,30 @@ const asDate = (iso) => new Date(iso).toLocaleDateString(undefined, { dateStyle:
             No articles yet. Run <code>php artisan wot:sync-news</code>.
         </p>
 
-        <nav v-if="articles.links.length > 3" class="mt-8 flex flex-wrap gap-1" aria-label="Pagination">
-            <component
-                :is="link.url ? 'a' : 'span'"
-                v-for="link in articles.links"
-                :key="link.label"
-                :href="link.url"
-                class="border px-3 py-1.5 text-sm"
-                :class="link.active
-                    ? 'border-wot-gold text-wot-gold'
-                    : link.url ? 'border-wot-border text-wot-muted hover:text-wot-gold' : 'border-wot-border-soft text-wot-dim'"
-                v-html="link.label"
-            />
-        </nav>
+        <div class="mt-8 flex flex-wrap items-center justify-between gap-4">
+            <nav v-if="articles.links.length > 3" class="flex flex-wrap gap-1" aria-label="Pagination">
+                <component
+                    :is="link.url ? 'a' : 'span'"
+                    v-for="link in articles.links"
+                    :key="link.label"
+                    :href="link.url"
+                    class="border px-3 py-1.5 text-sm"
+                    :class="link.active
+                        ? 'border-wot-gold text-wot-gold'
+                        : link.url ? 'border-wot-border text-wot-muted hover:text-wot-gold' : 'border-wot-border-soft text-wot-dim'"
+                    v-html="link.label"
+                />
+            </nav>
+            <span v-else />
+
+            <button
+                type="button"
+                class="ms-auto border border-wot-border px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-wot-dim transition-colors hover:border-wot-gold hover:text-wot-gold disabled:cursor-not-allowed disabled:opacity-50"
+                :disabled="resyncing"
+                @click="resync"
+            >
+                {{ resyncing ? 'Resyncing…' : 'Resync news & calendar' }}
+            </button>
+        </div>
     </AppShell>
 </template>

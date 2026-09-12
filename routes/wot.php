@@ -36,6 +36,7 @@ Route::post('/news/seen', [NewsController::class, 'markSeen'])->name('news.seen'
 Route::post('/news/seen-all', [NewsController::class, 'markAllSeen'])->name('news.seen-all');
 Route::post('/news/{article}/pin', [NewsController::class, 'pin'])->name('news.pin');
 Route::delete('/news/{article}/pin', [NewsController::class, 'unpin'])->name('news.unpin');
+Route::post('/news/resync', [NewsController::class, 'resync'])->name('news.resync');
 
 Route::get('/connect', [AccountLinkController::class, 'create'])->name('link.create');
 Route::get('/connect/callback', [AccountLinkController::class, 'callback'])->name('link.callback');
