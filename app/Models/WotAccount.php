@@ -91,4 +91,28 @@ class WotAccount extends Model
     {
         return $this->hasMany(WotTankPurchase::class);
     }
+
+    /** @return HasMany<WotTankCrew, $this> */
+    public function tankCrews(): HasMany
+    {
+        return $this->hasMany(WotTankCrew::class);
+    }
+
+    /** @return HasMany<WotCrewRecruit, $this> */
+    public function crewRecruits(): HasMany
+    {
+        return $this->hasMany(WotCrewRecruit::class);
+    }
+
+    /** @return HasMany<WotCrewBook, $this> */
+    public function crewBooks(): HasMany
+    {
+        return $this->hasMany(WotCrewBook::class);
+    }
+
+    /** @return HasMany<WotBattlePassCrew, $this> */
+    public function battlePassCrew(): HasMany
+    {
+        return $this->hasMany(WotBattlePassCrew::class);
+    }
 }

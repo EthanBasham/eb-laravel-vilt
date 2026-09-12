@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Wot\AccountLinkController;
+use App\Http\Controllers\Wot\CrewController;
 use App\Http\Controllers\Wot\DashboardController;
 use App\Http\Controllers\Wot\GrindController;
 use App\Http\Controllers\Wot\NewsController;
@@ -24,6 +25,34 @@ Route::patch('/grinding/modules/{tankId}/top-gun', [GrindController::class, 'pla
 Route::patch('/grinding/research/{tankId}/modules', [GrindController::class, 'updateModuleResearch'])->name('grinding.research-module');
 Route::patch('/grinding/research/{tankId}/modules/all', [GrindController::class, 'researchAllModules'])->name('grinding.research-all');
 Route::patch('/grinding/research/{tankId}', [GrindController::class, 'updateResearchXp'])->name('grinding.research-xp');
+
+/*
+ * Crews. Four tabs over one page, like the grinding board: the tech-tree board
+ * itself, the stockpiles behind it, the Battle Pass roster, and a guide yet to
+ * be written.
+ *
+ * Nothing under here is fetched from Wargaming. The public API has no endpoint
+ * for a player's own tankmen at all, so every route below writes something
+ * typed in by hand.
+ */
+Route::get('/crews', [CrewController::class, 'index'])->name('crews');
+Route::patch('/crews/filters', [CrewController::class, 'updateFilters'])->name('crews.filters');
+
+// Bound by tank_id rather than by model, like the grinding writes: a crew row
+// is created on first use, so there is nothing to bind to until then. PUT
+// rather than PATCH because the editor sends the whole set — see updateCrew.
+Route::put('/crews/tanks/{tankId}', [CrewController::class, 'updateCrew'])->name('crews.tank');
+Route::delete('/crews/tanks/{tankId}', [CrewController::class, 'destroyCrew'])->name('crews.tank.destroy');
+
+Route::patch('/crews/recruits/{recruitKey}', [CrewController::class, 'updateRecruit'])->name('crews.recruit');
+// The nation is part of the identity of a stack of books, so it is part of the
+// path rather than of the payload. 'universal' stands where a nation would be
+// for a book that spends anywhere, and for the two special items.
+Route::patch('/crews/books/{bookType}/{nation}', [CrewController::class, 'updateBook'])->name('crews.book');
+
+Route::post('/crews/battle-pass', [CrewController::class, 'storeBattlePassCrew'])->name('crews.battle-pass.store');
+Route::patch('/crews/battle-pass/{crew}', [CrewController::class, 'updateBattlePassCrew'])->name('crews.battle-pass.update');
+Route::delete('/crews/battle-pass/{crew}', [CrewController::class, 'destroyBattlePassCrew'])->name('crews.battle-pass.destroy');
 
 Route::post('/refresh', [DashboardController::class, 'refresh'])->name('dashboard.refresh');
 

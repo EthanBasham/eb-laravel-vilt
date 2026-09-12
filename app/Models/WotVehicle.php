@@ -12,7 +12,7 @@ use Database\Factories\WotVehicleFactory;
  * A vehicle from Wargaming's encyclopedia. Rows are wholly owned by the
  * upstream API and replaced by `wot:sync-vehicles`.
  */
-#[Fillable(['tank_id', 'name', 'short_name', 'tier', 'nation', 'type', 'is_premium', 'image_url', 'next_tanks', 'price_credit'])]
+#[Fillable(['tank_id', 'name', 'short_name', 'tier', 'nation', 'type', 'is_premium', 'image_url', 'next_tanks', 'price_credit', 'crew'])]
 class WotVehicle extends Model
 {
     /** @use HasFactory<WotVehicleFactory> */
@@ -36,6 +36,7 @@ class WotVehicle extends Model
             'is_premium' => 'boolean',
             'next_tanks' => 'array',
             'price_credit' => 'integer',
+            'crew' => 'array',
         ];
     }
 

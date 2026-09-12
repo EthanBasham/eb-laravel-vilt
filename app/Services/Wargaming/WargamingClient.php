@@ -110,7 +110,7 @@ class WargamingClient
     public function vehicles(int $pageNumber = 1, int $limit = 100): array
     {
         return $this->get('/wot/encyclopedia/vehicles/', [
-            'fields' => 'tank_id,name,short_name,tier,nation,type,is_premium,images,next_tanks,price_credit,modules_tree',
+            'fields' => 'tank_id,name,short_name,tier,nation,type,is_premium,images,next_tanks,price_credit,modules_tree,crew',
             'limit' => $limit,
             'page_no' => $pageNumber,
         ]);

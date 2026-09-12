@@ -76,6 +76,139 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Crew roles
+    |--------------------------------------------------------------------------
+    |
+    | The five roles the encyclopedia publishes, in the order the game lists a
+    | crew — which is the order the board spells its letters in, so a cell reads
+    | the same way the garage panel does.
+    |
+    | The letter is the whole of a crew member on the board. `name` is what the
+    | encyclopedia calls the role (encyclopedia/crewroles), used in tooltips and
+    | in the editor.
+    |
+    | Keyed by the API's own `member_id` / role slug. `radioman` is Wargaming's
+    | spelling; the display name is not.
+    |
+    */
+
+    'crew_roles' => [
+        'commander' => ['name' => 'Commander', 'letter' => 'C'],
+        'gunner' => ['name' => 'Gunner', 'letter' => 'G'],
+        'driver' => ['name' => 'Driver', 'letter' => 'D'],
+        'radioman' => ['name' => 'Radio Operator', 'letter' => 'R'],
+        'loader' => ['name' => 'Loader', 'letter' => 'L'],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Crew XP progression
+    |--------------------------------------------------------------------------
+    |
+    | XP per step of crew training, entered by hand — the API publishes crew
+    | roles and the skills attached to them, but no training costs at all.
+    |
+    | Key 0 is the base 100% qualification; 1-6 are the skills trained after it.
+    | Each step is twice the one before, bar the rounding in the first.
+    |
+    | Recorded as given, with no claim about whether a figure is the cost of
+    | that step alone or the running total to reach it — nothing computes
+    | against these yet, and the board only lists them.
+    |
+    */
+
+    'crew_xp' => [
+        0 => 100_000,
+        1 => 210_060,
+        2 => 420_120,
+        3 => 840_240,
+        4 => 1_680_480,
+        5 => 3_360_960,
+        6 => 6_721_920,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Crew books
+    |--------------------------------------------------------------------------
+    |
+    | The three classical books, each giving its XP to every member of a crew
+    | set. Held per nation, plus a universal stack that spends anywhere — the
+    | Books table is these three across `nations` above, with 'universal' as a
+    | twelfth row.
+    |
+    */
+
+    'crew_books' => [
+        'booklet' => ['name' => 'Booklet', 'xp' => 20_000],
+        'guide' => ['name' => 'Guide', 'xp' => 100_000],
+        'manual' => ['name' => 'Manual', 'xp' => 250_000],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Special training items
+    |--------------------------------------------------------------------------
+    |
+    | Not books, and not held per nation: they sit under the universal row with
+    | a single count each, in the same column the book totals land in.
+    |
+    */
+
+    'crew_book_specials' => [
+        'personal_training_manual' => 'Personal Training Manual',
+        'mentoring_license' => 'Mentoring License',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Recruits held
+    |--------------------------------------------------------------------------
+    |
+    | The barracks, as counts rather than as people: what is worth knowing is
+    | how many of each kind are waiting, not who they are. Spelled out one key
+    | per row — including the six boosted tiers — so the order on the page is
+    | this list's order and a new kind is one line here.
+    |
+    */
+
+    'crew_recruits' => [
+        'zero_skill_commanders' => 'Zero Skill Commanders',
+        'zero_skill_crew' => 'Zero Skill Crew',
+        'pending_zero_skill_crew' => 'Pending Zero Skill Crew',
+        'boosted_1' => 'Boosted Crew — 1 skill',
+        'boosted_2' => 'Boosted Crew — 2 skills',
+        'boosted_3' => 'Boosted Crew — 3 skills',
+        'boosted_4' => 'Boosted Crew — 4 skills',
+        'boosted_5' => 'Boosted Crew — 5 skills',
+        'boosted_6' => 'Boosted Crew — 6 skills',
+        'empty_novelty_crew' => 'Empty Novelty Crew',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Battle Pass crew
+    |--------------------------------------------------------------------------
+    |
+    | Where a named Battle Pass tanker has got to. 'uncollected' is the one that
+    | is not a place — it is a reward not taken yet, which is why the list holds
+    | rows for crew that are not in the barracks at all.
+    |
+    */
+
+    'crew_statuses' => [
+        'uncollected' => 'Uncollected',
+        'in_barracks' => 'In barracks',
+        'in_tank' => 'In tank',
+    ],
+
+    'crew_genders' => [
+        'male' => 'Male',
+        'female' => 'Female',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Lowest tier worth budgeting for
     |--------------------------------------------------------------------------
     |

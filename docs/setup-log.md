@@ -3028,3 +3028,164 @@ the MoE card's icons are deliberately smaller than the mastery card's 36px badge
 Both cards now show art and a count, with no text label. The name moved to `alt`/`title`, and
 the image sits in the `<dt>` with the count as its `<dd>` — the badge *is* the term, so the
 list stays a real description list rather than growing a redundant caption.
+
+---
+
+## 2026-09-12 — Crews: a fourth board, and everything the API will not tell you
+
+A new area at `/wot/crews`, four tabs over one page the way Grinding holds five: the Crews
+board itself, Recruits & Books, Battle Pass, and a Guide tab left empty until there is
+something to put in it.
+
+### What the API actually publishes about a crew
+
+Checked against the live NA API with this project's own application ID before designing
+anything, because the answer decides how much of this can ever be synced:
+
+| Endpoint | What it gives |
+|---|---|
+| `encyclopedia/vehicles` → `crew` | A vehicle's seats, in order. Each carries a `member_id` naming its primary role and a `roles` map of every role that body covers. |
+| `encyclopedia/crewroles` | The five roles, and the skills each can train (Commander 12, the rest 11). |
+| `encyclopedia/crewskills` | 44 skills/perks — id, name, description, `is_perk`, icons. Several have null names or descriptions, and a few descriptions are unedited strings beginning with `@`. |
+
+And what it does not publish, confirmed rather than assumed: `tanks/crew`,
+`account/tankmen` and `encyclopedia/tankmen` are all `METHOD_NOT_FOUND` (404);
+`account/info` carries no crew field among its 302 leaves; `tanks/stats` none among its 15
+top-level keys. **There is no endpoint for a player's own tankmen, with or without an access
+token.** No names, no training level, no skills learned, no banked XP.
+
+So the composition of a cell comes from the encyclopedia and every figure written over it is
+typed in by hand — the same bargain banked tank XP already strikes on the grinding boards.
+`wot_vehicles` gained a `crew` JSON column and `wot:sync-vehicles` now fills it; all 1,028
+vehicles carry one.
+
+### Slots key on position, not on role
+
+`member_id` repeats within a vehicle — the IS-7 carries two loaders — so a role cannot
+identify a seat. `wot_crew_members.slot` is the position in the encyclopedia's own list, and
+the role is deliberately not stored: a copy here would drift from the encyclopedia the first
+time a patch moves a tank's crew around.
+
+Seats also double up. Of 100 vehicles sampled, **70 had at least one body covering more than
+one role**, and crew sizes run 2–6. The board spells one letter per body, so five letters
+means five people to train; the second role appears in the tooltip and the editor only.
+
+### What a cell says, and how
+
+A cell is a short string of letters — C G D R L — and everything else it has to report is
+carried by how they are drawn, because a tech-tree grid has room for about five characters
+per tank:
+
+| Cue | Meaning |
+|---|---|
+| red | no crew in the tank |
+| white | a crew, none of them zero-skill |
+| yellow | some zero-skill, some not |
+| green | every member zero-skill |
+| green panel, green text | the whole set is maxed — outranks the colour above |
+| **bold letter** | that member is maxed |
+| *italic set* | not well balanced |
+| asterisks below a letter | zeroed XP steps on that member, 1 or 2 |
+| superscript numeral | skills trained, 1–6; a crew at base 100% shows none |
+
+The superscript was the open question — a skill-level indicator had to coexist with a colour,
+a weight, a slant and a row of asterisks without becoming a fifth thing to decode. A raised
+numeral after the letter is the one cue that reads as a quantity rather than as a state, and
+it costs no horizontal space in a grid that has none to give. A legend under the filters
+spells all nine out, which this board needs more than any other here.
+
+### Decisions worth recording
+
+- **Banked XP is per crew member**, not per set. A loader recruited late genuinely is behind
+  the commander beside them, and the editor already opens as a modal, so five fields cost no
+  more clicks than one.
+- **Skill level runs 0–6**, where 0 is base 100% with nothing on top — a real state, and the
+  one the progression table starts at.
+- **No crew is the absence of a row**, not a row of zeroes, so the editor's "Empty the tank"
+  DELETEs. Zeroed members would paint the cell as a crew that merely happens to be untrained.
+- **`is_balanced` defaults to false**, so an unvouched-for crew reads as unbalanced and
+  renders italic. Unknown and not-balanced are the same claim here.
+- **The XP progression lives in `config/wargaming.php`**, beside `nations` — static game data
+  entered by hand, which is what that file already holds. Recorded exactly as given, with no
+  claim about whether each figure is the cost of that step or the running total to reach it;
+  nothing computes against them yet, and the board only lists them above the grid.
+- **Premiums are absent from the board**, as they are from every other board here: rows are
+  research lines and a premium sits outside the tree. Their crews are real, which is why the
+  Battle Pass tank picker offers every vehicle rather than the board's lines.
+
+### Recruits, Books and the Battle Pass roster
+
+Recruits and books are counts held against a key from config rather than a column per kind,
+so a new book or a new sort of recruit is one line in `config/wargaming.php`. Books are
+nations down, types across, with `universal` as a twelfth row; the two special items follow
+it with a single count each in the total column. **The specials are counted in neither the
+column totals nor the grand total** — a Personal Training Manual is not a booklet, a guide or
+a manual, and adding it to the bottom of those columns would make the total mean nothing.
+
+The Battle Pass tab is the one crew record that is a person rather than a tally. Nothing is
+seeded: the roster is not something the API publishes and inventing one would put figures on
+the page nobody recorded. `tank_id` and `crew_role` are cleared server-side when a status
+moves off `in_tank`, so a tanker recalled to the barracks cannot go on naming a vehicle.
+
+Its vehicle picker is a deferred prop — a thousand rows that only one of four tabs needs, so
+the page paints without them.
+
+### Filters, shared cells, and the one table they all use
+
+The Crews board reuses the machinery the grinding boards already have: `TechTreeLines` for
+the rows, the same claim-the-shared-vehicle rule (a tank on three lines is crewed once and
+counted once), and `wot_grind_settings` for its filter row, which gained a `crews_filters`
+column. The merge behind that moved out of `GrindController` and onto
+`WotGrindSetting::mergeFilters()`, because two pages now save filters to one row through the
+same rule. `useBoardFilters` took a `url` option for the same reason.
+
+44 feature tests in `tests/Feature/Wot/CrewsTest.php`; suite green at 300.
+
+---
+
+## 2026-09-12 — A balanced crew trains as one
+
+Follow-up to the entry above. Ticking **This crew is well balanced** in the editor now links
+three of the four per-seat attributes: zero-skills, skill level and max apply to every seat
+at once. Entering the same figure five times is exactly what that tick exists to save.
+
+Banked XP stays per seat, and is the only one that does. It is the attribute that
+legitimately differs across a balanced crew — a member recruited late is genuinely behind the
+ones beside them — which is also why it was made per-member in the first place.
+
+**Ticking the box does not reach back and level a mismatched crew.** It takes effect from the
+next edit: the first attribute you touch is what the set snaps to. The alternative — levelling
+on the tick itself — means a single click silently overwriting four rows of figures with one
+seat's, and there is no obvious seat to elect as the winner.
+
+Mechanically this is why those three controls bind `:value` / `@change` through
+`setOnMembers()` rather than `v-model`. Restoring `v-model` reverts the linkage silently, and
+no test would catch it: the behaviour lives entirely in the modal's working copy, the project
+has no JS test runner, and the server sees only the set the modal finally posts. Noted in
+`.ai/rules/crews.md` for that reason.
+
+A line under the checkbox says which attributes it governs and that banked XP is exempt — a
+control that quietly writes four other rows is a surprise otherwise.
+
+---
+
+## 2026-09-12 — Zeroed XP steps underline the letter instead of sitting beneath it
+
+Reverses the asterisk row from the Crews entry above. A member's zeroed XP steps are now a
+rule on the letter itself: `underline` for one, `underline decoration-double` for two, both
+at `underline-offset-2` so the rule clears the baseline. None of the five letters has a
+descender, so there is nothing for it to collide with.
+
+Two things fall out of the change. The cell no longer needs a second row under the letters,
+so each seat is a plain inline span again rather than a two-row flex column with a fixed
+`h-2` spacer holding the baseline straight — that spacer existed only so a crew with some
+asterisks and some without did not step up and down the row.
+
+And the rule has to be worn by **the letter alone, not the seat's wrapper**:
+`text-decoration` inherits, and a child cannot switch an ancestor's off. Underlining the
+wrapper would drag the superscript skill level into it, producing a rule that ran on under a
+number meaning something else entirely. Hence the extra `<span>` around `{{ member.letter }}`
+in both branches of `CrewCell.vue` — it looks redundant and is not.
+
+The legend gained a row: one underline and a double underline are now shown separately,
+where the asterisks were one line reading "asterisks below a letter".

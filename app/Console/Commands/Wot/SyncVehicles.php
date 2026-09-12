@@ -47,6 +47,12 @@ class SyncVehicles extends Command
                         // research line" and "an empty one" stay distinct.
                         'next_tanks' => $vehicle['next_tanks'] ?: null,
                         'price_credit' => $vehicle['price_credit'] ?? null,
+                        /*
+                         * The vehicle's crew slots, in the order the game lists
+                         * them. Null rather than [] where the encyclopedia
+                         * publishes none, matching next_tanks above.
+                         */
+                        'crew' => $vehicle['crew'] ?: null,
                     ],
                 );
             }

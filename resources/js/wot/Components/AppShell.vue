@@ -22,6 +22,7 @@ const flash = computed(() => page.props.flash ?? {});
                 <nav class="flex items-center gap-5 text-sm" aria-label="Primary">
                     <Link href="/wot" class="text-wot-dim transition-colors hover:text-wot-gold-bright">Dashboard</Link>
                     <Link href="/wot/grinding" class="text-wot-dim transition-colors hover:text-wot-gold-bright">Grinding</Link>
+                    <Link href="/wot/crews" class="text-wot-dim transition-colors hover:text-wot-gold-bright">Crews</Link>
                     <Link href="/wot/news" class="text-wot-dim transition-colors hover:text-wot-gold-bright">News</Link>
                     <Link href="/wot/calendar" class="text-wot-dim transition-colors hover:text-wot-gold-bright">Calendar</Link>
                     <span v-if="auth.wot" class="font-medium text-wot-gold">{{ auth.wot.nickname }}</span>

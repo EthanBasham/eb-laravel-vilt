@@ -4,16 +4,26 @@ import { ref, watch } from 'vue';
 /**
  * Filter state for one of the tech-tree boards, remembered per account.
  *
- * Both grids filter the same two ways — by nation and by tier — and then differ
- * by one checkbox each, so the shape is a fixed pair plus whatever `extra` the
- * board passes in. Every value is held as what is *hidden* or *narrowed to*
+ * Every grid filters the same two ways — by nation and by tier — and then
+ * differs by one checkbox each, so the shape is a fixed pair plus whatever
+ * `extra` the board passes in. Every value is held as what is *hidden* or *narrowed to*
  * rather than what is selected, so a column that appears later starts on.
  *
- * @param {string} board            'purchase' or 'freexp' — which column the server stores this under.
+ * @param {string} board            Which column the server stores this under — 'purchase', 'xp', 'crews' and so on.
  * @param {object|null} saved       The stored filters, or null if they have never been saved.
- * @param {object} defaults         Fallbacks: { hiddenNations, hiddenTiers, extra: {...} }.
+ * @param {object} defaults         Fallbacks: { hiddenNations, hiddenTiers, extra: {...}, url }.
  */
-export function useBoardFilters(board, saved, { hiddenNations = [], hiddenTiers = [], extra = {} } = {}) {
+export function useBoardFilters(board, saved, {
+    hiddenNations = [],
+    hiddenTiers = [],
+    extra = {},
+    /*
+     * Where to save. Every board writes one row of wot_grind_settings, but the
+     * endpoints sit under the page that owns them — so the Crews board posts to
+     * its own rather than to the grinding page's.
+     */
+    url = '/wot/grinding/filters',
+} = {}) {
     /*
      * Read once, at construction, and never watched. A save writes the column
      * these came from, so re-seeding would feed every click back into the refs
@@ -61,7 +71,7 @@ export function useBoardFilters(board, saved, { hiddenNations = [], hiddenTiers 
         Object.assign(request, payload());
 
         clearTimeout(handle);
-        handle = setTimeout(() => request.patch('/wot/grinding/filters'), 500);
+        handle = setTimeout(() => request.patch(url), 500);
     });
 
     const drop = (list, value) => (list.includes(value)

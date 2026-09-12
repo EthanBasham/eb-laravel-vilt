@@ -300,8 +300,8 @@ class GrindController extends Controller
     /**
      * Remembers where a board's filter row was left.
      *
-     * Merged into whatever is stored rather than replacing it, so a client that
-     * sends one changed filter does not silently reset the other three.
+     * The merge itself lives on the model, because the Crews board saves its
+     * own filter row to the same table through the same rule.
      *
      * 204 rather than the `back()` every other action here returns, because the
      * caller is a standalone `useHttp` request rather than an Inertia visit:
@@ -314,18 +314,13 @@ class GrindController extends Controller
 
         abort_unless($account, 404);
 
-        $settings = WotGrindSetting::firstOrNew(['wot_account_id' => $account->id]);
-
         // 'board' says which column, so it is routing rather than filter state
         // and does not belong in the stored payload.
-        $column = $request->string('board').'_filters';
-
-        $settings->{$column} = [
-            ...(array) $settings->{$column},
-            ...collect($request->validated())->except('board')->all(),
-        ];
-
-        $settings->save();
+        WotGrindSetting::mergeFilters(
+            $account,
+            (string) $request->string('board'),
+            collect($request->validated())->except('board')->all(),
+        );
 
         return response()->noContent();
     }
