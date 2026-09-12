@@ -41,13 +41,29 @@ const asDate = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { day
                             :href="event.url ?? '/wot/calendar'"
                             :target="event.url ? '_blank' : undefined"
                             :rel="event.url ? 'noopener noreferrer' : undefined"
-                            class="block truncate border-l-2 ps-2 text-sm transition-opacity hover:opacity-80"
+                            class="block border-l-2 ps-2 text-sm transition-opacity hover:opacity-80"
                             :class="event.source === 'calendar'
                                 ? 'border-wot-gold text-wot-gold'
                                 : 'border-wot-blue text-wot-blue-light'"
                         >
-                            <span v-if="event.time" class="font-bold tabular-nums">{{ event.time }}</span>
-                            {{ event.title }}
+                            <span class="flex items-start gap-1">
+                                <span class="truncate">
+                                    <span v-if="event.time" class="font-bold tabular-nums">{{ event.time }}</span>
+                                    {{ event.title }}
+                                </span>
+
+                                <!-- shrink-0 so the title truncates before the
+                                     marker does — one that disappears on the
+                                     longer titles would be worse than none.
+                                     <sup> comes with 75% and top: -0.5em from
+                                     preflight; both are overridden here. -->
+                                <sup
+                                    v-if="event.is_final_day"
+                                    class="shrink-0 top-[0.05em] text-[length:60%] font-bold uppercase tracking-wider text-wot-bad"
+                                >
+                                    Final
+                                </sup>
+                            </span>
                         </a>
                     </span>
                 </span>

@@ -341,6 +341,79 @@ it('buckets upcoming events into five days', function () {
 });
 
 /**
+ * The panel is a schedule with no way to reconsider from it, so an event
+ * ignored on the calendar has to be gone from here too — both from the day
+ * buckets and from the campaigns summarised below them.
+ */
+it('hides ignored events from the next five days', function () {
+    $user = User::factory()->create();
+    WotAccount::factory()->for($user)->create(['account_id' => 7]);
+    $article = WotArticle::factory()->create();
+
+    $session = WotEvent::create([
+        'wot_article_id' => $article->id, 'title' => 'Stream tomorrow',
+        'starts_at' => now()->addDay()->setTime(16, 0), 'ends_at' => now()->addDay()->setTime(22, 59),
+        'event_type' => 'stream', 'source' => WotEvent::SOURCE_CALENDAR,
+    ]);
+    $campaign = WotEvent::create([
+        'wot_article_id' => $article->id, 'title' => 'Battle Pass',
+        'starts_at' => now()->subDays(3), 'ends_at' => now()->addDays(60),
+        'source' => WotEvent::SOURCE_WINDOW,
+    ]);
+
+    $user->ignoredEvents()->attach([
+        $session->id => ['ignored_at' => now()],
+        $campaign->id => ['ignored_at' => now()],
+    ]);
+
+    Http::fake([
+        '*/account/info/*' => Http::response(accountInfoResponse(7)),
+        '*/tanks/stats/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
+        '*/tanks/achievements/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
+    ]);
+
+    $this->actingAs($user)->get(route('wot.dashboard'))->assertInertia(fn ($page) => $page
+        ->has('upcoming.days.1.events', 0)
+        ->has('upcoming.ongoing', 0),
+    );
+});
+
+it('marks the last day of a multi-day run, and only that day', function () {
+    $user = User::factory()->create();
+    WotAccount::factory()->for($user)->create(['account_id' => 7]);
+    $article = WotArticle::factory()->create();
+
+    // Started yesterday, ends the day after tomorrow: three of the five buckets.
+    WotEvent::create([
+        'wot_article_id' => $article->id, 'title' => 'Trade In and Roll Out',
+        'starts_at' => now()->subDay()->setTime(4, 0), 'ends_at' => now()->addDays(2)->setTime(4, 0),
+        'source' => WotEvent::SOURCE_WINDOW,
+    ]);
+    // A single sitting, which must stay unmarked or every stream would claim
+    // to be ending.
+    WotEvent::create([
+        'wot_article_id' => $article->id, 'title' => 'Stream tomorrow',
+        'starts_at' => now()->addDay()->setTime(16, 0), 'ends_at' => now()->addDay()->setTime(22, 59),
+        'event_type' => 'stream', 'source' => WotEvent::SOURCE_CALENDAR,
+    ]);
+
+    Http::fake([
+        '*/account/info/*' => Http::response(accountInfoResponse(7)),
+        '*/tanks/stats/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
+        '*/tanks/achievements/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
+    ]);
+
+    $this->actingAs($user)->get(route('wot.dashboard'))->assertInertia(fn ($page) => $page
+        ->where('upcoming.days.0.events.0.is_final_day', false)
+        ->where('upcoming.days.1.events.0.is_final_day', false)
+        ->where('upcoming.days.2.events.0.is_final_day', true)
+        // The session shares tomorrow's bucket with the run, ordered after it.
+        ->where('upcoming.days.1.events.1.title', 'Stream tomorrow')
+        ->where('upcoming.days.1.events.1.is_final_day', false),
+    );
+});
+
+/**
  * The panels read local tables, so a Wargaming outage should cost the numbers
  * below them, not the whole page.
  */

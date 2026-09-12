@@ -69,6 +69,11 @@
 .modal {
     width: 100%;
     max-width: 32rem;
+    // Puts back what Tailwind's preflight takes away. A modal dialog is centred
+    // by the UA stylesheet's `margin: auto` inside its `inset: 0` box, and
+    // preflight's `* { margin: 0 }` beats that — it is an author rule, and the
+    // UA sheet is not. Without this every modal opens in the top-left corner.
+    margin: auto;
     padding: 0;
     border: 0;
     border-radius: 0.5rem;
@@ -84,6 +89,21 @@
             animation: modal-in vars.$transition-base;
         }
     }
+}
+
+// The WoT island is dark and its dialog content brings its own panel and
+// border. Without this the white sheet above shows as four light corners
+// around it, which only becomes visible once the dialog is centred.
+.modal--dark {
+    border-radius: 0;
+    background-color: transparent;
+    box-shadow: none;
+}
+
+// A day's full listing, which carries each event's times and rewards rather
+// than the one line a grid square has room for.
+.modal--wide {
+    max-width: 48rem;
 }
 
 @keyframes modal-in {

@@ -103,7 +103,7 @@ class DashboardController extends Controller
                     $user,
                 ),
             ],
-            'upcoming' => $this->upcoming(),
+            'upcoming' => $this->upcoming($user),
         ];
     }
 
@@ -134,12 +134,16 @@ class DashboardController extends Controller
      *
      * @return array<string, mixed>
      */
-    private function upcoming(): array
+    private function upcoming(?User $user): array
     {
         $from = Carbon::today();
         $to = $from->copy()->addDays(4)->endOfDay();
 
+        // Ignored on the calendar means ignored here too. This panel is a
+        // schedule, and there is no way to reconsider from it — that lives in
+        // the calendar's "Coming up".
         $events = WotEvent::with('article:id,title,url')
+            ->notIgnoredBy($user)
             ->onlyBetween($from, $to)
             ->orderBy('starts_at')
             ->get();
@@ -172,6 +176,12 @@ class DashboardController extends Controller
                         'time' => $e->source === WotEvent::SOURCE_CALENDAR && $e->starts_at->isSameDay($dayStart)
                             ? $e->starts_at->format('H:i')
                             : null,
+                        // Same rule as the month calendar: the last day of a run
+                        // that spans days. A single sitting is excluded, or every
+                        // stream session would announce itself as ending.
+                        'is_final_day' => $e->ends_at !== null
+                            && $e->ends_at->isSameDay($dayStart)
+                            && ! $e->starts_at->isSameDay($e->ends_at),
                     ])->values()->all(),
             ];
         }

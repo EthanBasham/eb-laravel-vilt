@@ -9,6 +9,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Artisan;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Wot\MarkArticlesSeenRequest;
+use App\Models\User;
 use App\Models\WotArticle;
 use App\Models\WotEvent;
 use Inertia\Inertia;
@@ -187,7 +188,11 @@ class NewsController extends Controller
         $gridStart = $month->copy()->startOfWeek(Carbon::MONDAY);
         $gridEnd = $month->copy()->endOfMonth()->endOfWeek(Carbon::SUNDAY);
 
+        // Ignored events are gone from the grid and the long-campaign list
+        // below — the whole point of ignoring one. They stay in "Coming up",
+        // which is where they are reconsidered.
         $events = WotEvent::with('article:id,title,url')
+            ->notIgnoredBy($request->user())
             ->onlyBetween($gridStart, $gridEnd)
             ->orderBy('starts_at')
             ->get();
@@ -203,9 +208,9 @@ class NewsController extends Controller
             'monthLabel' => $month->format('F Y'),
             'previousMonth' => $month->copy()->subMonth()->format('Y-m'),
             'nextMonth' => $month->copy()->addMonth()->format('Y-m'),
-            'days' => $this->days($gridStart, $gridEnd, $month, $dated),
-            'ongoing' => $ongoing->map(fn (WotEvent $event): array => $this->event($event, $gridStart))->values()->all(),
-            'upcoming' => $this->upcoming(),
+            'days' => $this->days($gridStart, $gridEnd, $month, $dated, $ongoing),
+            'ongoing' => $ongoing->map(fn (WotEvent $event): array => $this->event($event))->values()->all(),
+            'upcoming' => $this->upcoming($request->user()),
         ]);
     }
 
@@ -223,9 +228,10 @@ class NewsController extends Controller
 
     /**
      * @param  Collection<int, WotEvent>  $events
+     * @param  Collection<int, WotEvent>  $ongoing
      * @return list<array<string, mixed>>
      */
-    private function days(Carbon $start, Carbon $end, Carbon $month, Collection $events): array
+    private function days(Carbon $start, Carbon $end, Carbon $month, Collection $events, Collection $ongoing): array
     {
         $days = [];
 
@@ -245,6 +251,16 @@ class NewsController extends Controller
                 'in_month' => $date->month === $month->month,
                 'is_today' => $date->isToday(),
                 'events' => $onThisDay->map(fn (WotEvent $event): array => $this->event($event, $dayStart))->values()->all(),
+                // The long campaigns covering this day. Ids only: they are
+                // already in the `ongoing` prop, and repeating each one in
+                // every square it spans is the duplication that keeps them out
+                // of the grid to begin with. The day view looks them up.
+                'ongoing_ids' => $ongoing
+                    ->filter(fn (WotEvent $event): bool => $event->starts_at->lte($dayEnd)
+                        && ($event->ends_at ?? $event->starts_at)->gte($dayStart))
+                    ->pluck('id')
+                    ->values()
+                    ->all(),
             ];
         }
 
@@ -254,7 +270,7 @@ class NewsController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function event(WotEvent $event, Carbon $day): array
+    private function event(WotEvent $event, ?Carbon $day = null): array
     {
         return [
             'id' => $event->id,
@@ -264,12 +280,24 @@ class NewsController extends Controller
             // Only a session that actually starts on this day shows a time; a
             // multi-day window rendered with "16:00" on every square would be
             // stating something untrue.
-            'time' => $event->source === WotEvent::SOURCE_CALENDAR && $event->starts_at->isSameDay($day)
+            'time' => $day && $event->source === WotEvent::SOURCE_CALENDAR && $event->starts_at->isSameDay($day)
                 ? $event->starts_at->format('H:i')
                 : null,
-            'ends_time' => $event->source === WotEvent::SOURCE_CALENDAR && $event->ends_at?->isSameDay($day)
+            'ends_time' => $day && $event->source === WotEvent::SOURCE_CALENDAR && $event->ends_at?->isSameDay($day)
                 ? $event->ends_at->format('H:i')
                 : null,
+            // The last square of a run that actually spans days. A single
+            // sitting is excluded deliberately: every one-day event would
+            // otherwise announce itself as ending, which says nothing.
+            //
+            // False without a day, which is the long-campaign list above the
+            // grid: those occupy no square, so "which square is the last one"
+            // has no answer there and a flag computed against the grid's first
+            // day would fire on an arbitrary one.
+            'is_final_day' => $day !== null
+                && $event->ends_at !== null
+                && $event->ends_at->isSameDay($day)
+                && ! $event->starts_at->isSameDay($event->ends_at),
             'starts_at' => $event->starts_at->toIso8601String(),
             'ends_at' => $event->ends_at?->toIso8601String(),
             'metadata' => $event->metadata,
@@ -280,9 +308,13 @@ class NewsController extends Controller
     /**
      * @return list<array<string, mixed>>
      */
-    private function upcoming(): array
+    private function upcoming(?User $user): array
     {
+        // Deliberately not filtered by notIgnoredBy(): this listing is the only
+        // place an ignored event can be reconsidered, so hiding it here would
+        // make the decision irreversible.
         return WotEvent::with('article:id,title,url')
+            ->withIgnoredFor($user)
             ->onlyUpcoming()
             ->orderBy('starts_at')
             ->limit(10)
@@ -294,8 +326,33 @@ class NewsController extends Controller
                 'source' => $event->source,
                 'starts_at' => $event->starts_at->toIso8601String(),
                 'ends_at' => $event->ends_at?->toIso8601String(),
+                'is_ignored' => $event->ignored_at !== null,
                 'article' => ['title' => $event->article?->title, 'url' => $event->article?->url],
             ])
             ->all();
+    }
+
+    /**
+     * Hide an event from this user's schedule views.
+     *
+     * Idempotent, like pinning: ignoring something already ignored refreshes
+     * the timestamp rather than failing on the unique constraint.
+     */
+    public function ignore(Request $request, WotEvent $event): RedirectResponse
+    {
+        $request->user()->ignoredEvents()->syncWithoutDetaching([
+            $event->id => ['ignored_at' => now()],
+        ]);
+
+        // No flash: the event leaves the grid and its row gains the muted
+        // styling, which reports the outcome more directly than a banner.
+        return back(fallback: route('wot.calendar'));
+    }
+
+    public function unignore(Request $request, WotEvent $event): RedirectResponse
+    {
+        $request->user()->ignoredEvents()->detach($event->id);
+
+        return back(fallback: route('wot.calendar'));
     }
 }

@@ -54,6 +54,12 @@ class User extends Authenticatable
         return $this->belongsToMany(WotArticle::class, 'wot_article_views')->withPivot('seen_at');
     }
 
+    /** @return BelongsToMany<WotEvent, $this> */
+    public function ignoredEvents(): BelongsToMany
+    {
+        return $this->belongsToMany(WotEvent::class, 'wot_event_ignores')->withPivot('ignored_at');
+    }
+
     /**
      * Records an article as seen, leaving an existing timestamp alone — "first
      * seen" is the useful fact, and re-reading something shouldn't make it look

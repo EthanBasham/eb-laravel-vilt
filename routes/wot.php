@@ -38,6 +38,11 @@ Route::post('/news/{article}/pin', [NewsController::class, 'pin'])->name('news.p
 Route::delete('/news/{article}/pin', [NewsController::class, 'unpin'])->name('news.unpin');
 Route::post('/news/resync', [NewsController::class, 'resync'])->name('news.resync');
 
+// Ignoring is per user, like pins: it hides an event from this person's
+// schedule views without touching the shared row everyone else reads.
+Route::post('/events/{event}/ignore', [NewsController::class, 'ignore'])->name('events.ignore');
+Route::delete('/events/{event}/ignore', [NewsController::class, 'unignore'])->name('events.unignore');
+
 Route::get('/connect', [AccountLinkController::class, 'create'])->name('link.create');
 Route::get('/connect/callback', [AccountLinkController::class, 'callback'])->name('link.callback');
 Route::delete('/connect', [AccountLinkController::class, 'destroy'])->name('link.destroy');
