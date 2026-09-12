@@ -11,9 +11,12 @@ const flash = computed(() => page.props.flash ?? {});
     <div class="wot flex min-h-screen flex-col">
         <header class="border-b border-wot-border bg-wot-panel backdrop-blur-sm">
             <div class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-4 py-4 sm:px-6 lg:px-8">
-                <Link href="/wot" class="wot-title text-lg text-wot-heading hover:text-wot-gold">
-                    World of Tanks
-                    <span class="ms-2 text-sm normal-case tracking-normal text-wot-dim">dashboard</span>
+                <Link href="/wot" class="wot-title flex items-center gap-2 text-wot-heading hover:text-wot-gold">
+                    <img src="/images/wot/logo.png" alt="" class="h-11 w-11">
+                    <span class="flex flex-col">
+                        <span class="text-lg font-bold">World of Tanks</span>
+                        <span class="text-sm normal-case tracking-normal text-wot-dim">Personal hub for all things World of Tanks</span>
+                    </span>
                 </Link>
 
                 <nav class="flex items-center gap-5 text-sm" aria-label="Primary">
@@ -22,10 +25,6 @@ const flash = computed(() => page.props.flash ?? {});
                     <Link href="/wot/news" class="text-wot-dim transition-colors hover:text-wot-gold-bright">News</Link>
                     <Link href="/wot/calendar" class="text-wot-dim transition-colors hover:text-wot-gold-bright">Calendar</Link>
                     <span v-if="auth.wot" class="font-medium text-wot-gold">{{ auth.wot.nickname }}</span>
-                    <!-- A plain <a>, not an Inertia <Link>: the rest of the site
-                         is server-rendered Blade outside this SPA, so leaving it
-                         needs a real page load. -->
-                    <a href="/" class="text-wot-dim transition-colors hover:text-wot-gold-bright">Leave dashboard</a>
                 </nav>
             </div>
         </header>
