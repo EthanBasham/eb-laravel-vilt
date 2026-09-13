@@ -19,6 +19,13 @@ use App\Models\WotVehicle;
  */
 class AccountDashboard
 {
+    /**
+     * Private balances already looked up this request, null answers included.
+     *
+     * @var array<int, array{credits: ?int, free_xp: ?int}|null>
+     */
+    private array $balances = [];
+
     public function __construct(
         private readonly WargamingClient $client,
         private readonly Wn8Calculator $wn8,
@@ -67,6 +74,115 @@ class AccountDashboard
     public function forget(WotAccount $account): void
     {
         Cache::forget("wot:payloads:{$account->account_id}");
+        // freeXp()'s own copy of account/info, so Refresh moves the Grinding
+        // page's balance too rather than leaving it on the old figure.
+        Cache::forget("wot:account-info:{$account->account_id}");
+    }
+
+    /**
+     * The account's Free XP balance, or null where Wargaming will not say.
+     *
+     * Null means "not known", and the Grinding card shows planned alone for it
+     * rather than planned over a zero nobody reported. See privateBalances().
+     */
+    public function freeXp(WotAccount $account): ?int
+    {
+        return $this->privateBalances($account)['free_xp'] ?? null;
+    }
+
+    /**
+     * The account's credit balance, or null where Wargaming will not say.
+     *
+     * The same lookup as freeXp(), and the same meaning of null: the Grinding
+     * card shows credits needed alone rather than under a balance nobody
+     * reported.
+     */
+    public function credits(WotAccount $account): ?int
+    {
+        return $this->privateBalances($account)['credits'] ?? null;
+    }
+
+    /**
+     * The balances in account/info's private block, or null where Wargaming
+     * will not say.
+     *
+     * Remembered per account for the life of this instance, null answers
+     * included: the Grinding page reads two figures from one reply, and a cold
+     * cache — or a refusal, which is never cached — must not become one request
+     * per figure.
+     *
+     * @return array{credits: ?int, free_xp: ?int}|null
+     */
+    private function privateBalances(WotAccount $account): ?array
+    {
+        if (! array_key_exists($account->id, $this->balances)) {
+            $this->balances[$account->id] = $this->lookUpPrivateBalances($account);
+        }
+
+        return $this->balances[$account->id];
+    }
+
+    /**
+     * Fetches the private block, as cheaply as it can be had.
+     *
+     * The block only comes back with a valid token, so without one this answers
+     * null at once and asks nothing.
+     *
+     * A warm copy of this class's own payloads already holds account/info, so
+     * that is read first. Only when it is cold is account/info fetched, on its
+     * own: the dashboard's full fetch is dominated by tanks/stats, which the
+     * Grinding page has no use for and should not pay for.
+     *
+     * A refusal is null rather than an error. This feeds figures on a card, and
+     * Wargaming being unavailable is no reason for the board beneath them to
+     * fail. Refusals are not cached, so the next render asks again.
+     *
+     * @return array{credits: ?int, free_xp: ?int}|null
+     */
+    private function lookUpPrivateBalances(WotAccount $account): ?array
+    {
+        if (! $account->is_token_valid) {
+            return null;
+        }
+
+        $payloads = Cache::get("wot:payloads:{$account->account_id}");
+
+        if (is_array($payloads)) {
+            return $this->balancesFrom((array) ($payloads['info'] ?? []), $account);
+        }
+
+        try {
+            $info = Cache::remember(
+                "wot:account-info:{$account->account_id}",
+                (int) config('wargaming.cache.dashboard'),
+                fn (): array => $this->client->accountInfo([$account->account_id], $account->access_token),
+            );
+        } catch (WargamingException) {
+            return null;
+        }
+
+        return $this->balancesFrom($info, $account);
+    }
+
+    /**
+     * @param  array<string, mixed>  $info  account/info's data, keyed by account id
+     * @return array{credits: ?int, free_xp: ?int}|null
+     */
+    private function balancesFrom(array $info, WotAccount $account): ?array
+    {
+        $private = $info[(string) $account->account_id]['private'] ?? null;
+
+        // Each figure is null on its own if missing, rather than zero: an
+        // absent key is Wargaming not saying, not a balance of nothing.
+        if (is_array($private)) {
+            return [
+                'credits' => isset($private['credits']) ? (int) $private['credits'] : null,
+                'free_xp' => isset($private['free_xp']) ? (int) $private['free_xp'] : null,
+            ];
+        }
+
+        // No private block is Wargaming declining to say.
+        return null;
     }
 
     /**

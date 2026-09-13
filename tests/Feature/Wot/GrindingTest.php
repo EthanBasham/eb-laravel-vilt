@@ -1,13 +1,32 @@
 <?php
 
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use App\Models\User;
 use App\Models\WotAccount;
+use App\Models\WotBlueprint;
 use App\Models\WotGrindSetting;
 use App\Models\WotTankModule;
 use App\Models\WotVehicle;
 use App\Models\WotVehicleSnapshot;
 use App\Models\WotVehicleModule;
 use App\Models\WotTankPurchase;
+
+/*
+ * The Free XP card asks account/info for the balance, and factory accounts carry
+ * a live-looking token — so without this every render in the file would make a
+ * real request.
+ *
+ * A closure over $this->accountInfo rather than a fixed response, so a test sets
+ * the response it wants on that property instead of registering a second fake:
+ * which of two fakes for one URL answers is not something a test should have to
+ * reason about.
+ */
+beforeEach(function () {
+    $this->accountInfo = ['status' => 'ok', 'data' => []];
+
+    Http::fake(['*/account/info/*' => fn () => Http::response($this->accountInfo)]);
+});
 
 /** A three-tier line: T8 -> T9 -> T10. */
 function techLine(): array
@@ -1866,6 +1885,179 @@ it('lays the Blueprints board out as fragments per vehicle', function () {
         ->where('blueprints.rows.0.fragments', 0)
         ->where('totals.blueprint_fragments', 0),
     );
+});
+
+/**
+ * Every nation gets a stack whether or not a count has been typed for it, with
+ * universal last — the page draws a fixed row and never has to know which
+ * stacks exist.
+ */
+it('lists blueprints held for every nation, universal last', function () {
+    $user = User::factory()->create();
+    WotAccount::factory()->for($user)->create();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        // The eleven nations of the tech tree, plus the stack that spends
+        // anywhere.
+        ->has('blueprints.stock', 12)
+        ->where('blueprints.stock.0.nation', 'usa')
+        ->where('blueprints.stock.0.quantity', 0)
+        ->where('blueprints.stock.11.nation', 'universal')
+        ->where('blueprints.stock.11.label', 'Universal'),
+    );
+});
+
+it('records blueprints held against a nation and universally', function () {
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create();
+
+    $this->actingAs($user)->patch(route('wot.grinding.blueprint-stock', 'ussr'), ['quantity' => 7])->assertRedirect();
+    $this->actingAs($user)->patch(route('wot.grinding.blueprint-stock', 'universal'), ['quantity' => 3])->assertRedirect();
+
+    $props = $this->actingAs($user)->get(route('wot.grinding'))->viewData('page')['props'];
+
+    expect(WotBlueprint::where('wot_account_id', $account->id)->count())->toBe(2)
+        ->and(collect($props['blueprints']['stock'])->firstWhere('nation', 'ussr')['quantity'])->toBe(7)
+        ->and(collect($props['blueprints']['stock'])->firstWhere('nation', 'universal')['quantity'])->toBe(3);
+});
+
+it('refuses blueprints for a nation that does not exist', function () {
+    $user = User::factory()->create();
+    WotAccount::factory()->for($user)->create();
+
+    $this->actingAs($user)->patch(route('wot.grinding.blueprint-stock', 'atlantis'), ['quantity' => 1])
+        ->assertNotFound();
+
+    expect(WotBlueprint::count())->toBe(0);
+});
+
+/**
+ * The balance is in account/info's private block, so the card can show planned
+ * over available when Wargaming answers with it.
+ */
+/**
+ * Fully researched has one definition — the Free XP board's — and the headline
+ * card counts vehicles by it. Playing the X settles the VIII and IX beneath it;
+ * the X still has modules to research.
+ */
+it('counts the vehicles on the tree that are fully researched', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+    played($account, 100);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('totals.tanks_researched', 2)
+        ->where('totals.tanks_total', 3),
+    );
+});
+
+/**
+ * A vehicle on two lines is one vehicle: it is researched once, so it must not
+ * be counted once per line it appears on.
+ */
+it('counts a vehicle shared between lines once', function () {
+    $user = User::factory()->create();
+    branchedLines($user);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        // Two lines of four tiers is eight cells, but the VII and VIII are
+        // shared: six vehicles.
+        ->where('totals.tanks_total', 6),
+    );
+});
+
+it('reports the Free XP available alongside what is planned', function () {
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create();
+    $this->accountInfo = ['status' => 'ok', 'data' => [(string) $account->account_id => ['private' => ['free_xp' => 125_000]]]];
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('totals.free_xp_available', 125_000),
+    );
+});
+
+/**
+ * Credits come from the same private block, so both figures are one reply — and
+ * one request, not one per figure.
+ */
+it('reports the credits available from the same reply as Free XP', function () {
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create();
+    $this->accountInfo = ['status' => 'ok', 'data' => [(string) $account->account_id => ['private' => ['credits' => 42_000_000, 'free_xp' => 125_000]]]];
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('totals.credits_available', 42_000_000)
+        ->where('totals.free_xp_available', 125_000),
+    );
+
+    Http::assertSentCount(1);
+});
+
+it('leaves Free XP available unknown without a valid token, and does not ask', function () {
+    $user = User::factory()->create();
+    WotAccount::factory()->for($user)->expiredToken()->create();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('totals.free_xp_available', null)
+        ->where('totals.credits_available', null),
+    );
+
+    Http::assertNothingSent();
+});
+
+/**
+ * A reply without the private block is Wargaming declining to say, not a
+ * balance of zero.
+ */
+it('leaves Free XP available unknown when the reply has no private block', function () {
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create();
+    $this->accountInfo = ['status' => 'ok', 'data' => [(string) $account->account_id => ['nickname' => 'EthanB']]];
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('totals.free_xp_available', null)
+        ->where('totals.credits_available', null),
+    );
+});
+
+it('leaves Free XP available unknown when Wargaming refuses, rather than failing the page', function () {
+    $user = User::factory()->create();
+    WotAccount::factory()->for($user)->create();
+    $this->accountInfo = ['status' => 'error', 'error' => ['message' => 'SOURCE_NOT_AVAILABLE']];
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('totals.free_xp_available', null),
+    );
+});
+
+/**
+ * The dashboard fetches account/info already, so a warm copy of its payloads is
+ * read rather than asking Wargaming a second time.
+ */
+it('reads Free XP available from the dashboard cache when it is warm', function () {
+    $user = User::factory()->create();
+    $account = WotAccount::factory()->for($user)->create();
+    Cache::put("wot:payloads:{$account->account_id}", [
+        'info' => [(string) $account->account_id => ['private' => ['free_xp' => 7_500]]],
+        'stats' => [],
+        'achievements' => [],
+    ], 60);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('totals.free_xp_available', 7_500),
+    );
+
+    Http::assertNothingSent();
+});
+
+it('rejects a blueprint count below zero', function () {
+    $user = User::factory()->create();
+    WotAccount::factory()->for($user)->create();
+
+    $this->actingAs($user)->patch(route('wot.grinding.blueprint-stock', 'ussr'), ['quantity' => -1])
+        ->assertSessionHasErrors('quantity');
+
+    expect(WotBlueprint::count())->toBe(0);
 });
 
 /**

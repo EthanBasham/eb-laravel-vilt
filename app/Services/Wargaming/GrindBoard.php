@@ -29,6 +29,7 @@ class GrindBoard
         private readonly XpBoard $xp,
         private readonly BlueprintBoard $blueprints,
         private readonly AccountProgress $progress,
+        private readonly AccountDashboard $dashboard,
     ) {}
 
     /**
@@ -74,9 +75,12 @@ class GrindBoard
             'totals' => $this->totals(
                 $active,
                 $purchase['credits_required'],
+                $this->dashboard->credits($account),
                 $freexp['free_xp_planned'],
+                $this->dashboard->freeXp($account),
                 $xp['xp_remaining'],
                 $blueprints['blueprint_fragments'],
+                $this->researchCounts($freexp['rows']),
             ),
         ];
     }
@@ -264,14 +268,18 @@ class GrindBoard
 
     /**
      * @param  list<array<string, mixed>>  $active
+     * @param  array{researched: int, total: int}  $research
      * @return array<string, mixed>
      */
     private function totals(
         array $active,
         int $creditsRequired,
+        ?int $creditsAvailable,
         int $freeXpPlanned,
+        ?int $freeXpAvailable,
         int $xpRemaining,
         int $blueprintFragments,
+        array $research,
     ): array {
         return [
             // Nested rather than a sibling prop: every partial reload on this
@@ -286,9 +294,47 @@ class GrindBoard
              */
             'xp_remaining' => $xpRemaining,
             'free_xp_planned' => $freeXpPlanned,
+            /*
+             * The account's Free XP balance, where Wargaming will say. It is in
+             * account/info's private block, which only comes back with a valid
+             * token, so null is a real answer — "not known" — and the card
+             * shows planned alone rather than planned over a zero it made up.
+             */
+            'free_xp_available' => $freeXpAvailable,
             'credits_required' => $creditsRequired,
+            // The credit balance, where Wargaming will say — null for "not
+            // known", on the same terms as free_xp_available below.
+            'credits_available' => $creditsAvailable,
             'blueprint_fragments' => $blueprintFragments,
+            // Vehicles on the tree with nothing left for XP Remaining to count,
+            // of how many — see researchCounts().
+            'tanks_researched' => $research['researched'],
+            'tanks_total' => $research['total'],
             'banked_xp' => (int) collect($active)->sum('banked_xp'),
+        ];
+    }
+
+    /**
+     * How many vehicles on the tree are fully researched, of how many.
+     *
+     * Read off the Free XP board's cells, which carry the flag, rather than
+     * worked out a second time: fully researched — every upgrade module
+     * researched and every tank ahead unlocked — has one definition, and it
+     * lives there. Only the cell a row owns is counted, so a vehicle sitting on
+     * several lines is one vehicle.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     * @return array{researched: int, total: int}
+     */
+    private function researchCounts(array $rows): array
+    {
+        $cells = collect($rows)
+            ->flatMap(fn (array $row): array => array_values($row['cells']))
+            ->reject(fn (array $cell): bool => $cell['is_shared']);
+
+        return [
+            'researched' => $cells->where('is_researched', true)->count(),
+            'total' => $cells->count(),
         ];
     }
 

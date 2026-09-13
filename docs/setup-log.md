@@ -3414,3 +3414,125 @@ grid, which split the four colours across two rows and put "whole set maxed" now
 "member maxed". Maxed now leads both the Set and Member rows so the two scopes of the same
 fact sit one above the other. Each row's `<dl>` is `display: contents`, so its items wrap in
 the row's own flex line beside the label.
+
+---
+
+## 2026-09-12 — Blueprints held, per nation
+
+A table above the Blueprints board's filters records the blueprints actually held: one count
+per nation, plus the universal stack. New table `wot_blueprints` (`wot_account_id`, `nation`,
+`quantity`, unique on the pair), model `WotBlueprint`, and
+`PATCH /wot/grinding/blueprints/{nation}` → `GrindController::updateBlueprintStock`.
+
+**These are not the fragments already on the board.** `wot_tank_purchases.blueprint_fragments`
+counts fragments built towards one vehicle; this counts the raw material. National blueprints
+and universal ones are combined to build those fragments, so the stock is keyed by nation
+rather than by tank. Nothing computes fragments from it — the table records, like the cells do.
+
+**Universal is the nation `'universal'`, not a null**, for the reason `wot_crew_books` already
+gives: Postgres treats nulls as distinct in a unique index, so a nullable column would admit a
+second universal row. An unknown nation in the path is a 404 rather than a validation error,
+since it is a URL that does not exist.
+
+The stock rides on the Blueprints board's own payload (`blueprints.stock`) rather than as a
+sibling prop, so the `only: ['blueprints']` reload every edit on that tab already requests
+brings it back. Every nation is always listed, universal last, so the page draws a fixed row.
+It is one row across under a row of flags — scrolling sideways on a narrow screen rather than
+wrapping, so each count stays under its own flag — with the same stepper inputs as the Crews
+counts.
+
+**Production needs `php artisan migrate`** for the new table. The deploy runs migrations, as it
+did for the crew tables.
+
+---
+
+## 2026-09-12 — Blueprints held, redrawn
+
+Reverses the single row described in the entry above. The stock is now a panel: each nation's
+flag sits beside its own input, the eleven nations fill a six-column grid (two rows at full
+width, fewer columns before anything overflows on a narrow screen), and universal takes a row
+of its own beneath a divider.
+
+The flag beside the figure means a count is read with its nation rather than found by column.
+Universal is set apart because it is not a twelfth nation but the stack every nation draws on.
+Each flag-and-input pair is a `<label>`, so the flag is a click target for its input and names
+it for assistive tech. The data behind it — `blueprints.stock`, universal last — is unchanged;
+the page splits it.
+
+---
+
+## 2026-09-12 — Free XP planned, over Free XP available
+
+The Grinding page's Free XP card reads **planned / available** when the account's balance is
+known, and **planned** alone when it is not. The balance is `private.free_xp` from
+`account/info`, which Wargaming only returns with a valid access token.
+
+**`AccountDashboard::freeXp()` owns the lookup**, because that class already owns the cache the
+balance usually lives in:
+
+- No valid token → null, and nothing is asked.
+- A warm `wot:payloads:{id}` — the dashboard's cached fetch — is read first.
+- Otherwise `account/info` is fetched **on its own** and cached as `wot:account-info:{id}` for
+  the dashboard's TTL. The dashboard's full fetch is dominated by `tanks/stats`, which the
+  Grinding page has no use for and should not pay for on a cold load.
+- A `WargamingException` or a reply with no private block → null. Refusals are not cached.
+
+**Null is "not known", never zero.** A card reading `90,000 / 0` would claim a balance nobody
+reported; the planned-only form is the honest fallback, and the label drops "/ available" with it.
+
+`forget()` clears both cache keys, so the dashboard's Refresh moves this figure as well.
+
+**Test trap worth knowing:** factory accounts carry a valid-looking token, so every Grinding
+render would now make a real `account/info` request. `GrindingTest` fakes it file-wide with a
+closure over `$this->accountInfo`, and a test that needs a specific reply sets that property
+rather than registering a second fake for the same URL — which of two overlapping fakes answers
+is not something a test should depend on. `phpunit.xml` already forces an application ID and
+the array cache store, so the client's guard passes and each test starts cold.
+
+---
+
+## 2026-09-12 — Credits available, over credits needed
+
+The Grinding page's credits card reads **available / needed** when the balance is known and
+**needed** alone when it is not — the reverse order of the Free XP card, deliberately: that one
+leads with what it plans to spend, this one with what you already have. "Needed" stays the
+filtered purchase-board total the card already showed.
+
+The balance is `private.credits`, from the same `account/info` block as Free XP, so the lookup
+from the previous entry was generalised rather than copied. `freeXp()` and a new `credits()`
+now read one `privateBalances()`, which **remembers its answer for the life of the instance,
+null included**. Without that, two figures read on a cold cache would be two fetches — and a
+refusal, which is never cached, would be two failed requests. A test asserts one request for
+both figures.
+
+Each figure is null on its own when its key is missing, rather than zero, on the same "not
+known is not nothing" terms as before.
+
+---
+
+## 2026-09-12 — Both balance cards lead with what you have
+
+Reverses the order recorded two entries above. The Free XP card now reads **available /
+planned**, matching the credits card's **available / needed**: the balance leads on both, and
+the board's figure is what it is measured against. The label follows ("Free XP available /
+planned"), and the planned-only fallback without a known balance is unchanged. Consistency
+between the two cards was the point — they sit side by side and are read as a pair.
+
+---
+
+## 2026-09-12 — Headline cards: tanks researched first, banked XP over XP remaining
+
+The Grinding page's four cards are now, in order:
+
+1. **Tanks fully researched** — a count of vehicles on the tree with nothing left for XP
+   Remaining, over the vehicles on the tree, with a percentage.
+2. **Banked XP / XP remaining** — the Banked XP card folded into the XP remaining one, which
+   now reads balance over what is owed, the same order as the two cards after it.
+3. Free XP available / planned.
+4. Credits available / needed.
+
+**The count reads the Free XP board's `is_researched` flag rather than deriving the state
+again** — "fully researched" has exactly one definition, and it lives there. Only each row's
+owned cell is counted, so a vehicle on several lines is counted once, and the figure covers the
+whole tree rather than following any board's filters. It is served as `totals.tanks_researched`
+and `totals.tanks_total` from `GrindBoard::researchCounts()`.

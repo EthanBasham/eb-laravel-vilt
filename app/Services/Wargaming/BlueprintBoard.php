@@ -4,6 +4,7 @@ namespace App\Services\Wargaming;
 
 use Illuminate\Support\Collection;
 use App\Models\WotAccount;
+use App\Models\WotBlueprint;
 use App\Models\WotTankPurchase;
 use App\Models\WotVehicle;
 
@@ -53,7 +54,33 @@ class BlueprintBoard
             'rows' => $rows->all(),
             'tiers' => $this->tierColumns($rows),
             'blueprint_fragments' => (int) $rows->sum('fragments'),
+            // Carried on this board's payload rather than as a sibling prop, so
+            // the reload every edit on the tab already asks for brings it back.
+            'stock' => $this->stock($account),
         ];
+    }
+
+    /**
+     * Blueprints held, one entry per nation plus the universal stack.
+     *
+     * Every nation is listed whether or not a count has been typed for it, in
+     * tech-tree order with universal last, so the page draws a fixed row and
+     * never has to know which stacks happen to exist. This is the raw material
+     * the fragments on the cells below are built from: national blueprints
+     * spend on their own nation, universal ones on any.
+     *
+     * @return list<array{nation: string, label: string, quantity: int}>
+     */
+    private function stock(WotAccount $account): array
+    {
+        $held = WotBlueprint::where('wot_account_id', $account->id)->pluck('quantity', 'nation');
+
+        return collect((array) config('wargaming.nations'))
+            ->map(fn (string $label, string $nation): array => ['nation' => $nation, 'label' => $label])
+            ->values()
+            ->push(['nation' => WotBlueprint::UNIVERSAL, 'label' => 'Universal'])
+            ->map(fn (array $stack): array => [...$stack, 'quantity' => (int) ($held[$stack['nation']] ?? 0)])
+            ->all();
     }
 
     /**

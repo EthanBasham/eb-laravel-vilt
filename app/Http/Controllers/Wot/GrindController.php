@@ -7,11 +7,13 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response as HttpResponse;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Wot\BoardFiltersRequest;
+use App\Http\Requests\Wot\UpdateBlueprintStockRequest;
 use App\Http\Requests\Wot\UpdateModulePlanRequest;
 use App\Http\Requests\Wot\UpdateModuleResearchRequest;
 use App\Http\Requests\Wot\UpdateResearchXpRequest;
 use App\Http\Requests\Wot\UpdateTankPurchaseRequest;
 use App\Models\WotAccount;
+use App\Models\WotBlueprint;
 use App\Models\WotGrindSetting;
 use App\Models\WotTankModule;
 use App\Models\WotTankPurchase;
@@ -273,6 +275,35 @@ class GrindController extends Controller
         $purchase->banked_xp = max(0, (int) $purchase->banked_xp - $xp);
 
         $purchase->save();
+    }
+
+    /**
+     * Records how many blueprints of one nation are held, or universal ones.
+     *
+     * The nation is in the path, like a stack of books on the Crews page, with
+     * 'universal' standing where a nation would. These are not tied to a
+     * vehicle yet — they are what the fragments on the board's cells are built
+     * from — so they are keyed by nation rather than by tank.
+     */
+    public function updateBlueprintStock(UpdateBlueprintStockRequest $request, string $nation): RedirectResponse
+    {
+        $account = $request->user()->wotAccount;
+
+        abort_unless($account, 404);
+        // Checked against config rather than in the request, because the
+        // nation arrives in the path: an unknown one is a URL that does not
+        // exist.
+        abort_unless(
+            $nation === WotBlueprint::UNIVERSAL || array_key_exists($nation, (array) config('wargaming.nations')),
+            404,
+        );
+
+        WotBlueprint::updateOrCreate(
+            ['wot_account_id' => $account->id, 'nation' => $nation],
+            ['quantity' => $request->integer('quantity')],
+        );
+
+        return back(fallback: route('wot.grinding'));
     }
 
     /**

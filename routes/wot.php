@@ -25,6 +25,9 @@ Route::patch('/grinding/modules/{tankId}/top-gun', [GrindController::class, 'pla
 Route::patch('/grinding/research/{tankId}/modules', [GrindController::class, 'updateModuleResearch'])->name('grinding.research-module');
 Route::patch('/grinding/research/{tankId}/modules/all', [GrindController::class, 'researchAllModules'])->name('grinding.research-all');
 Route::patch('/grinding/research/{tankId}', [GrindController::class, 'updateResearchXp'])->name('grinding.research-xp');
+// Blueprints held, per nation — keyed by the nation rather than a tank, since
+// they are not spent on any vehicle yet. 'universal' stands in for a nation.
+Route::patch('/grinding/blueprints/{nation}', [GrindController::class, 'updateBlueprintStock'])->name('grinding.blueprint-stock');
 
 /*
  * Crews. Four tabs over one page, like the grinding board: the tech-tree board

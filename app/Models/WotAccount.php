@@ -92,6 +92,12 @@ class WotAccount extends Model
         return $this->hasMany(WotTankPurchase::class);
     }
 
+    /** @return HasMany<WotBlueprint, $this> */
+    public function blueprints(): HasMany
+    {
+        return $this->hasMany(WotBlueprint::class);
+    }
+
     /** @return HasMany<WotTankCrew, $this> */
     public function tankCrews(): HasMany
     {

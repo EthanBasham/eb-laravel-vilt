@@ -316,6 +316,12 @@ const tierTotal = (tier) => shownRows.value.reduce((sum, r) => sum + cellCost(r.
 const grandTotal = computed(() => shownRows.value.reduce((sum, r) => sum + rowRemaining(r), 0));
 const short = (v) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : n(v));
 
+// Floored rather than rounded, so a tree one vehicle short of finished never
+// reads 100%. Null on an empty tree, where a percentage means nothing.
+const researchedPercent = computed(() => (props.totals.tanks_total
+    ? Math.floor((props.totals.tanks_researched / props.totals.tanks_total) * 100)
+    : null));
+
 /*
  * Free XP filters.
  *
@@ -450,6 +456,12 @@ const {
 
 const blueprintNations = computed(() => nationsOf(props.blueprints.rows));
 
+// Blueprints held, split the way the panel draws them: the national stacks in
+// a grid, and the universal stack — which spends on any of them — on a row of
+// its own beneath.
+const bpNationStock = computed(() => (props.blueprints.stock ?? []).filter((stack) => stack.nation !== 'universal'));
+const bpUniversalStock = computed(() => (props.blueprints.stock ?? []).find((stack) => stack.nation === 'universal'));
+
 const bpShownTiers = computed(() => props.blueprints.tiers.filter((t) => !bpHiddenTiers.value.includes(t)));
 
 // A shared cell is held and edited on the row that owns it, which keeps the row
@@ -496,24 +508,53 @@ const bpGrandTotal = computed(() => bpShownRows.value.reduce((sum, r) => sum + b
         </div>
 
         <dl class="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <!-- Vehicles with nothing left for XP Remaining to count, over the
+                 vehicles on the tree — the Free XP board's own definition of
+                 fully researched, counted once per vehicle. The whole tree,
+                 not a filtered board: progress through the game should not
+                 move because a nation chip was switched off. -->
             <div class="border border-wot-border bg-wot-panel p-3">
-                <dt class="text-xs uppercase tracking-wider text-wot-dim">XP remaining</dt>
-                <!-- The filtered board's figure, like Credits needed below it:
-                     the server bills the whole tree, and narrowing to a nation
-                     is what turns that into a number worth reading. -->
-                <dd class="mt-1 text-xl tabular-nums text-wot-heading">{{ short(xpGrandTotal) }}</dd>
+                <dt class="text-xs uppercase tracking-wider text-wot-dim">Tanks fully researched</dt>
+                <dd class="mt-1 text-xl tabular-nums text-wot-heading">
+                    <span class="text-wot-dim">{{ n(totals.tanks_researched) }} / </span>{{ n(totals.tanks_total) }}
+                    <span v-if="researchedPercent !== null" class="ms-1 text-sm text-wot-good">{{ researchedPercent }}%</span>
+                </dd>
             </div>
+            <!-- Banked over remaining, the balance-first order of the two cards
+                 after it. Remaining is the filtered board's figure, like Credits
+                 needed: the server bills the whole tree, and narrowing to a
+                 nation is what turns that into a number worth reading. Banked is
+                 summed over Active Grinding, the only place it is kept. -->
             <div class="border border-wot-border bg-wot-panel p-3">
-                <dt class="text-xs uppercase tracking-wider text-wot-dim">Banked XP</dt>
-                <dd class="mt-1 text-xl tabular-nums text-wot-good">{{ n(totals.banked_xp) }}</dd>
+                <dt class="text-xs uppercase tracking-wider text-wot-dim">Banked XP / XP remaining</dt>
+                <dd class="mt-1 text-xl tabular-nums text-wot-heading">
+                    <span class="text-wot-dim">{{ short(totals.banked_xp) }} / </span>{{ short(xpGrandTotal) }}
+                </dd>
             </div>
+            <!-- Available over planned, the same order as the credits card: the
+                 balance you already have leads, and the board's figure is what
+                 it is measured against. Planned alone when Wargaming does not
+                 report a balance — it needs a valid token — rather than under a
+                 zero nobody reported. -->
             <div class="border border-wot-border bg-wot-panel p-3">
-                <dt class="text-xs uppercase tracking-wider text-wot-dim">Free XP planned</dt>
-                <dd class="mt-1 text-xl tabular-nums text-wot-gold">{{ n(totals.free_xp_planned) }}</dd>
+                <dt class="text-xs uppercase tracking-wider text-wot-dim">
+                    {{ totals.free_xp_available != null ? 'Free XP available / planned' : 'Free XP planned' }}
+                </dt>
+                <dd class="mt-1 text-xl tabular-nums text-wot-gold">
+                    <span v-if="totals.free_xp_available != null" class="text-wot-dim">{{ n(totals.free_xp_available) }} / </span>{{ n(totals.free_xp_planned) }}
+                </dd>
             </div>
+            <!-- Available over needed, the same order as the Free XP card: the
+                 balance you already have leads, and the board's figure is what
+                 it is measured against. Needed alone when Wargaming does not
+                 report a balance. -->
             <div class="border border-wot-border bg-wot-panel p-3">
-                <dt class="text-xs uppercase tracking-wider text-wot-dim">Credits needed</dt>
-                <dd class="mt-1 text-xl tabular-nums text-wot-heading">{{ short(grandTotal) }}</dd>
+                <dt class="text-xs uppercase tracking-wider text-wot-dim">
+                    {{ totals.credits_available != null ? 'Credits available / needed' : 'Credits needed' }}
+                </dt>
+                <dd class="mt-1 text-xl tabular-nums text-wot-heading">
+                    <span v-if="totals.credits_available != null" class="text-wot-dim">{{ short(totals.credits_available) }} / </span>{{ short(grandTotal) }}
+                </dd>
             </div>
         </dl>
 
@@ -1182,6 +1223,51 @@ const bpGrandTotal = computed(() => bpShownRows.value.reduce((sum, r) => sum + b
         -->
         <section v-else class="mt-4" aria-labelledby="blueprints-heading">
             <h2 id="blueprints-heading" class="sr-only">Blueprints</h2>
+
+            <!--
+                Blueprints held, before they are fragments of anything: one count
+                per nation, and the universal stack that spends on any of them.
+                National and universal blueprints are combined to build the
+                fragments counted per vehicle in the grid below.
+
+                Each flag sits beside its own count, so a figure is read with its
+                nation rather than found by column. The eleven nations take two
+                rows of six at full width, dropping to fewer columns rather than
+                overflowing on a narrow screen; universal gets a row of its own
+                beneath, because it is not a twelfth nation but the stack every
+                nation draws on. Each pair is a <label>, so the flag is a click
+                target for its input and names it for assistive tech.
+
+                Steppers, like the Recruits & Books counts: these move by a few
+                at a time rather than being retyped.
+            -->
+            <div class="mb-3 border border-wot-border bg-wot-panel p-3">
+                <h3 class="text-xs font-bold uppercase tracking-wider text-wot-dim">National blueprints</h3>
+
+                <div class="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3 lg:grid-cols-6">
+                    <label v-for="stack in bpNationStock" :key="stack.nation" class="flex items-center gap-2">
+                        <NationFlag :nation="stack.nation" />
+                        <EditableNumber
+                            field="quantity"
+                            stepper
+                            :model-value="stack.quantity"
+                            :url="`/wot/grinding/blueprints/${stack.nation}`"
+                            :only="['blueprints']"
+                        />
+                    </label>
+                </div>
+
+                <label v-if="bpUniversalStock" class="mt-3 flex items-center gap-2 border-t border-wot-border-soft pt-3">
+                    <span class="text-xs font-bold uppercase tracking-wider text-wot-gold">Universal</span>
+                    <EditableNumber
+                        field="quantity"
+                        stepper
+                        :model-value="bpUniversalStock.quantity"
+                        :url="`/wot/grinding/blueprints/${bpUniversalStock.nation}`"
+                        :only="['blueprints']"
+                    />
+                </label>
+            </div>
 
             <div class="mb-3 space-y-2 border border-wot-border bg-wot-panel p-3">
                 <div class="flex flex-wrap items-center gap-1.5">
