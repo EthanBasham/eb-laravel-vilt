@@ -70,12 +70,17 @@ const {
     hiddenNations,
     hiddenTiers,
     only_crewed: onlyCrewed,
+    hidden_crew_sizes: hiddenCrewSizes,
     toggleNation,
     toggleTier,
     clearNations,
     clearTiers,
 } = useBoardFilters('crews', props.settings.crews_filters, {
-    extra: { only_crewed: false },
+    /*
+     * hidden_crew_sizes is held as what is hidden, like nations and tiers, so
+     * a size that first appears after a patch starts shown.
+     */
+    extra: { only_crewed: false, hidden_crew_sizes: [] },
     url: '/wot/crews/filters',
 });
 
@@ -83,17 +88,48 @@ const crewNations = computed(() => nationsOf(props.crews.rows));
 const shownTiers = computed(() => props.crews.tiers.filter((t) => !hiddenTiers.value.includes(t)));
 
 /*
+ * The crew sizes that actually occur on the tree, smallest first, so there is
+ * a chip for every size a vehicle has and none for a size nothing has. A crew's
+ * size is its seat count — one per body, the same count as the letters in the
+ * cell — and a vehicle the encyclopedia publishes no crew for has no size.
+ */
+const crewSizes = computed(() => [...new Set(props.crews.rows
+    .flatMap((row) => Object.values(row.cells))
+    .map((cell) => cell.members.length)
+    .filter((size) => size > 0))]
+    .sort((a, b) => a - b));
+
+const toggleCrewSize = (size) => (hiddenCrewSizes.value = hiddenCrewSizes.value.includes(size)
+    ? hiddenCrewSizes.value.filter((hidden) => hidden !== size)
+    : [...hiddenCrewSizes.value, size]);
+
+/*
+ * A vehicle whose crew size is switched off reads as an empty tier and counts
+ * for nothing — the filter narrows the tanks, not just the lines, since the
+ * question it answers is about one vehicle's crew.
+ */
+const isShown = (cell) => Boolean(cell) && !hiddenCrewSizes.value.includes(cell.members.length);
+
+/*
  * A shared cell is counted on the row that owns the vehicle, which keeps the
  * row figures summing to the grand total — the same rule every board here
  * follows, and the reason a tier VIII under three tier Xs is one crew rather
  * than three.
  */
-const isCounted = (cell) => Boolean(cell) && !cell.is_shared;
+const isCounted = (cell) => isShown(cell) && !cell.is_shared;
 const rowCrews = (row) => shownTiers.value.filter((t) => isCounted(row.cells[t]) && row.cells[t].has_crew).length;
 const rowSeats = (row) => shownTiers.value.filter((t) => isCounted(row.cells[t])).length;
 
+// Shared cells included: a line keeps its place while any tank on it is still
+// visible, wherever that tank happens to be counted.
+const hasShownCell = (row) => shownTiers.value.some((t) => isShown(row.cells[t]));
+
 const shownRows = computed(() => props.crews.rows.filter(
-    (r) => !hiddenNations.value.includes(r.nation) && !(onlyCrewed.value && rowCrews(r) === 0),
+    (r) => !hiddenNations.value.includes(r.nation)
+        && !(onlyCrewed.value && rowCrews(r) === 0)
+        // Only once a size is switched off: otherwise a line keeps its row even
+        // with every tier column hidden, as it always has.
+        && (!hiddenCrewSizes.value.length || hasShownCell(r)),
 ));
 const tierTotal = (tier) => shownRows.value.filter((r) => isCounted(r.cells[tier]) && r.cells[tier].has_crew).length;
 const grandTotal = computed(() => shownRows.value.reduce((sum, r) => sum + rowCrews(r), 0));
@@ -350,6 +386,33 @@ const chooseTankForNew = () => (picking.value = {
                     </button>
                 </div>
 
+                <!-- Crew size, as a chip per size present, lit meaning shown like
+                     the nation and tier rows above. Only offered when sizes
+                     differ — one size on the whole board is nothing to filter. -->
+                <div v-if="crewSizes.length > 1" class="flex flex-wrap items-center gap-1.5">
+                    <span class="w-12 shrink-0 text-xs font-bold uppercase tracking-wider text-wot-dim">Crew</span>
+                    <button
+                        v-for="size in crewSizes"
+                        :key="size"
+                        type="button"
+                        class="min-w-9 border px-2 py-0.5 text-xs font-bold tracking-wider transition-colors"
+                        :class="hiddenCrewSizes.includes(size)
+                            ? 'border-wot-border text-wot-dim hover:text-wot-text'
+                            : 'border-wot-gold text-wot-gold'"
+                        :aria-pressed="!hiddenCrewSizes.includes(size)"
+                        :aria-label="`Crews of ${size}`"
+                        :title="`Crews of ${size}`"
+                        @click="toggleCrewSize(size)"
+                    >
+                        {{ size }}
+                    </button>
+                    <button v-if="hiddenCrewSizes.length" type="button"
+                            class="ms-1 text-xs uppercase tracking-wider text-wot-dim hover:text-wot-text"
+                            @click="hiddenCrewSizes = []">
+                        All
+                    </button>
+                </div>
+
                 <div class="flex flex-wrap items-center gap-1.5">
                     <span class="w-12 shrink-0 text-xs font-bold uppercase tracking-wider text-wot-dim">Lines</span>
                     <label class="flex items-center gap-2 text-xs text-wot-text">
@@ -437,7 +500,7 @@ const chooseTankForNew = () => (picking.value = {
             </div>
 
             <p v-if="!shownRows.length" class="border border-dashed border-wot-border p-8 text-center text-sm text-wot-dim">
-                {{ onlyCrewed ? 'No crews recorded in the selected nations and tiers.' : 'No lines in the selected nations and tiers.' }}
+                {{ onlyCrewed ? 'No crews recorded in the selected nations, tiers and crew sizes.' : 'No lines in the selected nations, tiers and crew sizes.' }}
             </p>
 
             <div v-else class="overflow-x-auto border border-wot-border bg-wot-panel">
@@ -462,8 +525,10 @@ const chooseTankForNew = () => (picking.value = {
                             </td>
 
                             <td v-for="tier in shownTiers" :key="tier" class="px-3 py-2 text-center">
+                                <!-- A tank whose crew size is filtered out reads
+                                     as an empty tier, like one the line lacks. -->
                                 <CrewCell
-                                    v-if="row.cells[tier]"
+                                    v-if="isShown(row.cells[tier])"
                                     :cell="row.cells[tier]"
                                     @edit="editing = $event"
                                 />

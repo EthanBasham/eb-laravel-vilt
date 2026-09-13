@@ -8,12 +8,13 @@ use Illuminate\Validation\Rule;
 /**
  * Where a board's filter row was left.
  *
- * Serves every grid in the app. `board` picks which column the payload lands in; the rest
- * of the keys are `sometimes`, so a client sends only what changed and a
- * partial payload never clears the rest. hide_owned belongs to the purchase
- * board, only_planned and hide_researched to Free XP, hide_done to XP Remaining
- * and only_crewed to Crews, but none is rejected on another — a key a board
- * never sends is simply one it never stores.
+ * Serves every grid in the app. `board` picks which column the payload lands
+ * in; the rest of the keys are `sometimes`, so a client sends only what changed
+ * and a partial payload never clears the rest. hide_owned belongs to the
+ * purchase board, only_planned and hide_researched to Free XP, hide_done to XP
+ * Remaining, and only_crewed and hidden_crew_sizes to Crews, but none is
+ * rejected on another — a key a board never sends is simply one it never
+ * stores.
  */
 class BoardFiltersRequest extends FormRequest
 {
@@ -42,6 +43,12 @@ class BoardFiltersRequest extends FormRequest
             'hide_researched' => ['sometimes', 'boolean'],
             'hide_done' => ['sometimes', 'boolean'],
             'only_crewed' => ['sometimes', 'boolean'],
+            // Held as what is hidden, like nations and tiers, so an empty list
+            // — nothing hidden — is the common case. Twelve is headroom: the
+            // largest crew the encyclopedia publishes is six, and
+            // UpdateTankCrewRequest caps a crew at twelve seats too.
+            'hidden_crew_sizes' => ['sometimes', 'present', 'array', 'max:12'],
+            'hidden_crew_sizes.*' => ['integer', 'min:1', 'max:12'],
         ];
     }
 }

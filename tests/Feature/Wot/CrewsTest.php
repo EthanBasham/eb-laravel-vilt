@@ -622,13 +622,26 @@ it('remembers where the crews filters were left', function () {
         'board' => 'crews',
         'hidden_nations' => ['japan'],
         'only_crewed' => true,
+        'hidden_crew_sizes' => [2, 3],
     ])->assertNoContent();
 
     $this->actingAs($user)->get(route('wot.crews'))->assertInertia(fn ($page) => $page
         ->where('settings.crews_filters.hidden_nations', ['japan'])
-        ->where('settings.crews_filters.only_crewed', true),
+        ->where('settings.crews_filters.only_crewed', true)
+        ->where('settings.crews_filters.hidden_crew_sizes', [2, 3]),
     );
 });
+
+it('rejects a crew size filter the board could never produce', function (array $payload) {
+    [$user] = crewUser();
+
+    $this->actingAs($user)->patch(route('wot.crews.filters'), ['board' => 'crews', ...$payload])
+        ->assertSessionHasErrors();
+})->with([
+    'a crew of nobody' => [['hidden_crew_sizes' => [0]]],
+    'a crew past any vehicle' => [['hidden_crew_sizes' => [13]]],
+    'sizes as a scalar' => [['hidden_crew_sizes' => 4]],
+]);
 
 /**
  * The Crews board writes its filters to the same row every other board does, so

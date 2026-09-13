@@ -3536,3 +3536,21 @@ again** — "fully researched" has exactly one definition, and it lives there. O
 owned cell is counted, so a vehicle on several lines is counted once, and the figure covers the
 whole tree rather than following any board's filters. It is served as `totals.tanks_researched`
 and `totals.tanks_total` from `GrindBoard::researchCounts()`.
+
+---
+
+## 2026-09-12 — Crews board filters by crew size
+
+A **Crew** row joins the Crews board's filters: a chip per crew size that actually occurs on
+the tree (2 to 6 today), lit meaning shown, like the nation and tier rows. It is only offered
+when sizes differ.
+
+**It narrows tanks, not only lines.** A tank whose size is switched off reads as an empty tier
+and leaves the row, tier and grand counts; a line with no visible tank left drops off the board.
+The question the filter answers is about one vehicle's crew, so filtering whole lines by a size
+some of their tanks have would answer a different one.
+
+Size is the seat count from the encyclopedia — one per body, the same count as the letters in a
+cell — read from the members the board already ships, so nothing server-side changed but the
+filter key. It is stored as `hidden_crew_sizes` in `crews_filters`, held as what is hidden so a
+size first appearing after a patch starts shown, and validated as integers from 1 to 12.
