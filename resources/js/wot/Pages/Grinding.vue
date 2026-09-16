@@ -345,9 +345,12 @@ const {
 } = useBoardFilters('freexp', props.settings.freexp_filters, {
     /*
      * hide_researched starts on, the opposite of only_planned beside it: a line
-     * with nothing left to research is one no Free XP can go to, so it is
-     * settled in the sense XP Remaining's hide_done means, and gets the same
-     * default.
+     * with nothing left to buy is settled in the sense XP Remaining's hide_done
+     * means, and gets the same default.
+     *
+     * The stored key still says researched, which is what it hid by until the
+     * two came apart — see fxLineMaxed. Renaming it would orphan the filter row
+     * every account has already saved, to no one's benefit.
      */
     extra: { only_planned: false, hide_researched: true },
 });
@@ -364,14 +367,38 @@ const fxShownTiers = computed(() => props.freexp.tiers.filter((t) => !fxHiddenTi
 const fxCellXp = (cell) => (cell && !cell.is_shared && !cell.is_researched ? cell.planned_xp : 0);
 const fxRowPlanned = (row) => fxShownTiers.value.reduce((sum, t) => sum + fxCellXp(row.cells[t]), 0);
 
-// Every cell, not the visible ones, for the reason bpLineDone gives: hiding a
-// tier column must not decide which lines the board has.
-const fxLineResearched = (row) => Object.values(row.cells).every((cell) => cell.is_researched);
+/*
+ * A line no Free XP can go to: every vehicle on it maxed, meaning every upgrade
+ * module researched or none there to begin with.
+ *
+ * is_maxed rather than is_researched, which is the stricter of the two and the
+ * wrong question here. A tier X with a stock gun under a tier XI nobody has
+ * unlocked is not researched — it owes the unlock — but no part of that debt is
+ * payable in Free XP, and reading the strict flag kept fifteen finished lines
+ * on the board, each over a single cell with nothing in it to buy.
+ *
+ * Every cell, not the visible ones, for the reason bpLineDone gives: hiding a
+ * tier column must not decide which lines the board has. That is also why
+ * filtering the tier XI column away never shook those lines loose — the cell
+ * holding them was the tier X below it.
+ */
+const fxLineMaxed = (row) => Object.values(row.cells).every((cell) => cell.is_maxed);
 
 const fxShownRows = computed(() => props.freexp.rows.filter(
     (r) => !fxHiddenNations.value.includes(r.nation)
         && !(onlyPlanned.value && fxRowPlanned(r) === 0)
-        && !(fxHideResearched.value && fxLineResearched(r)),
+        /*
+         * Never hidden while it still carries a plan, whatever else is true of
+         * it. row.planned_xp is the server's own figure — the one summed into
+         * the headline card — so a line holding any part of that total stays
+         * where the total can be read against it.
+         *
+         * A plan on a maxed vehicle is stale rather than wrong: researching a
+         * module through the app drops it, but a module that only *became*
+         * researched, because a successor was unlocked, keeps whatever was
+         * planned against it. Showing that line is how it gets cleared.
+         */
+        && !(fxHideResearched.value && fxLineMaxed(r) && r.planned_xp === 0),
 ));
 const fxTierTotal = (tier) => fxShownRows.value.reduce((sum, r) => sum + fxCellXp(r.cells[tier]), 0);
 const fxGrandTotal = computed(() => fxShownRows.value.reduce((sum, r) => sum + fxRowPlanned(r), 0));
@@ -1170,7 +1197,10 @@ const bpEditingCell = computed(() => {
                         </label>
                         <label class="ms-3 flex items-center gap-2 text-xs text-wot-text">
                             <input v-model="fxHideResearched" type="checkbox" class="border">
-                            Hide lines with nothing left to research
+                            <!-- "to buy", not "to research": this board spends
+                                 Free XP on modules, and a line can owe an
+                                 unlock it cannot buy its way out of here. -->
+                            Hide lines with nothing left to buy
                         </label>
                     </div>
                 </div>
@@ -1179,7 +1209,7 @@ const bpEditingCell = computed(() => {
                     {{ onlyPlanned
                         ? 'Nothing planned in the selected nations and tiers.'
                         : fxHideResearched
-                            ? 'Nothing left to research in the selected nations and tiers.'
+                            ? 'Nothing left to buy in the selected nations and tiers.'
                             : 'No lines in the selected nations and tiers.' }}
                 </p>
 

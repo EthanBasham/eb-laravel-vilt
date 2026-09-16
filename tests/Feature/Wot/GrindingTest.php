@@ -1263,6 +1263,66 @@ it('will not let one account plan another account modules', function () {
 });
 
 /**
+ * The Lines filter asks this board's own question — is there anything left for
+ * Free XP to buy — and that is not the same as the vehicle being researched.
+ *
+ * A tier X whose gun is stock, sitting under a tier XI nobody has unlocked, is
+ * the case they part company on: it owes the unlock, so it is not researched,
+ * and not a point of that debt is payable from here, so it is maxed. Fifteen
+ * finished lines on a real account stayed on the board over exactly this.
+ */
+it('calls a vehicle with nothing left to buy maxed, even where it still owes an unlock', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    // A tier XI above the line's tier X, and that tier X stripped back to the
+    // stock modules it ships with — which is most of tier X in the real tree.
+    WotVehicle::factory()->create(['tank_id' => 110, 'name' => 'Target XI', 'short_name' => 'Tgt XI', 'tier' => 11, 'nation' => 'ussr', 'type' => 'mediumTank', 'next_tanks' => null]);
+    WotVehicle::where('tank_id', 100)->update(['next_tanks' => json_encode([110 => 325_000])]);
+    WotVehicleModule::where('tank_id', 100)->where('is_default', false)->delete();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        // Still named for its tier X, whatever tier the line now tops out at.
+        ->where('freexp.rows.0.name', 'Tgt X')
+        ->where('freexp.rows.0.cells.10.is_maxed', true)
+        // The unlock is real and XP Remaining still charges for it, so the
+        // strict flag — and the headline count that reads it — must not move.
+        ->where('freexp.rows.0.cells.10.is_researched', false)
+        ->where('xp.rows.0.cells.10.unlocks.xp', 325_000),
+    );
+});
+
+/**
+ * The same parting of the ways from the other direction: a vehicle whose
+ * modules you have ticked off by hand, under a successor you have not unlocked.
+ */
+it('calls a vehicle maxed once its last module is researched', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.research-all', 80))->assertRedirect();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('freexp.rows.0.cells.8.is_maxed', true)
+        // The tier IX above it is still locked, so it is not researched.
+        ->where('freexp.rows.0.cells.8.is_researched', false),
+    );
+});
+
+it('leaves a vehicle with a module outstanding unmaxed', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.research-module', 80), ['module_id' => 100, 'researched' => true]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        // The engine is still there to buy, so Free XP has somewhere to go.
+        ->where('freexp.rows.0.cells.8.is_maxed', false)
+        ->where('freexp.rows.0.cells.9.is_maxed', false),
+    );
+});
+
+/**
  * A tank on two lines is one tank with one plan. Counting it on both rows would
  * put the same XP in the grand total twice.
  */

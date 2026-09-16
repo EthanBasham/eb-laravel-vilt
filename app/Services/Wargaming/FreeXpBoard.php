@@ -137,6 +137,12 @@ class FreeXpBoard
          */
         $topGun = $this->moduleTree->topGunChain($modules);
 
+        /*
+         * Every upgrade module researched, or there were never any to begin
+         * with: no Free XP can go to this vehicle, whatever else it owes.
+         */
+        $maxed = $options->every(fn (array $option): bool => $option['is_researched']);
+
         return [
             'tank_id' => $tankId,
             'name' => $name,
@@ -164,16 +170,28 @@ class FreeXpBoard
              */
             'total_xp' => (int) $options->sum('price_xp'),
             /*
+             * Nothing here can take Free XP. What the Lines filter hides by,
+             * and the only one of the two that is this board's own question:
+             * Free XP buys modules here and nothing else, so a vehicle with
+             * none left to buy is finished as far as this board is concerned.
+             */
+            'is_maxed' => $maxed,
+            /*
              * Nothing left on this vehicle for XP Remaining to count: every
              * upgrade module researched, and every tank it leads to unlocked.
-             * The board shows a dash for it and, by default, hides a line made
-             * of nothing else — there is no Free XP left to spend on either.
+             * The board shows a dash for it, and the headline card counts it.
              *
              * Read from the same two facts XP Remaining draws, so the boards
              * cannot disagree about which vehicles are finished.
+             *
+             * Deliberately not what the Lines filter hides by. The two part
+             * company on a tier X whose gun is stock sitting under a tier XI
+             * nobody has unlocked: it owes 325,000 XP for that unlock, so it is
+             * not researched — and not a point of it can be spent from here,
+             * so it is maxed. Fifteen finished lines stayed on the board over
+             * that one cell before the two were told apart.
              */
-            'is_researched' => $successorsUnlocked
-                && $options->every(fn (array $option): bool => $option['is_researched']),
+            'is_researched' => $successorsUnlocked && $maxed,
             /*
              * Filled in by claimShared(). Seeded so every cell has the same
              * shape whether it ends up shared or not — the client reads these
