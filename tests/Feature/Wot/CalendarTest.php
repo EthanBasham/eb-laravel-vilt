@@ -4,6 +4,20 @@ use Illuminate\Testing\TestResponse;
 use App\Models\User;
 use App\Models\WotEvent;
 
+/*
+ * Every fixture here is pinned to September 2026, because the grid's shape is
+ * part of what is asserted: it runs whole weeks from the Monday on or before
+ * the 1st, so which square a date lands in depends on the weekday the month
+ * opens with. Relative dates would move that from one run to the next.
+ *
+ * Fixed dates alone are not enough, though. "Coming up" is `onlyUpcoming()`,
+ * which is measured against now() — so the moment the real clock passed
+ * 2026-09-15 the events below stopped being upcoming and the listing emptied.
+ * The clock is frozen to the start of the month so the two agree: the dates are
+ * fixed, and so is the today they are ahead of.
+ */
+beforeEach(fn () => test()->travelTo('2026-09-01 08:00:00'));
+
 /**
  * The events the month grid puts on one date.
  *
