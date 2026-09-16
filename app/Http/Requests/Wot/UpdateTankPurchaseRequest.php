@@ -14,16 +14,13 @@ use App\Services\Wargaming\BlueprintCost;
 class UpdateTankPurchaseRequest extends FormRequest
 {
     /**
-     * The four fields the fragment ceiling applies to.
+     * The fields the fragment ceiling applies to.
      *
-     * Named here so the rules and the lookup guard cannot drift apart.
+     * Named here so the rules and the lookup guard cannot drift apart. Just the
+     * one since the plan moved to its own request, where the nation it is
+     * against is part of the URL.
      */
-    private const FRAGMENT_FIELDS = [
-        'blueprint_fragments',
-        'blueprint_plan_own',
-        'blueprint_plan_group',
-        'blueprint_plan_universal',
-    ];
+    private const FRAGMENT_FIELDS = ['blueprint_fragments'];
 
     /**
      * Get the validation rules that apply to the request.
@@ -44,12 +41,6 @@ class UpdateTankPurchaseRequest extends FormRequest
             // a game rule now rather than headroom: a blueprint takes what its
             // tier takes, and a figure above that buys nothing.
             'blueprint_fragments' => $fragments,
-            // Where the rest of them are meant to come from. Own-nation, the
-            // same group at six to one, or universal — alternatives chosen per
-            // fragment, so each is bounded on its own and their sum is not.
-            'blueprint_plan_own' => $fragments,
-            'blueprint_plan_group' => $fragments,
-            'blueprint_plan_universal' => $fragments,
             // Membership of the Active Grinding list; there is no other tick
             // for "playing this", so adding and dropping are both this flag.
             'is_playing' => ['sometimes', 'boolean'],

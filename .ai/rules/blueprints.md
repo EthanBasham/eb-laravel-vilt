@@ -12,13 +12,17 @@ paths:
 
 `BlueprintCost::xpSaved()` gets this from its `>= fragmentsNeeded()` branch rather than from a special case, and rounds once on the cumulative share rather than per fragment and summing. Both are pinned by tests; changing either silently moves every figure on the board.
 
-## The three cost columns are an OR, chosen per fragment
-`national`, `group` and `universal` are what one fragment costs from each source, not a combined price. A fragment is paid for out of exactly one of them, and a single blueprint can take a different one each time. That is why `wot_tank_purchases` carries three plan counters instead of one: the group rate is six times the national one, so a single "planned" figure could not be turned back into blueprints.
+## The two cost columns are an AND; only the payer is a choice
+`national` and `universal` are both spent on every fragment — one fragment costs that many national blueprints *and* that many universal ones. `group` is not a third price: it is what the national half costs when a peer nation in the vehicle's group pays it instead of the vehicle's own, at six to one, and the universal half does not move when it does. There is no fragment bought with universal blueprints alone, and none bought without them.
 
-The counters count *fragments*. What they come to in raw blueprints is `BlueprintCost::plan()`, and it needs the tier — there is no summing them without it.
+This corrected a reading recorded on 2026-09-15 — that the three columns were alternatives chosen per fragment — which under-quoted every plan by roughly a third and put a "Universal" row in the planner for a purchase that cannot happen. `wot_tank_purchases.blueprint_plan` replaced the three counters that reading needed: a JSON map of nation slug to fragments, written one nation per request at `grinding.blueprint-plan`, because each line of the planner is an independent decision.
 
-## Group spend belongs to the group, never to a nation
-A group fragment eats six blueprints of *some other* nation in the vehicle's group, and which one is settled when it is spent, not when it is planned. Nothing may charge a nation's stack for it. The Blueprints board deliberately measures no plan against any stock at all — `blueprints.stock` is raw material recorded, and `blueprints.planned` is a total. Anything that starts reporting a per-nation shortfall is inventing a debt.
+The map counts *fragments*. What they come to in blueprints is `BlueprintCost::plan()`, and it needs the tier and the vehicle's nation — there is no summing the map without both.
+
+## A plan names its nation; the board still measures nothing against stock
+A plan used to say only "somewhere in the group", so charging any one nation's stack for it would have been invented. That is no longer true — `blueprint_plan` is keyed by nation, and `BlueprintCost::payingNations()` is the whole of which nations may appear: the vehicle's own and the peers in its group, own first. A blueprint never leaves its group, so a nation outside it is a 404 rather than a validation error.
+
+The board still measures no plan against any stock. `blueprints.stock` is raw material recorded, `blueprints.planned` is a total across every nation together, and the planner prints "N held" beside a line to be read, not to report a shortfall. A per-nation shortfall is answerable now rather than invented — but it is still not claimed anywhere, and adding it is a decision, not a tidy-up.
 
 ## Three different things all sound like "blueprints"
 `wot_tank_purchases.blueprint_fragments` is fragments built towards one vehicle. `wot_blueprints.quantity` is the raw material they are crafted from, held per nation with `universal` as a twelfth row. `wot_tank_purchases.research_xp` is neither — it is what a player read off the game screen after the game applied the discount, and it is kept even though the discount is now derivable. `unlocks.blueprint_xp` on the XP board is the derived one. The two are shown side by side where they differ precisely because the board cannot tell which is stale.

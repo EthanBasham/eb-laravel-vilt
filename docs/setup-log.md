@@ -3692,3 +3692,58 @@ ten; both now record ten.
 **Production needs `php artisan migrate`** for the three new columns.
 
 Suite: **147 passed, 1613 assertions** on `GrindingTest`.
+
+## 2026-09-16 — Fragments are national **and** universal: the planner replans by nation
+
+Reverses the central claim of the 2026-09-15 entry above — *"Three planned counters, not one,
+because the sources are an OR"*. They are not an OR. Every fragment of a vehicle's blueprint is
+crafted from national blueprints **and** universal ones together; the only choice is which nation
+pays the national half, the vehicle's own or a peer in its group at six to one. There is no
+fragment bought with universal blueprints alone, and none bought without them.
+
+**The old reading under-quoted every plan by roughly a third**, and put a "Universal" row in the
+planner for a purchase that cannot happen. Confirmed with the user before any of it was changed,
+along with the three questions the code could not answer: whether the table's existing `national`
+and `universal` columns are the pair (they are — tier X is 4 + 12 per fragment, so a whole tier X
+blueprint is 48 national and 144 universal), whether the six-to-one surcharge touches the
+universal half (it does not), and which nations earn a line (the vehicle's own and its group
+peers).
+
+**`blueprint_plan`, a JSON map of nation to fragments,** replaces `blueprint_plan_own`,
+`_group` and `_universal`. A column per nation was never on: which nations a vehicle may draw on
+is config, and the database has no business mirroring it. `blueprint_plan_group` could not say
+*which* peer would pay — the thing the planner now asks — and `blueprint_plan_universal` recorded
+a purchase that does not exist, so neither could be carried across; the migration moves the
+own-nation counter into the map and lets the other two go. Nothing was lost in practice: no row
+on this account had a plan on it.
+
+**One nation per request, at its own URL.** `PATCH /wot/grinding/purchases/{tankId}/blueprint-plan/{nation}`,
+with the nation in the path for the reason the blueprint stock route already gives — it is part of
+what is being written, not a value written against it. Each line of the planner is an independent
+decision, and sending the map whole would mean every stepper click carrying a rewrite of the other
+nations. A nation outside the vehicle's group 404s rather than failing validation: a blueprint
+never leaves its group, so Sweden paying for a U.S. tank is a URL with no meaning.
+
+**The modal's middle section is "Fragments Planned"** — one line per nation that could pay, own
+first, reading `<counter> : <flag> <national> + <globe> <universal>`, with the per-fragment rate
+and what is in that stack as a muted hint. The sentence that stood above it, *"One fragment is
+crafted from any one of these, and a blueprint can mix them"*, is gone: it was the wrong model
+stated out loud.
+
+**`cost` and `group` are off the cell.** Each line carries its own `per_fragment` pair and the
+lines are the group spelled out, so both were dead payload across 67 rows of nine tiers.
+
+**The counters have − and + buttons**, via a new `buttons` prop on
+`EditableNumber` that also takes a `min`/`max` to step within. This is not the chevron detour of
+2026-09-14 coming back: that was the browser's own spin buttons on an `input[type=number]`, where
+the digits sat hard against them because padding lands outside a `::-webkit-inner-spin-button`.
+These are ordinary buttons outside the input, so the gap is just the gap between two elements. A
+step is applied at once and saved after the same 400 ms pause a typed change gets, so holding a
+button down sends one request; a `pending` flag keeps the reload from another edit on the page
+from arriving with the old figure and undoing the click. The component's root is now a wrapper
+span, `display:contents` unless there are buttons to wrap, so every other caller lays the bare
+field out exactly as before.
+
+**Production needs `php artisan migrate`.**
+
+Suite: **374 passed, 2700 assertions.**

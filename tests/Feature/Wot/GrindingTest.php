@@ -2498,51 +2498,135 @@ it('still quotes a vehicle already researched', function () {
 });
 
 /**
- * A fragment is crafted against a nation, and a national blueprint can cross to
- * another nation in the same group — so the cell has to say which group it is
- * in, not only which nation.
+ * A fragment is crafted against a nation, and the cell has to carry the
+ * vehicle's own — a line is one nation all the way down, but the planner asks
+ * what a fragment costs here.
+ *
+ * Which nations its blueprints can cross to is not a second field beside it:
+ * the group is spelled out one nation per line under 'planned', with what each
+ * would charge, so there is nothing left for a group object to say.
  */
-it('carries the vehicle nation and the group its blueprints cross', function () {
+it('carries the vehicle own nation on every cell', function () {
     $user = User::factory()->create();
     freeXpLine($user);
 
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
         ->where('blueprints.rows.0.cells.10.nation', 'ussr')
-        ->where('blueprints.rows.0.cells.10.group.key', 'union')
-        ->where('blueprints.rows.0.cells.10.group.name', 'Union')
-        ->where('blueprints.rows.0.cells.10.group.nations', ['ussr', 'china'])
-        ->where('blueprints.rows.0.cells.10.cost', ['national' => 4, 'group' => 24, 'universal' => 12]),
+        ->missing('blueprints.rows.0.cells.10.group')
+        ->missing('blueprints.rows.0.cells.10.cost'),
     );
 });
 
 /**
- * The three sources are alternatives chosen per fragment, so a plan records
- * each separately and only the raw blueprints they come to are added up —
- * a group fragment costs six times what an own-nation one does.
+ * Every fragment costs national blueprints AND universal ones — the two halves
+ * are both spent, not chosen between. The only choice is which nation pays the
+ * national half: the vehicle's own, or a peer in its group at six to one.
  */
-it('costs a plan in raw blueprints, charging group fragments six to one', function () {
+it('costs a plan as a national half and a universal half, together', function () {
     $user = User::factory()->create();
     freeXpLine($user);
 
-    $this->actingAs($user)->patch(route('wot.grinding.purchase', 100), [
-        'blueprint_plan_own' => 2,
-        'blueprint_plan_group' => 1,
-        'blueprint_plan_universal' => 3,
-    ]);
+    // The line is Soviet, so the group is the Union and China is its one peer.
+    $this->actingAs($user)->patch(route('wot.grinding.blueprint-plan', [100, 'ussr']), ['fragments' => 2]);
+    $this->actingAs($user)->patch(route('wot.grinding.blueprint-plan', [100, 'china']), ['fragments' => 1])
+        ->assertRedirect();
 
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
-        ->where('blueprints.rows.0.cells.10.planned.own', 2)
-        ->where('blueprints.rows.0.cells.10.planned.group', 1)
-        ->where('blueprints.rows.0.cells.10.planned.universal', 3)
-        ->where('blueprints.rows.0.cells.10.planned.fragments', 6)
-        // 2 x 4 own-nation, plus 1 x 24 across the group.
+        // Own nation first, at 4 + 12 a fragment.
+        ->where('blueprints.rows.0.cells.10.planned.lines.0.nation', 'ussr')
+        ->where('blueprints.rows.0.cells.10.planned.lines.0.is_own', true)
+        ->where('blueprints.rows.0.cells.10.planned.lines.0.fragments', 2)
+        ->where('blueprints.rows.0.cells.10.planned.lines.0.national', 8)
+        ->where('blueprints.rows.0.cells.10.planned.lines.0.universal', 24)
+        // The peer pays six to one on its own blueprints, and buys no relief
+        // from the universal half.
+        ->where('blueprints.rows.0.cells.10.planned.lines.1.nation', 'china')
+        ->where('blueprints.rows.0.cells.10.planned.lines.1.is_own', false)
+        ->where('blueprints.rows.0.cells.10.planned.lines.1.national', 24)
+        ->where('blueprints.rows.0.cells.10.planned.lines.1.universal', 12)
+        ->where('blueprints.rows.0.cells.10.planned.fragments', 3)
         ->where('blueprints.rows.0.cells.10.planned.national_blueprints', 32)
         ->where('blueprints.rows.0.cells.10.planned.universal_blueprints', 36)
-        ->where('blueprints.rows.0.planned_fragments', 6)
-        ->where('blueprints.planned.fragments', 6)
+        ->where('blueprints.rows.0.planned_fragments', 3)
+        ->where('blueprints.planned.fragments', 3)
         ->where('blueprints.planned.national_blueprints', 32)
         ->where('blueprints.planned.universal_blueprints', 36),
     );
+});
+
+/**
+ * A blueprint never leaves its group, so the planner offers exactly the nations
+ * that could pay — and offers them whether or not anything is planned against
+ * them, so it draws a fixed set of rows.
+ */
+it('offers the vehicle own nation and its group peers, own first', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->has('blueprints.rows.0.cells.10.planned.lines', 2)
+        ->where('blueprints.rows.0.cells.10.planned.lines.0.nation', 'ussr')
+        ->where('blueprints.rows.0.cells.10.planned.lines.1.nation', 'china')
+        // The rate each would charge, so the row can show it without a table.
+        ->where('blueprints.rows.0.cells.10.planned.lines.0.per_fragment', ['national' => 4, 'universal' => 12])
+        ->where('blueprints.rows.0.cells.10.planned.lines.1.per_fragment', ['national' => 24, 'universal' => 12])
+        // Nothing planned, but the lines are there to plan on.
+        ->where('blueprints.rows.0.cells.10.planned.fragments', 0),
+    );
+});
+
+it('refuses a nation that could never pay for the vehicle', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+
+    // Sweden is in the Coalition; a Soviet tank draws on the Union alone.
+    $this->actingAs($user)->patch(route('wot.grinding.blueprint-plan', [100, 'sweden']), ['fragments' => 1])
+        ->assertNotFound();
+
+    $this->actingAs($user)->patch(route('wot.grinding.blueprint-plan', [100, 'atlantis']), ['fragments' => 1])
+        ->assertNotFound();
+
+    expect(WotTankPurchase::where('wot_account_id', $account->id)->count())->toBe(0);
+});
+
+/**
+ * An absent nation and a nation planned for nothing are the same state, so
+ * there is one spelling of it rather than two.
+ */
+it('drops a nation from the plan when its count goes back to zero', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.blueprint-plan', [100, 'ussr']), ['fragments' => 3]);
+    $this->actingAs($user)->patch(route('wot.grinding.blueprint-plan', [100, 'china']), ['fragments' => 1]);
+    $this->actingAs($user)->patch(route('wot.grinding.blueprint-plan', [100, 'china']), ['fragments' => 0]);
+
+    expect(WotTankPurchase::where('wot_account_id', $account->id)->first()->blueprint_plan)->toBe(['ussr' => 3]);
+});
+
+it('writes one nation without disturbing the others', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.blueprint-plan', [100, 'ussr']), ['fragments' => 2]);
+    $this->actingAs($user)->patch(route('wot.grinding.blueprint-plan', [100, 'china']), ['fragments' => 1]);
+    $this->actingAs($user)->patch(route('wot.grinding.blueprint-plan', [100, 'ussr']), ['fragments' => 5]);
+
+    expect(WotTankPurchase::where('wot_account_id', $account->id)->first()->blueprint_plan)
+        ->toBe(['china' => 1, 'ussr' => 5]);
+});
+
+it('will not let one account plan another account blueprint', function () {
+    $owner = User::factory()->create();
+    $account = freeXpLine($owner);
+
+    $intruder = User::factory()->create();
+    WotAccount::factory()->for($intruder)->create(['account_id' => 999_999]);
+
+    $this->actingAs($intruder)->patch(route('wot.grinding.blueprint-plan', [100, 'ussr']), ['fragments' => 2])
+        ->assertRedirect();
+
+    expect(WotTankPurchase::where('wot_account_id', $account->id)->count())->toBe(0);
 });
 
 /**
@@ -2553,10 +2637,8 @@ it('folds built and planned fragments into what the plan would leave', function 
     $user = User::factory()->create();
     freeXpLine($user);
 
-    $this->actingAs($user)->patch(route('wot.grinding.purchase', 100), [
-        'blueprint_fragments' => $built,
-        'blueprint_plan_own' => $planned,
-    ]);
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 100), ['blueprint_fragments' => $built]);
+    $this->actingAs($user)->patch(route('wot.grinding.blueprint-plan', [100, 'ussr']), ['fragments' => $planned]);
 
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
         ->where('blueprints.rows.0.cells.10.xp_after_plan', $left),
@@ -2618,15 +2700,18 @@ it('bounds a fragment count by what the tier takes', function (int $tankId, int 
     'one more than tier X takes' => [100, 13, false],
 ]);
 
-it('rejects a planned source count the board could never produce', function (array $payload) {
+it('rejects a planned fragment count the blueprint could never take', function (mixed $fragments) {
     $user = User::factory()->create();
     freeXpLine($user);
 
-    $this->actingAs($user)->patch(route('wot.grinding.purchase', 100), $payload)->assertSessionHasErrors();
+    $this->actingAs($user)->patch(route('wot.grinding.blueprint-plan', [100, 'ussr']), ['fragments' => $fragments])
+        ->assertSessionHasErrors('fragments');
 })->with([
-    'negative own' => [['blueprint_plan_own' => -1]],
-    'over the blueprint' => [['blueprint_plan_group' => 13]],
-    'absurd universal' => [['blueprint_plan_universal' => 500]],
+    'negative' => [-1],
+    // A tier X blueprint takes twelve, so a thirteenth buys nothing.
+    'over the blueprint' => [13],
+    'absurd' => [500],
+    'not a number' => ['lots'],
 ]);
 
 /**
@@ -2666,7 +2751,7 @@ it('remembers the Blueprints filters under their own board key', function () {
  * one of them is a claim about ownership. Recording a discount or a fragment
  * count must not stop the play-history back-fill settling the tank.
  */
-it('does not un-own a tank by recording a figure against it', function (string $field, int $value) {
+it('does not un-own a tank by recording a figure against it', function (string $name, array $args, array $payload) {
     $user = User::factory()->create();
     $account = freeXpLine($user);
     played($account, 100);
@@ -2675,8 +2760,7 @@ it('does not un-own a tank by recording a figure against it', function (string $
         fn ($page) => $page->where('purchase.rows.0.cells.9.is_purchased', true),
     );
 
-    $route = $field === 'research_xp' ? 'wot.grinding.research-xp' : 'wot.grinding.purchase';
-    $this->actingAs($user)->patch(route($route, 90), [$field => $value])->assertRedirect();
+    $this->actingAs($user)->patch(route($name, $args), $payload)->assertRedirect();
 
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
         // Still settled, on both boards that ask.
@@ -2684,9 +2768,11 @@ it('does not un-own a tank by recording a figure against it', function (string $
         ->where('xp.rows.0.cells.8.unlocks.is_unlocked', true),
     );
 })->with([
-    'a blueprint discount' => ['research_xp', 60_000],
-    'a fragment count' => ['blueprint_fragments', 10],
-    'a blueprint plan' => ['blueprint_plan_own', 2],
+    // The route is part of the case now: a blueprint plan is written per
+    // nation, at a URL of its own, rather than as a field on the purchase.
+    'a blueprint discount' => ['wot.grinding.research-xp', [90], ['research_xp' => 60_000]],
+    'a fragment count' => ['wot.grinding.purchase', [90], ['blueprint_fragments' => 10]],
+    'a blueprint plan' => ['wot.grinding.blueprint-plan', [90, 'ussr'], ['fragments' => 2]],
 ]);
 
 it('still lets an explicit un-tick beat the back-fill', function () {

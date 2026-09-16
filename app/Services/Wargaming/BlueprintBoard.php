@@ -58,11 +58,9 @@ class BlueprintBoard
             'rows' => $rows->all(),
             'tiers' => $this->tierColumns($rows),
             'blueprint_fragments' => (int) $rows->sum('fragments'),
-            // What the plans across the whole board come to. Recorded and
-            // totalled, never measured against the stock below: a group
-            // fragment eats six blueprints of *some* other nation in its group
-            // and the counter cannot say which, so nothing here pretends to
-            // know what any one stack owes.
+            // What the plans across the whole board come to, in blueprints of
+            // every nation together. Recorded and totalled, never measured
+            // against the stock below — see plannedTotals().
             'planned' => $this->plannedTotals($rows),
             // Carried on this board's payload rather than as a sibling prop, so
             // the reload every edit on the tab already asks for brings it back.
@@ -153,12 +151,7 @@ class BlueprintBoard
         $baseXp = (int) (($predecessor?->next_tanks ?? [])[$vehicle->tank_id] ?? 0);
         $built = (int) ($purchase?->blueprint_fragments ?? 0);
 
-        $planned = $this->cost->plan(
-            $tier,
-            (int) ($purchase?->blueprint_plan_own ?? 0),
-            (int) ($purchase?->blueprint_plan_group ?? 0),
-            (int) ($purchase?->blueprint_plan_universal ?? 0),
-        );
+        $planned = $this->cost->plan($tier, (string) $vehicle->nation, (array) ($purchase?->blueprint_plan ?? []));
 
         return [
             'tank_id' => $vehicle->tank_id,
@@ -166,8 +159,10 @@ class BlueprintBoard
             'tier' => $tier,
             // The vehicle's own, not the row's. A line is one nation all the
             // way down, but the planner asks what a fragment costs *here*.
+            //
+            // The group it belongs to is not carried beside it: which nations
+            // may pay is already spelled out, one per line, under 'planned'.
             'nation' => $vehicle->nation,
-            'group' => $this->cost->groupOf((string) $vehicle->nation),
             // Undiscounted, which is what the cell prints: it is constant per
             // tank, so the column reads as what the tank is worth. What the
             // fragments have taken off it is xp_saved.
@@ -175,15 +170,14 @@ class BlueprintBoard
             'fragments' => $built,
             'fragments_needed' => $this->cost->fragmentsNeeded($tier),
             'percent_per_fragment' => $this->cost->percentPerFragment($tier),
-            'cost' => $this->cost->costPerFragment($tier),
             'xp_saved' => $this->cost->xpSaved($tier, $baseXp, $built),
             'xp_remaining' => $this->cost->xpRemaining($tier, $baseXp, $built),
-            'planned' => [
-                'own' => (int) ($purchase?->blueprint_plan_own ?? 0),
-                'group' => (int) ($purchase?->blueprint_plan_group ?? 0),
-                'universal' => (int) ($purchase?->blueprint_plan_universal ?? 0),
-                ...$planned,
-            ],
+            /*
+             * One line per nation that could pay for a fragment, plus what they
+             * come to. The lines are the planner's rows; the totals are what
+             * the grid cell prints and what plannedTotals() sums.
+             */
+            'planned' => $planned,
             'xp_after_plan' => $this->cost->xpRemaining($tier, $baseXp, $built + $planned['fragments']),
             /*
              * A starter vehicle is not researched from anything, so fragments

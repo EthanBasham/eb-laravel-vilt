@@ -43,16 +43,43 @@ const props = defineProps({
      * a save is in flight.
      */
     stepper: { type: Boolean, default: false },
+    /*
+     * A minus and a plus flanking the field, for a count that is nudged rather
+     * than transcribed — a fragment at a time against a blueprint.
+     *
+     * Not the chevrons that were tried and reverted here: those were the
+     * browser's own spin buttons on an input[type=number], and the digits sat
+     * hard against them because padding lands outside a ::-webkit-inner-spin-
+     * button and a margin on it drew no space. These are ordinary buttons
+     * outside the input, so the gap is the gap between two elements.
+     *
+     * Implies the stepper's own manners — bare digits, debounced saves — and is
+     * only used alongside it.
+     */
+    buttons: { type: Boolean, default: false },
+    // The range a button will step within. The server bounds these too; this is
+    // so a button never offers a figure it knows would be refused.
+    min: { type: Number, default: 0 },
+    max: { type: Number, default: null },
 });
 
 const raw = ref(String(props.modelValue ?? 0));
 const saving = ref(false);
 const editing = ref(false);
 
+/*
+ * Whether a stepped value is written here but not yet saved.
+ *
+ * A button applies its step at once and saves after a pause, so for that moment
+ * the field is ahead of the server. Without this the reload from some other
+ * edit on the page would arrive carrying the old figure and undo the click.
+ */
+const pending = ref(false);
+
 // Keep in step with server responses — an edit elsewhere can change totals —
-// but never while this field is being typed in.
+// but never while this field is being typed in or holds an unsaved step.
 watch(() => props.modelValue, (v) => {
-    if (!editing.value) raw.value = String(v ?? 0);
+    if (!editing.value && !pending.value) raw.value = String(v ?? 0);
 });
 
 const digits = (v) => String(v ?? '').replace(/[^\d]/g, '');
@@ -120,12 +147,34 @@ const click = (event) => {
 let pendingSave;
 
 const scheduleSave = () => {
-    if (!props.stepper) {
+    if (!props.stepper && !props.buttons) {
         return;
     }
 
     clearTimeout(pendingSave);
     pendingSave = setTimeout(save, 400);
+};
+
+const value = () => Number(digits(raw.value) || 0);
+
+const atMin = computed(() => value() <= props.min);
+const atMax = computed(() => props.max !== null && value() >= props.max);
+
+/*
+ * One step, applied here and saved after the same pause a typed change gets, so
+ * holding a button down sends one request rather than one per click.
+ */
+const step = (delta) => {
+    const next = Math.max(props.min, Math.min(props.max ?? Infinity, value() + delta));
+
+    if (next === value()) {
+        return;
+    }
+
+    raw.value = String(next);
+    pending.value = true;
+
+    scheduleSave();
 };
 
 const commit = () => {
@@ -136,9 +185,13 @@ const commit = () => {
 };
 
 const save = () => {
-    const next = Number(digits(raw.value) || 0);
+    const next = value();
 
-    if (next === Number(props.modelValue ?? 0)) return;
+    if (next === Number(props.modelValue ?? 0)) {
+        pending.value = false;
+
+        return;
+    }
 
     saving.value = true;
 
@@ -146,7 +199,10 @@ const save = () => {
         preserveScroll: true,
         // Only the board comes back; nothing else on the page moved.
         only: props.only,
-        onFinish: () => (saving.value = false),
+        onFinish: () => {
+            saving.value = false;
+            pending.value = false;
+        },
     };
 
     if (props.optimistic) {
@@ -159,42 +215,75 @@ const save = () => {
 
 <template>
     <!--
-        A text input rather than type="number": the spinner arrows are visual
-        noise on a dense table, and arrow keys silently nudging a figure is a
-        poor fit for numbers that are transcribed from the game rather than
-        adjusted. inputmode keeps the numeric keypad on touch devices.
-
-        text-sm is not redundant with the surrounding table. @tailwindcss/forms
-        puts font-size: 1rem on text inputs in the base layer, so these did not
-        inherit the table's 14px and rendered a size larger than every figure
-        beside them. The utility overrides it, and brings the line-height down
-        with it — which is what makes the group shorter, since the buttons take
-        their height from this field.
-
-        w-20 is measured rather than guessed: Instrument Sans at 14px puts a
-        seven-figure price ("6,100,000") at 67.6px of text, 77.6px once px-1 and
-        the border are counted, so 80px holds every realistic price.
+        A wrapper that only exists when there are buttons to wrap. Without them
+        it is display:contents, so the input sits in the caller's own flex or
+        table layout exactly as it did before this span was here — every other
+        caller places it as a bare field and lays it out itself.
     -->
-    <!-- A stepper is never disabled while saving: its saves are debounced, and
-         disabling the field mid-save would eat the next chevron click. -->
-    <input
-        :value="display"
-        type="text"
-        inputmode="numeric"
-        autocomplete="off"
-        class="w-20 border py-0.5 text-sm tabular-nums transition-colors focus:border-wot-gold"
-        :class="[
-            align,
-            tone,
-            stepper ? 'box-border ps-1 pe-1' : 'px-1',
-            saving && !stepper ? 'opacity-50' : '',
-        ]"
-        :disabled="saving && !stepper"
-        @input="onInput"
-        @change="scheduleSave"
-        @focus="focus"
-        @click="click"
-        @blur="commit"
-        @keyup.enter="$event.target.blur()"
-    >
+    <span :class="buttons ? 'inline-flex items-stretch' : 'contents'">
+        <button
+            v-if="buttons"
+            type="button"
+            class="border border-e-0 border-wot-border bg-wot-sunken px-2 text-sm leading-none text-wot-dim transition-colors hover:border-wot-gold hover:text-wot-gold disabled:opacity-30 disabled:hover:border-wot-border disabled:hover:text-wot-dim"
+            :disabled="atMin"
+            aria-label="One fewer"
+            @click="step(-1)"
+        >
+            −
+        </button>
+
+        <!--
+            A text input rather than type="number": the spinner arrows are visual
+            noise on a dense table, and arrow keys silently nudging a figure is a
+            poor fit for numbers that are transcribed from the game rather than
+            adjusted. inputmode keeps the numeric keypad on touch devices.
+
+            text-sm is not redundant with the surrounding table. @tailwindcss/forms
+            puts font-size: 1rem on text inputs in the base layer, so these did not
+            inherit the table's 14px and rendered a size larger than every figure
+            beside them. The utility overrides it, and brings the line-height down
+            with it — which is what makes the group shorter, since the buttons take
+            their height from this field.
+
+            w-20 is measured rather than guessed: Instrument Sans at 14px puts a
+            seven-figure price ("6,100,000") at 67.6px of text, 77.6px once px-1 and
+            the border are counted, so 80px holds every realistic price. A field
+            with buttons either side is a count rather than a price, and takes
+            the narrower width the two chrome elements leave room for.
+        -->
+        <!-- A stepper is never disabled while saving: its saves are debounced, and
+             disabling the field mid-save would eat the next chevron click. -->
+        <input
+            :value="display"
+            type="text"
+            inputmode="numeric"
+            autocomplete="off"
+            class="border py-0.5 text-sm tabular-nums transition-colors focus:border-wot-gold"
+            :class="[
+                align,
+                tone,
+                buttons ? 'w-10' : 'w-20',
+                stepper ? 'box-border ps-1 pe-1' : 'px-1',
+                saving && !stepper ? 'opacity-50' : '',
+            ]"
+            :disabled="saving && !stepper"
+            @input="onInput"
+            @change="scheduleSave"
+            @focus="focus"
+            @click="click"
+            @blur="commit"
+            @keyup.enter="$event.target.blur()"
+        >
+
+        <button
+            v-if="buttons"
+            type="button"
+            class="border border-s-0 border-wot-border bg-wot-sunken px-2 text-sm leading-none text-wot-dim transition-colors hover:border-wot-gold hover:text-wot-gold disabled:opacity-30 disabled:hover:border-wot-border disabled:hover:text-wot-dim"
+            :disabled="atMax"
+            aria-label="One more"
+            @click="step(1)"
+        >
+            +
+        </button>
+    </span>
 </template>

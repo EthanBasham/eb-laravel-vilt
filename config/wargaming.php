@@ -227,10 +227,16 @@ return [
     | figure a player transcribes into `wot_tank_purchases.research_xp` is still
     | kept, and the derived one is shown beside it rather than replacing it.
     |
-    | 'national', 'group' and 'universal' are alternatives, not a total: one
-    | fragment is crafted from own-nation blueprints, OR from another nation in
-    | the same group at six to one, OR from universal ones, and a blueprint may
-    | mix sources fragment by fragment.
+    | 'national' and 'universal' are BOTH spent on every fragment, not a choice
+    | between them: one fragment costs that many national blueprints AND that
+    | many universal ones. 'group' is what the national half costs when a peer
+    | nation in the same group pays it instead of the vehicle's own — six to one
+    | — and the universal half is unchanged by who pays. There is no fragment
+    | bought with universal blueprints alone.
+    |
+    | This corrects what was recorded here on 2026-09-15, that the three columns
+    | were alternative prices for one fragment. They are not, and a plan costed
+    | that way quoted roughly a third of the true price.
     |
     | 'percent' is the share of base research XP a fragment removes — every
     | fragment EXCEPT the last, which covers whatever remains and lands the

@@ -2,13 +2,14 @@
 import { router } from '@inertiajs/vue3';
 import { computed, nextTick, ref, watch } from 'vue';
 import EditableNumber from './EditableNumber.vue';
+import NationFlag from './NationFlag.vue';
 
 /**
  * One vehicle's blueprint: what has been built, and where the rest comes from.
  *
  * The grid cell has room for two lines and no controls, so everything the
  * fragments mean is said here — what the tank costs, what a fragment is worth
- * against that, and what each of the three sources would charge for the ones
+ * against that, and what each nation that could pay would charge for the ones
  * still missing.
  *
  * Native <dialog>, like every other modal in the app: the platform supplies the
@@ -26,8 +27,8 @@ import EditableNumber from './EditableNumber.vue';
  */
 const props = defineProps({
     cell: { type: Object, default: null },
-    // Blueprints held, straight from the board, so a source row can say what is
-    // in the stack it would spend. Nothing is measured against it.
+    // Blueprints held, straight from the board, so each nation's line can say
+    // what is in the stack it would spend. Nothing is measured against it.
     stock: { type: Array, default: () => [] },
 });
 
@@ -60,48 +61,23 @@ const url = computed(() => `/wot/grinding/purchases/${props.cell?.tank_id}`);
 const held = (nation) => props.stock.find((stack) => stack.nation === nation)?.quantity ?? 0;
 
 /**
- * The three ways to craft a fragment, in the order the game charges for them.
+ * The nations that could pay for a fragment, own first, each with what its
+ * share of the plan comes to.
  *
- * Alternatives rather than a breakdown: a fragment is paid for out of one of
- * these, and a blueprint may take a different one each time. The group row is
- * the odd one — it spends the *other* nations in the group, six blueprints for
- * one, and says so rather than naming a stack it could draw on.
+ * Every figure is the server's: which nations may pay, what one fragment costs
+ * each of them, and what the counter multiplies out to. A fragment is never
+ * bought from one source — it takes national blueprints *and* universal ones —
+ * so a line is a pair, and the only choice is whose national half it is.
+ *
+ * Own nation and the peers in its group, which is the whole of the choice: a
+ * blueprint never leaves its group. The peers are the dear ones, at six to one.
  */
-const sources = computed(() => {
-    if (!props.cell) return [];
-
-    const peers = (props.cell.group?.nations ?? []).filter((nation) => nation !== props.cell.nation);
-
-    return [
-        {
-            key: 'own',
-            field: 'blueprint_plan_own',
-            label: 'Own nation',
-            note: `${props.cell.cost.national} blueprint${props.cell.cost.national === 1 ? '' : 's'} a fragment`,
-            stack: `${n(held(props.cell.nation))} held`,
-            planned: props.cell.planned.own,
-            blueprints: props.cell.planned.own * props.cell.cost.national,
-        },
-        {
-            key: 'group',
-            field: 'blueprint_plan_group',
-            label: props.cell.group ? props.cell.group.name : 'Same group',
-            note: `${props.cell.cost.group} a fragment, at six to one`,
-            stack: peers.length ? peers.join(', ') : 'no other nation in the group',
-            planned: props.cell.planned.group,
-            blueprints: props.cell.planned.group * props.cell.cost.group,
-        },
-        {
-            key: 'universal',
-            field: 'blueprint_plan_universal',
-            label: 'Universal',
-            note: `${props.cell.cost.universal} a fragment`,
-            stack: `${n(held('universal'))} held`,
-            planned: props.cell.planned.universal,
-            blueprints: props.cell.planned.universal * props.cell.cost.universal,
-        },
-    ];
-});
+const lines = computed(() => (props.cell?.planned.lines ?? []).map((line) => ({
+    ...line,
+    // Its own URL, so a stepper writes one nation and leaves the rest alone.
+    url: `/wot/grinding/purchases/${props.cell.tank_id}/blueprint-plan/${line.nation}`,
+    held: held(line.nation),
+})));
 
 // Built and planned together can overshoot what the blueprint takes. Worth
 // saying, not worth refusing: a plan is written before it is spent, and the
@@ -111,11 +87,18 @@ const overPlanned = computed(() => Math.max(
     (props.cell?.fragments ?? 0) + (props.cell?.planned.fragments ?? 0) - (props.cell?.fragments_needed ?? 0),
 ));
 
-const clearPlan = () => router.patch(url.value, {
-    blueprint_plan_own: 0,
-    blueprint_plan_group: 0,
-    blueprint_plan_universal: 0,
-}, { preserveScroll: true, only: ['blueprints', 'totals'] });
+/*
+ * One request per nation that has anything on it, rather than a clear-all
+ * endpoint. Each is the same write the stepper beside it makes — a nation set
+ * back to zero — so there is no second path into the plan that could disagree
+ * with the first about what zero means.
+ */
+const clearPlan = () => lines.value
+    .filter((line) => line.fragments)
+    .forEach((line) => router.patch(line.url, { fragments: 0 }, {
+        preserveScroll: true,
+        only: ['blueprints', 'totals'],
+    }));
 </script>
 
 <template>
@@ -152,7 +135,10 @@ const clearPlan = () => router.patch(url.value, {
                         <EditableNumber
                             field="blueprint_fragments"
                             stepper
+                            buttons
+                            align="text-center"
                             :model-value="cell.fragments"
+                            :max="cell.fragments_needed"
                             :url="url"
                             :only="['blueprints', 'totals']"
                         />
@@ -165,47 +151,84 @@ const clearPlan = () => router.patch(url.value, {
                 </div>
             </div>
 
-            <h4 class="mt-5 text-xs font-bold uppercase tracking-wider text-wot-dim">Where the rest comes from</h4>
-            <p class="mt-1 text-xs text-wot-dim">
-                One fragment is crafted from any one of these, and a blueprint can mix them.
-            </p>
+            <h4 class="mt-5 text-xs font-bold uppercase tracking-wider text-wot-dim">Fragments Planned</h4>
 
-            <div class="mt-2 overflow-x-auto">
-                <table class="min-w-full text-sm">
-                    <thead>
-                        <tr class="text-xs uppercase tracking-wider text-wot-dim">
-                            <th scope="col" class="py-2 pe-3 text-left font-bold">Source</th>
-                            <th scope="col" class="px-3 py-2 text-left font-bold">Rate</th>
-                            <th scope="col" class="px-3 py-2 text-center font-bold">Fragments</th>
-                            <th scope="col" class="ps-3 py-2 text-right font-bold">Blueprints</th>
-                        </tr>
-                    </thead>
+            <!--
+                One line per nation that could pay, own first, then the peers in
+                its group at six to one. Read as: this many fragments, bought
+                with this many of that nation's blueprints and this many
+                universal ones.
 
-                    <tbody class="divide-y divide-wot-border-soft">
-                        <tr v-for="source in sources" :key="source.key">
-                            <td class="py-2 pe-3">
-                                <span class="text-wot-text">{{ source.label }}</span>
-                                <span class="block text-xs text-wot-dim">{{ source.stack }}</span>
-                            </td>
-                            <td class="px-3 py-2 text-xs text-wot-dim">{{ source.note }}</td>
-                            <td class="px-3 py-2 text-center">
-                                <EditableNumber
-                                    :field="source.field"
-                                    stepper
-                                    align="text-center"
-                                    :model-value="source.planned"
-                                    :url="url"
-                                    :only="['blueprints', 'totals']"
-                                />
-                            </td>
-                            <td class="ps-3 py-2 text-right tabular-nums"
-                                :class="source.blueprints ? 'text-wot-text' : 'text-wot-dim'">
-                                {{ n(source.blueprints) }}
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+                Both halves, always. A fragment is never crafted from one stack
+                or the other — the national blueprints and the universal ones
+                are both spent on every one of them — so the "+" is an addition
+                rather than a choice, which is the thing the row this replaced
+                got wrong.
+            -->
+            <ul role="list" class="mt-2 space-y-1">
+                <li
+                    v-for="line in lines"
+                    :key="line.nation"
+                    class="flex flex-wrap items-center gap-x-3 gap-y-1 border border-wot-border-soft px-3 py-2"
+                >
+                    <EditableNumber
+                        field="fragments"
+                        stepper
+                        buttons
+                        align="text-center"
+                        :model-value="line.fragments"
+                        :max="cell.fragments_needed"
+                        :url="line.url"
+                        :only="['blueprints', 'totals']"
+                    />
+
+                    <span aria-hidden="true" class="text-wot-dim">:</span>
+
+                    <span
+                        class="flex items-center gap-2 tabular-nums"
+                        :class="line.fragments ? 'text-wot-text' : 'text-wot-dim'"
+                        :title="`${n(line.held)} held`"
+                    >
+                        <NationFlag :nation="line.nation" />
+                        {{ n(line.national) }}
+                        <!-- The rate behind the figure, as blueprints to the
+                             fragment. A peer nation's six to one needs no words
+                             next to a (24:1) beside the own nation's (4:1). -->
+                        <span class="text-xs text-wot-dim">({{ line.per_fragment.national }}:1)</span>
+                    </span>
+
+                    <span aria-hidden="true" class="text-wot-dim">+</span>
+
+                    <span
+                        class="flex items-center gap-2 tabular-nums"
+                        :class="line.fragments ? 'text-wot-text' : 'text-wot-dim'"
+                    >
+                        <!-- Universal blueprints spend anywhere, so a globe
+                             rather than a flag. Inline rather than an image for
+                             the reason VehicleTypeIcon gives: currentColor
+                             takes a utility class, which an <img> could not.
+                             Blue, and not the line's own colour — it holds
+                             still while the figure beside it dims, which is
+                             what the flags opposite do. -->
+                        <svg
+                            viewBox="0 0 16 16"
+                            width="13"
+                            height="13"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.3"
+                            aria-hidden="true"
+                            class="shrink-0 text-wot-blue-light"
+                        >
+                            <circle cx="8" cy="8" r="6.4" />
+                            <ellipse cx="8" cy="8" rx="2.7" ry="6.4" />
+                            <path d="M1.9 5.9h12.2M1.9 10.1h12.2" />
+                        </svg>
+                        {{ n(line.universal) }}
+                        <span class="text-xs text-wot-dim">({{ line.per_fragment.universal }}:1)</span>
+                    </span>
+                </li>
+            </ul>
 
             <div class="mt-4 border-t border-wot-border-soft pt-3 text-sm">
                 <p class="text-wot-text">

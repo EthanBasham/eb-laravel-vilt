@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response as HttpResponse;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Wot\BoardFiltersRequest;
+use App\Http\Requests\Wot\UpdateBlueprintPlanRequest;
 use App\Http\Requests\Wot\UpdateBlueprintStockRequest;
 use App\Http\Requests\Wot\UpdateModulePlanRequest;
 use App\Http\Requests\Wot\UpdateModuleResearchRequest;
@@ -20,6 +21,7 @@ use App\Models\WotTankPurchase;
 use App\Models\WotVehicle;
 use App\Models\WotVehicleModule;
 use App\Services\Wargaming\AccountProgress;
+use App\Services\Wargaming\BlueprintCost;
 use App\Services\Wargaming\GrindBoard;
 use App\Services\Wargaming\ModuleTree;
 use Inertia\Inertia;
@@ -304,6 +306,42 @@ class GrindController extends Controller
         $purchase->banked_xp = max(0, (int) $purchase->banked_xp - $xp);
 
         $purchase->save();
+    }
+
+    /**
+     * Records which nation is to pay for how many of a vehicle's fragments.
+     *
+     * One nation per request, at its own URL, rather than the whole map in one
+     * payload: each line of the planner is an independent decision, and sending
+     * the set would mean every stepper click carrying a rewrite of the others.
+     *
+     * The nation is checked against the ones that could actually pay — the
+     * vehicle's own and the peers in its group — rather than against the list
+     * of nations in the game. A blueprint never leaves its group, so Sweden
+     * paying for a U.S. tank is not a plan that failed validation, it is a URL
+     * with no meaning.
+     */
+    public function updateBlueprintPlan(
+        UpdateBlueprintPlanRequest $request,
+        int $tankId,
+        string $nation,
+        BlueprintCost $cost,
+    ): RedirectResponse {
+        $account = $request->user()->wotAccount;
+
+        abort_unless($account, 404);
+
+        $vehicle = WotVehicle::where('tank_id', $tankId)->first();
+
+        abort_unless($vehicle, 404);
+        abort_unless(in_array($nation, $cost->payingNations((string) $vehicle->nation), strict: true), 404);
+
+        WotTankPurchase::firstOrNew([
+            'wot_account_id' => $account->id,
+            'tank_id' => $tankId,
+        ])->setPlannedFragments($nation, $request->integer('fragments'));
+
+        return back(fallback: route('wot.grinding'));
     }
 
     /**

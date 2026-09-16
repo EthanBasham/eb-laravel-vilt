@@ -9,10 +9,13 @@ namespace App\Services\Wargaming;
  * — hand-transcribed, because the encyclopedia publishes none of it. Two rules
  * here are easy to get wrong from the table alone:
  *
- * The three cost columns are alternatives chosen per fragment, not a combined
- * price. One fragment comes from own-nation blueprints, or from another nation
- * in the same group at six to one, or from universal ones, and a single
- * blueprint may mix the three across its fragments.
+ * Every fragment costs national blueprints *and* universal ones, together. The
+ * only choice is which nation pays the national half: the vehicle's own, or a
+ * peer in its group at six to one. There is no fragment bought with universal
+ * blueprints alone and none bought without them, so the table's three columns
+ * are two halves and a surcharge rather than three prices — `universal` is
+ * charged on every fragment whichever nation pays, and `group` is what the
+ * national half costs when a peer pays it.
  *
  * The last fragment does not remove `percent`. Fragments one to F-1 each take
  * their listed share; the Fth covers whatever is left and lands the vehicle on
@@ -66,7 +69,10 @@ class BlueprintCost
     }
 
     /**
-     * Raw blueprints per fragment, one figure per source.
+     * Raw blueprints per fragment, one figure per column.
+     *
+     * The columns are not three prices — see the class docblock. What one
+     * fragment actually costs a given nation is fragmentCost().
      *
      * @return array{national: int, group: int, universal: int}
      */
@@ -79,6 +85,46 @@ class BlueprintCost
             'group' => $row['group'],
             'universal' => $row['universal'],
         ];
+    }
+
+    /**
+     * What one fragment costs when a given nation pays the national half.
+     *
+     * The universal half does not move: a peer nation is charged six to one on
+     * its own blueprints, and buys no relief from the universal ones every
+     * fragment takes.
+     *
+     * @return array{national: int, universal: int}
+     */
+    public function fragmentCost(int $tier, bool $isOwnNation): array
+    {
+        $cost = $this->costPerFragment($tier);
+
+        return [
+            'national' => $isOwnNation ? $cost['national'] : $cost['group'],
+            'universal' => $cost['universal'],
+        ];
+    }
+
+    /**
+     * The nations a vehicle's fragments can be paid for out of, own first.
+     *
+     * Its own nation and the peers in its group, which is the whole of the
+     * choice — a blueprint never leaves its group. Own first because it is the
+     * cheap one and the one most plans are made of; the peers keep the config's
+     * order after it.
+     *
+     * A nation outside every group is its own only source, which is the honest
+     * answer rather than a special case: nothing else can pay for it.
+     *
+     * @return list<string>
+     */
+    public function payingNations(string $nation): array
+    {
+        $peers = collect($this->groupOf($nation)['nations'] ?? [])
+            ->reject(fn (string $peer): bool => $peer === $nation);
+
+        return [$nation, ...$peers->values()->all()];
     }
 
     /**
@@ -111,24 +157,47 @@ class BlueprintCost
     }
 
     /**
-     * What a plan costs in raw blueprints.
+     * What a plan comes to: one line per nation that could pay, and the totals.
      *
-     * Group fragments are charged at the group rate, which is why they are
-     * counted apart from own-nation ones and then folded in here: both are
-     * national blueprints, and only the rate differs. Nothing is capped — the
-     * raw spend of a plan is its raw spend even where it overshoots the
-     * blueprint, which xpRemaining() is the thing that clamps.
+     * Every nation in the group gets a line whether or not anything is planned
+     * against it, so the planner draws a fixed set of rows and the client never
+     * has to work out which nations a vehicle may draw on — that rule has one
+     * home, and it is payingNations() above.
      *
-     * @return array{national_blueprints: int, universal_blueprints: int, fragments: int}
+     * Nothing is capped. The raw spend of a plan is its raw spend even where it
+     * overshoots the blueprint; xpRemaining() is the thing that clamps.
+     *
+     * @param  array<string, int>  $fragmentsByNation
+     * @return array{lines: list<array{nation: string, is_own: bool, fragments: int, national: int, universal: int, per_fragment: array{national: int, universal: int}}>, fragments: int, national_blueprints: int, universal_blueprints: int}
      */
-    public function plan(int $tier, int $own, int $group, int $universal): array
+    public function plan(int $tier, string $nation, array $fragmentsByNation): array
     {
-        $cost = $this->costPerFragment($tier);
+        $lines = collect($this->payingNations($nation))->map(function (string $paying) use ($tier, $nation, $fragmentsByNation): array {
+            $fragments = max(0, (int) ($fragmentsByNation[$paying] ?? 0));
+            $cost = $this->fragmentCost($tier, $paying === $nation);
+
+            return [
+                'nation' => $paying,
+                'is_own' => $paying === $nation,
+                'fragments' => $fragments,
+                'national' => $fragments * $cost['national'],
+                'universal' => $fragments * $cost['universal'],
+                'per_fragment' => $cost,
+            ];
+        });
 
         return [
-            'national_blueprints' => $own * $cost['national'] + $group * $cost['group'],
-            'universal_blueprints' => $universal * $cost['universal'],
-            'fragments' => $own + $group + $universal,
+            'lines' => $lines->all(),
+            'fragments' => (int) $lines->sum('fragments'),
+            /*
+             * Totalled across nations, which is what the board-wide figure has
+             * always been: how many blueprints the plans would spend, not whose
+             * stack they come out of. A shortfall against one nation's stock is
+             * answerable now that a line names its nation, but nothing here
+             * claims it — see the Blueprints rules.
+             */
+            'national_blueprints' => (int) $lines->sum('national'),
+            'universal_blueprints' => (int) $lines->sum('universal'),
         ];
     }
 

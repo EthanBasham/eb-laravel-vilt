@@ -21,6 +21,10 @@ Route::patch('/grinding/filters', [GrindController::class, 'updateFilters'])->na
 // Bound by tank_id rather than by model: a purchase row is created on first
 // use, so there is nothing to bind to until then.
 Route::patch('/grinding/purchases/{tankId}', [GrindController::class, 'updatePurchase'])->name('grinding.purchase');
+// Which nation is to pay for how many of a vehicle's blueprint fragments. The
+// nation is in the path for the reason the blueprint stock below gives: it is
+// part of what is being written, not a value written against it.
+Route::patch('/grinding/purchases/{tankId}/blueprint-plan/{nation}', [GrindController::class, 'updateBlueprintPlan'])->name('grinding.blueprint-plan');
 Route::patch('/grinding/modules/{tankId}', [GrindController::class, 'updateModulePlan'])->name('grinding.module-plan');
 Route::patch('/grinding/modules/{tankId}/top-gun', [GrindController::class, 'planTopGun'])->name('grinding.top-gun');
 // The plan spent rather than another module added to it, so it hangs off the

@@ -24,7 +24,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * else falls back to defaults derived from what the account has played. See
  * PurchaseBoard.
  */
-#[Fillable(['wot_account_id', 'tank_id', 'is_unlocked', 'is_purchased', 'price_credit', 'research_xp', 'blueprint_fragments', 'blueprint_plan_own', 'blueprint_plan_group', 'blueprint_plan_universal', 'is_playing', 'banked_xp'])]
+#[Fillable(['wot_account_id', 'tank_id', 'is_unlocked', 'is_purchased', 'price_credit', 'research_xp', 'blueprint_fragments', 'is_playing', 'banked_xp'])]
 class WotTankPurchase extends Model
 {
     /**
@@ -40,9 +40,7 @@ class WotTankPurchase extends Model
             'is_purchased' => 'boolean',
             'research_xp' => 'integer',
             'blueprint_fragments' => 'integer',
-            'blueprint_plan_own' => 'integer',
-            'blueprint_plan_group' => 'integer',
-            'blueprint_plan_universal' => 'integer',
+            'blueprint_plan' => 'array',
             'price_credit' => 'integer',
             'is_playing' => 'boolean',
             'banked_xp' => 'integer',
@@ -50,17 +48,44 @@ class WotTankPurchase extends Model
     }
 
     /**
-     * Fragments the plan would add, whichever source pays for them.
+     * Fragments the plan would add, whichever nation pays for them.
      *
-     * The three counters are sources rather than kinds, so they sum: what the
-     * blueprint gains is the same fragment however it was crafted. What they
-     * cost does not sum, and lives in BlueprintCost.
+     * The entries are nations rather than kinds, so they sum: the blueprint
+     * gains the same fragment whoever's blueprints bought it. What they cost
+     * does not sum — a peer nation is charged six to one — and lives in
+     * BlueprintCost.
      */
     protected function plannedFragments(): Attribute
     {
-        return Attribute::get(fn (): int => (int) $this->blueprint_plan_own
-            + (int) $this->blueprint_plan_group
-            + (int) $this->blueprint_plan_universal);
+        return Attribute::get(fn (): int => (int) array_sum($this->blueprint_plan ?? []));
+    }
+
+    /**
+     * Records how many of a vehicle's fragments one nation is meant to pay for.
+     *
+     * Deliberately not fillable: the plan is a map, and mass-assigning it whole
+     * would let one nation's counter arrive carrying a rewrite of every other.
+     * Each nation is written on its own, at its own URL — which is also why a
+     * zero removes the entry rather than storing one. An absent nation and a
+     * nation planned for zero fragments are the same state, and keeping both
+     * spellings would mean two ways to say it.
+     */
+    public function setPlannedFragments(string $nation, int $fragments): void
+    {
+        $plan = $this->blueprint_plan ?? [];
+
+        if ($fragments > 0) {
+            $plan[$nation] = $fragments;
+        } else {
+            unset($plan[$nation]);
+        }
+
+        // ksort so two identical plans are one string in the database, whatever
+        // order their nations were typed in.
+        ksort($plan);
+
+        $this->blueprint_plan = $plan;
+        $this->save();
     }
 
     // Relations
