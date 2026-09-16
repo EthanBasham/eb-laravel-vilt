@@ -4,7 +4,8 @@
     + jQuery site shell, and this one loads the Vue/Inertia bundle instead, so
     the two stacks never ship to the same page.
 
-    Registered via Inertia::setRootView('wot') in AppServiceProvider.
+    Selected by HandleInertiaRequests::$rootView, which is applied to the /wot
+    route group alone — see routes/web.php.
 --}}
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
