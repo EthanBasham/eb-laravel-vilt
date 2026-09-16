@@ -213,6 +213,76 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Blueprint fragment costs
+    |--------------------------------------------------------------------------
+    |
+    | What one fragment of a vehicle's blueprint costs to craft, how many of
+    | them complete it, and how much of the vehicle's research XP each one
+    | removes. Worked out by hand from the game's own blueprint screen: the
+    | encyclopedia publishes none of it, and `encyclopedia/personalmissions` is
+    | the only mission or progression table it does publish.
+    |
+    | This reverses the decision recorded on 2026-09-09, that blueprint
+    | discounts are entered and never computed. The curve is known now. The
+    | figure a player transcribes into `wot_tank_purchases.research_xp` is still
+    | kept, and the derived one is shown beside it rather than replacing it.
+    |
+    | 'national', 'group' and 'universal' are alternatives, not a total: one
+    | fragment is crafted from own-nation blueprints, OR from another nation in
+    | the same group at six to one, OR from universal ones, and a blueprint may
+    | mix sources fragment by fragment.
+    |
+    | 'percent' is the share of base research XP a fragment removes — every
+    | fragment EXCEPT the last, which covers whatever remains and lands the
+    | vehicle on zero. Tier X is eleven fragments at 7% and then 23%, not twelve
+    | at 7%. Nothing here claims to know how the game client rounds.
+    |
+    | 'group' is 'national' times six at every tier today. It is spelled out
+    | anyway, for the reason the crew XP block gives: these are recorded as
+    | given, so a rebalance that breaks the relation stays a config change.
+    |
+    | Tiers II-X only. A tier I is researched from nothing and a tier XI sits
+    | above where the system stops, which is the range BlueprintBoard's
+    | MIN_TIER and MAX_TIER already draw.
+    |
+    */
+
+    'blueprint_costs' => [
+        2 => ['national' => 1, 'group' => 6, 'universal' => 4, 'fragments' => 4, 'percent' => 25],
+        3 => ['national' => 1, 'group' => 6, 'universal' => 4, 'fragments' => 4, 'percent' => 20],
+        4 => ['national' => 1, 'group' => 6, 'universal' => 4, 'fragments' => 4, 'percent' => 18],
+        5 => ['national' => 2, 'group' => 12, 'universal' => 6, 'fragments' => 6, 'percent' => 15],
+        6 => ['national' => 2, 'group' => 12, 'universal' => 6, 'fragments' => 6, 'percent' => 15],
+        7 => ['national' => 3, 'group' => 18, 'universal' => 8, 'fragments' => 8, 'percent' => 12],
+        8 => ['national' => 3, 'group' => 18, 'universal' => 10, 'fragments' => 8, 'percent' => 12],
+        9 => ['national' => 3, 'group' => 18, 'universal' => 12, 'fragments' => 10, 'percent' => 9],
+        10 => ['national' => 4, 'group' => 24, 'universal' => 12, 'fragments' => 12, 'percent' => 7],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Nation groups
+    |--------------------------------------------------------------------------
+    |
+    | The game's own groupings, and the only reason they matter here: a national
+    | blueprint can be spent on a vehicle of another nation in the same group,
+    | at the six-to-one rate in the table above. A blueprint never leaves its
+    | group.
+    |
+    | Every slug in 'nations' appears in exactly one group, and no group holds a
+    | nation that list does not.
+    |
+    */
+
+    'nation_groups' => [
+        'alliance' => ['name' => 'Alliance', 'nations' => ['usa', 'uk', 'poland']],
+        'bloc' => ['name' => 'Bloc', 'nations' => ['germany', 'japan']],
+        'union' => ['name' => 'Union', 'nations' => ['ussr', 'china']],
+        'coalition' => ['name' => 'Coalition', 'nations' => ['france', 'czech', 'italy', 'sweden']],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Lowest tier worth budgeting for
     |--------------------------------------------------------------------------
     |

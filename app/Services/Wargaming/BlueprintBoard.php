@@ -9,17 +9,20 @@ use App\Models\WotTankPurchase;
 use App\Models\WotVehicle;
 
 /**
- * The Blueprints view: fragments held, and nothing else.
+ * The Blueprints view: what a vehicle costs, and how far its blueprint has come.
  *
- * The last tab to become the tree itself, and the simplest of the four. A cell
- * is one number — how many fragments you hold towards researching that vehicle
- * — typed by hand, because the encyclopedia publishes neither the fragments a
- * vehicle needs nor the discount they buy.
+ * A cell carries the fragments built against the fragments the tier takes, the
+ * vehicle's undiscounted research cost, and where the remaining fragments are
+ * meant to come from. The figures behind it are hand-transcribed — the
+ * encyclopedia publishes neither the fragments a vehicle needs nor the discount
+ * they buy — and live in config('wargaming.blueprint_costs'); the arithmetic is
+ * BlueprintCost's.
  *
- * It stays reference only. What the fragments actually reduce the cost to is
- * recorded on the XP Remaining board, against the same vehicle; deriving one
- * from the other would mean reverse-engineering a curve that silently rots on
- * the next rebalance.
+ * This reverses what the board was first built on, that the fragments-to-
+ * discount curve could not be derived. It can, now that the curve is known. The
+ * XP Remaining board still keeps its hand-typed research_xp, because that is
+ * what the game actually quoted; the derived figure is printed beside it rather
+ * than over it, and the two disagreeing is worth seeing.
  */
 class BlueprintBoard
 {
@@ -39,6 +42,7 @@ class BlueprintBoard
     public function __construct(
         private readonly TechTreeLines $lines,
         private readonly AccountProgress $progress,
+        private readonly BlueprintCost $cost,
     ) {}
 
     /**
@@ -54,6 +58,12 @@ class BlueprintBoard
             'rows' => $rows->all(),
             'tiers' => $this->tierColumns($rows),
             'blueprint_fragments' => (int) $rows->sum('fragments'),
+            // What the plans across the whole board come to. Recorded and
+            // totalled, never measured against the stock below: a group
+            // fragment eats six blueprints of *some* other nation in its group
+            // and the counter cannot say which, so nothing here pretends to
+            // know what any one stack owes.
+            'planned' => $this->plannedTotals($rows),
             // Carried on this board's payload rather than as a sibling prop, so
             // the reload every edit on the tab already asks for brings it back.
             'stock' => $this->stock($account),
@@ -105,7 +115,7 @@ class BlueprintBoard
                         // The vehicle below it on this line. Where there is
                         // none, this is the root of the tree and there is
                         // nothing to research — so nothing to blueprint.
-                        $byTier->has($tier - 1),
+                        $byTier->get($tier - 1),
                         $purchases->get($v->tank_id),
                         $owned[$v->tank_id] ?? [],
                     ))
@@ -122,22 +132,65 @@ class BlueprintBoard
     }
 
     /**
+     * One vehicle: what it costs, what has been built, and what is planned.
+     *
+     * The base XP is read off this line's own predecessor rather than the
+     * cheapest one anywhere in the tree, which is what XpBoard does too. Two
+     * lines converging on a vehicle from parents charging different prices
+     * would otherwise quote different figures on different boards.
+     *
+     * Nothing here asks whether the predecessor is researched. A cell earns its
+     * figures by having a vehicle below it on the line, not by being the next
+     * thing you could research — fragments are banked against a tank long
+     * before it comes within reach.
+     *
      * @param  array{is_purchased?: bool, is_unlocked?: bool}  $owned
      * @return array<string, mixed>
      */
-    private function cell(WotVehicle $vehicle, bool $isResearchable, ?WotTankPurchase $purchase, array $owned): array
+    private function cell(WotVehicle $vehicle, ?WotVehicle $predecessor, ?WotTankPurchase $purchase, array $owned): array
     {
+        $tier = (int) $vehicle->tier;
+        $baseXp = (int) (($predecessor?->next_tanks ?? [])[$vehicle->tank_id] ?? 0);
+        $built = (int) ($purchase?->blueprint_fragments ?? 0);
+
+        $planned = $this->cost->plan(
+            $tier,
+            (int) ($purchase?->blueprint_plan_own ?? 0),
+            (int) ($purchase?->blueprint_plan_group ?? 0),
+            (int) ($purchase?->blueprint_plan_universal ?? 0),
+        );
+
         return [
             'tank_id' => $vehicle->tank_id,
             'name' => $vehicle->short_name ?? $vehicle->name,
-            'tier' => $vehicle->tier,
-            'fragments' => (int) ($purchase?->blueprint_fragments ?? 0),
+            'tier' => $tier,
+            // The vehicle's own, not the row's. A line is one nation all the
+            // way down, but the planner asks what a fragment costs *here*.
+            'nation' => $vehicle->nation,
+            'group' => $this->cost->groupOf((string) $vehicle->nation),
+            // Undiscounted, which is what the cell prints: it is constant per
+            // tank, so the column reads as what the tank is worth. What the
+            // fragments have taken off it is xp_saved.
+            'base_xp' => $baseXp,
+            'fragments' => $built,
+            'fragments_needed' => $this->cost->fragmentsNeeded($tier),
+            'percent_per_fragment' => $this->cost->percentPerFragment($tier),
+            'cost' => $this->cost->costPerFragment($tier),
+            'xp_saved' => $this->cost->xpSaved($tier, $baseXp, $built),
+            'xp_remaining' => $this->cost->xpRemaining($tier, $baseXp, $built),
+            'planned' => [
+                'own' => (int) ($purchase?->blueprint_plan_own ?? 0),
+                'group' => (int) ($purchase?->blueprint_plan_group ?? 0),
+                'universal' => (int) ($purchase?->blueprint_plan_universal ?? 0),
+                ...$planned,
+            ],
+            'xp_after_plan' => $this->cost->xpRemaining($tier, $baseXp, $built + $planned['fragments']),
             /*
              * A starter vehicle is not researched from anything, so fragments
              * have nothing to discount. Shown as a dash rather than a zero you
              * could type into.
              */
-            'is_researchable' => $isResearchable,
+            'is_researchable' => $predecessor !== null,
             // Already researched, so whatever you hold is spent or spare. Still
             // shown and still editable — a record of what was held is worth
             // keeping — but greyed, because it buys nothing now.
@@ -175,12 +228,42 @@ class BlueprintBoard
                 }
             }
 
-            $row['fragments'] = (int) collect($row['cells'])
-                ->reject(fn (array $c): bool => $c['is_shared'])
-                ->sum('fragments');
+            $owned = collect($row['cells'])->reject(fn (array $c): bool => $c['is_shared']);
+
+            $row['fragments'] = (int) $owned->sum('fragments');
+            $row['planned_fragments'] = (int) $owned->sum(fn (array $c): int => $c['planned']['fragments']);
+            // Researched cells are left out of this one alone: their fragments
+            // are a record worth keeping, but the XP behind them is already
+            // paid and a line total that counted it would owe money twice.
+            $row['xp_remaining'] = (int) $owned
+                ->reject(fn (array $c): bool => $c['is_unlocked'])
+                ->sum('xp_remaining');
 
             return $row;
         });
+    }
+
+    /**
+     * What every plan on the board comes to, in fragments and in blueprints.
+     *
+     * Over the cells each row owns, so a vehicle on two lines is counted once —
+     * the same rule the fragment total follows.
+     *
+     * @param  Collection<int, array<string, mixed>>  $rows
+     * @return array{fragments: int, national_blueprints: int, universal_blueprints: int}
+     */
+    private function plannedTotals(Collection $rows): array
+    {
+        $planned = $rows
+            ->flatMap(fn (array $r): array => $r['cells'])
+            ->reject(fn (array $c): bool => $c['is_shared'])
+            ->map(fn (array $c): array => $c['planned']);
+
+        return [
+            'fragments' => (int) $planned->sum('fragments'),
+            'national_blueprints' => (int) $planned->sum('national_blueprints'),
+            'universal_blueprints' => (int) $planned->sum('universal_blueprints'),
+        ];
     }
 
     /**

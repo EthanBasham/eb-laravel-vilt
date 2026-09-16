@@ -4,6 +4,7 @@ import { IconEngine, IconLock, IconLockOpen, IconRestore, IconShoppingCart } fro
 import { computed, ref } from 'vue';
 import ActiveGrindingTable from '../Components/ActiveGrindingTable.vue';
 import AppShell from '../Components/AppShell.vue';
+import BlueprintPlanner from '../Components/BlueprintPlanner.vue';
 import EditableNumber from '../Components/EditableNumber.vue';
 import ModulePlanPicker from '../Components/ModulePlanPicker.vue';
 import ModuleResearchPicker from '../Components/ModuleResearchPicker.vue';
@@ -497,6 +498,32 @@ const bpShownRows = computed(() => props.blueprints.rows.filter(
 ));
 const bpTierTotal = (tier) => bpShownRows.value.reduce((sum, r) => sum + bpCellFragments(r.cells[tier]), 0);
 const bpGrandTotal = computed(() => bpShownRows.value.reduce((sum, r) => sum + bpRowFragments(r), 0));
+
+/*
+ * The vehicle the planner is open for, held as a tank id rather than as the
+ * cell itself.
+ *
+ * Crews.vue stores the cell object and gets away with it because CrewEditor
+ * saves once and closes. This one stays open across several writes, and every
+ * one of them reloads `blueprints` wholesale — so a stored object would be a
+ * snapshot from before the edit, showing the figures the save was meant to
+ * change. Looking the cell up again on each render is what keeps it live.
+ *
+ * The owning cell wins: a shared vehicle is edited where it is counted.
+ */
+const bpEditing = ref(null);
+
+const bpEditingCell = computed(() => {
+    if (bpEditing.value === null) return null;
+
+    for (const row of props.blueprints.rows) {
+        for (const cell of Object.values(row.cells)) {
+            if (cell.tank_id === bpEditing.value && !cell.is_shared) return cell;
+        }
+    }
+
+    return null;
+});
 </script>
 
 <template>
@@ -754,6 +781,22 @@ const bpGrandTotal = computed(() => bpShownRows.value.reduce((sum, r) => sum + b
                                                         ? 'border-wot-gold/50 bg-wot-sunken text-wot-gold'
                                                         : 'border-wot-border bg-wot-sunken text-wot-text'"
                                                 />
+                                                <!-- What the fragments recorded
+                                                     on the Blueprints board say
+                                                     this should cost. Shown
+                                                     only where it disagrees
+                                                     with the figure beside it:
+                                                     one of the two is stale,
+                                                     and which is not this
+                                                     board's to decide. -->
+                                                <span
+                                                    v-if="row.cells[tier].unlocks.blueprint_xp != null
+                                                        && row.cells[tier].unlocks.blueprint_xp !== row.cells[tier].unlocks.xp"
+                                                    class="shrink-0 text-xs tabular-nums text-wot-dim"
+                                                    :title="`The fragments built against the ${row.cells[tier].unlocks.name} come to ${n(row.cells[tier].unlocks.blueprint_xp)} XP. The figure beside it is what was typed in.`"
+                                                >
+                                                    {{ n(row.cells[tier].unlocks.blueprint_xp) }}
+                                                </span>
                                                 <!-- Only offered once the figure
                                                      has been typed over; there is
                                                      nothing to reset back to
@@ -1216,10 +1259,13 @@ const bpGrandTotal = computed(() => bpShownRows.value.reduce((sum, r) => sum + b
         </section>
 
         <!-- 5. Blueprints -------------------------------------------------------
-             Fragments held, and nothing else. The simplest of the four boards:
-             one typed number per vehicle, because the encyclopedia publishes
-             neither the fragments a tank needs nor the discount they buy. What
-             they actually reduce the cost to is recorded on XP Remaining.
+             What each vehicle costs, and how far its blueprint has come. A cell
+             reads "built / needed = XP to research" over the blueprints its
+             plan would spend, and opens a planner. The figures behind it are
+             hand-transcribed — the encyclopedia publishes neither the fragments
+             a tank needs nor the discount they buy — and the XP Remaining board
+             still keeps the cost a player read off the game screen, with the
+             derived figure printed beside it.
         -->
         <section v-else class="mt-4" aria-labelledby="blueprints-heading">
             <h2 id="blueprints-heading" class="sr-only">Blueprints</h2>
@@ -1365,25 +1411,65 @@ const bpGrandTotal = computed(() => bpShownRows.value.reduce((sum, r) => sum + b
                                     >—</span>
 
                                     <!-- Shared with a line above, where it is
-                                         the editable one. -->
+                                         the editable one. Read-only here, but
+                                         still spelled out: the figures belong
+                                         to the tank, and a blank cell would
+                                         read as a tank with nothing against
+                                         it. -->
                                     <span
                                         v-else-if="row.cells[tier].is_shared"
-                                        class="tabular-nums text-wot-dim/60"
+                                        class="block tabular-nums text-wot-dim/60"
                                         :title="`${row.cells[tier].name} — counted and edited on ${row.cells[tier].shared_with}.`"
                                     >
-                                        {{ n(row.cells[tier].fragments) }}
+                                        <span class="block whitespace-nowrap">
+                                            {{ row.cells[tier].fragments }} / {{ row.cells[tier].fragments_needed }}
+                                            = {{ n(row.cells[tier].base_xp) }}
+                                        </span>
+                                        <span class="block whitespace-nowrap text-xs">
+                                            {{ n(row.cells[tier].planned.national_blueprints) }}
+                                            + {{ n(row.cells[tier].planned.universal_blueprints) }}
+                                        </span>
                                     </span>
 
-                                    <EditableNumber
+                                    <!--
+                                        Two lines and no controls: fragments
+                                        built against what the tier takes, the
+                                        undiscounted cost of the tank, and the
+                                        raw blueprints the plan would spend.
+                                        Everything else about the vehicle — what
+                                        the fragments have already taken off,
+                                        which source pays for the rest — is a
+                                        click away, because a cell that carried
+                                        an input for each of them would be five
+                                        controls wide across nine tiers.
+
+                                        The XP never moves as fragments are
+                                        built: it is what the tank costs, so the
+                                        column can be read down as which tanks
+                                        the percentages are worth most against.
+                                    -->
+                                    <button
                                         v-else
-                                        :field="'blueprint_fragments'"
-                                        :model-value="row.cells[tier].fragments"
-                                        :url="`/wot/grinding/purchases/${row.cells[tier].tank_id}`"
-                                        :only="['blueprints', 'totals']"
-                                        :tone="row.cells[tier].is_unlocked
-                                            ? 'border-wot-border bg-wot-sunken text-wot-dim/50'
-                                            : 'border-wot-border bg-wot-sunken text-wot-text'"
-                                    />
+                                        type="button"
+                                        class="block w-full whitespace-nowrap border border-wot-border bg-wot-sunken px-2 py-1 text-right tabular-nums transition-colors hover:border-wot-gold"
+                                        :class="row.cells[tier].is_unlocked ? 'text-wot-dim/50' : 'text-wot-text'"
+                                        :title="`${row.cells[tier].name} — ${row.cells[tier].fragments} of ${row.cells[tier].fragments_needed} fragments built at ${row.cells[tier].percent_per_fragment}% each, against ${n(row.cells[tier].base_xp)} XP`"
+                                        @click="bpEditing = row.cells[tier].tank_id"
+                                    >
+                                        <span class="block">
+                                            <span :class="row.cells[tier].fragments && !row.cells[tier].is_unlocked ? 'text-wot-gold' : ''">
+                                                {{ row.cells[tier].fragments }} / {{ row.cells[tier].fragments_needed }}
+                                            </span>
+                                            = {{ n(row.cells[tier].base_xp) }}
+                                        </span>
+                                        <span
+                                            class="block text-xs"
+                                            :class="row.cells[tier].planned.fragments ? 'text-wot-text' : 'text-wot-dim'"
+                                        >
+                                            {{ n(row.cells[tier].planned.national_blueprints) }}
+                                            + {{ n(row.cells[tier].planned.universal_blueprints) }}
+                                        </span>
+                                    </button>
                                 </template>
                                 <span v-else class="text-wot-muted">·</span>
                             </td>
@@ -1406,6 +1492,8 @@ const bpGrandTotal = computed(() => bpShownRows.value.reduce((sum, r) => sum + b
                     </tfoot>
                 </table>
             </div>
+
+            <BlueprintPlanner :cell="bpEditingCell" :stock="blueprints.stock" @close="bpEditing = null" />
         </section>
 
         <!-- Active Grinding only. Saying what you are playing is not a question

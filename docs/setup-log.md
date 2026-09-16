@@ -3615,3 +3615,80 @@ person who typed it, which is exactly what a self-XSS is aimed at. The request a
 
 The shared prop is a closure so a partial reload that doesn't ask for `bookmarks` neither runs
 the query nor trips the one-time seeding write behind it.
+
+---
+
+## 2026-09-15 — Blueprint fragments, costed: the curve is derived after all
+
+Reverses the decision recorded on 2026-09-09 — *"Blueprint discounts are **entered, not
+computed**"* — and the matching claim in `BlueprintBoard`'s docblock that the board "stays
+reference only". Both sentences have been rewritten. The premise behind them was that Wargaming
+publishes no fragments-to-discount curve, which is still true of the API; it is no longer true of
+what is known. The curve is now `config('wargaming.blueprint_costs')`, and a Blueprints cell
+reads `built / needed = XP to research` over the raw blueprints its plan would spend, opening a
+planner on click.
+
+**The economics came from the game, not from the API.** Per tier: how many blueprints one
+fragment costs from the vehicle's own nation, from another nation in the same group, and in
+universals; how many fragments complete the blueprint; and what share of the research XP each one
+removes. Hand-transcribed, on the same footing as `crew_xp`. Confirmed while checking: the only
+mission or progression table the API publishes at all is
+`wot/encyclopedia/personalmissions/`, and even that is campaign 1 only.
+
+**The 2026-09-09 workbook turned out to be the corroboration.** That entry recorded the IS-4 at
+149,310 in the sheet against the API's 189,000, *"exactly ×0.79"*. The IS-4 is tier X, which the
+table puts at 7% a fragment: three fragments removes 21%, and `189,000 − 39,690 = 149,310`.
+`BlueprintCost` reproduces it to the XP. A figure transcribed off the game screen a week before
+anyone knew it was a curve is the closest thing to an independent check available.
+
+**The last fragment is not `percent`.** Fragments 1 to F−1 each remove their listed share; the
+Fth covers whatever remains and lands the vehicle on nothing to research. Tier X is eleven at 7%
+and then 23%, not twelve at 7%. It falls out of the `>= F` branch in `BlueprintCost::xpSaved()`
+rather than being special-cased, and a test asserts `(F − 1) × percent` stays under 100 at every
+tier so the rule cannot be transcribed into nonsense. Rounding is applied once on the cumulative
+share rather than per fragment and summed, pinned by a test on a price that does not divide
+evenly.
+
+**Three planned counters, not one, because the sources are an OR.** Own-nation, the same group at
+six to one, and universal are alternatives chosen per fragment, and one blueprint may mix them —
+so a single "planned" figure could not be costed, the group rate being six times the national
+one. New columns `blueprint_plan_own`, `blueprint_plan_group` and `blueprint_plan_universal` on
+`wot_tank_purchases`, all counting fragments rather than the blueprints they are crafted from.
+
+**Nothing is measured against the stock panel.** Planned figures are recorded and totalled, and
+that is all. A group fragment eats six blueprints of *some* other nation in its group, and which
+one is decided at the moment it is spent — so charging a nation for it would invent a debt that
+may never be paid there. The per-nation counts stay what they were: raw material, recorded.
+
+**`research_xp` stays, with the derived figure printed beside it.** `xp` is what a player read
+off the game screen; `xp.…unlocks.blueprint_xp` is what the fragment count implies. Neither
+overwrites the other and the XP board's totals still follow the typed figure — the two
+disagreeing means one of them is stale, and which is not a thing the board can know. Shown only
+where they differ, so an agreeing cell stays as quiet as it was. Null outside tiers II–X, so
+"outside the system" reads differently from "nothing built yet".
+
+**The cell is a button now, not an input.** Built, needed, base XP and two kinds of planned spend
+is more than a grid cell has room for controls, so the cell reports and `BlueprintPlanner.vue`
+writes — the bargain `CrewEditor` already struck. Unlike the crew editor it keeps no draft: every
+field is an independent absolute value against `PATCH /wot/grinding/purchases/{tankId}`, which
+already existed, and the planner stays open across several of them. It binds to a `tank_id` and
+re-resolves the cell on each render, because every write reloads `blueprints` wholesale and a
+stored cell object would show the figures the save was meant to change.
+
+**The XP in the cell is the undiscounted price and never moves.** It is what the tank costs, so
+the column can be read down for which tanks a percentage is worth most against — which is the
+question the board exists to answer. What the fragments have taken off is in the planner.
+
+**The arithmetic is on the server because there is no JS test runner.** Every figure the planner
+shows arrives on `blueprints.rows.*.cells.*`, so `GrindingTest` can assert it; anything
+multiplied out in a template would be arithmetic nothing checks.
+
+**The fragment ceiling is a game rule now.** `blueprint_fragments` was `max:2000` headroom and is
+now bounded by the tier's own fragment count, as are the three plan counters. The lookup that
+resolves the tier sits behind `hasAny()`, so an `is_playing` toggle through the same request does
+not pay for it. Two existing tests recorded 42 and 12 fragments against a tier IX, which takes
+ten; both now record ten.
+
+**Production needs `php artisan migrate`** for the three new columns.
+
+Suite: **147 passed, 1613 assertions** on `GrindingTest`.

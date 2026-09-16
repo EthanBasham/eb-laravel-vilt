@@ -28,6 +28,7 @@ class XpBoard
     public function __construct(
         private readonly TechTreeLines $lines,
         private readonly AccountProgress $progress,
+        private readonly BlueprintCost $cost,
     ) {}
 
     /**
@@ -174,6 +175,21 @@ class XpBoard
             'name' => $next->short_name ?? $next->name,
             'xp' => (int) ($discounted ?? $full),
             'full_xp' => $full,
+            /*
+             * What the fragments built imply the unlock now costs, which is not
+             * the same claim as `xp`: that is the figure a player read off the
+             * game screen, this one is derived from the count on the Blueprints
+             * board. Both are kept and neither overwrites the other — the two
+             * disagreeing means a stale count or a stale transcription, and
+             * reporting the gap is more use than picking a winner.
+             *
+             * Null where blueprints do not reach — tier I, tier XI, or a
+             * vehicle with no price — so "outside the system" stays distinct
+             * from "nothing built yet".
+             */
+            'blueprint_xp' => $this->cost->supports((int) $next->tier) && $full > 0
+                ? $this->cost->xpRemaining((int) $next->tier, $full, (int) ($purchase?->blueprint_fragments ?? 0))
+                : null,
             // Null is "no discount recorded", which is distinct from a recorded
             // zero — you can hold fragments enough to unlock outright.
             'is_discounted' => $discounted !== null && (int) $discounted !== $full,

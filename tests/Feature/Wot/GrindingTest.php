@@ -1635,6 +1635,59 @@ it('records a blueprint discount and gives it back', function () {
         ->toBeNull();
 });
 
+/**
+ * Two answers to the same question, deliberately: `xp` is what a player read
+ * off the game screen, `blueprint_xp` is what the fragments recorded on the
+ * Blueprints board imply. Both are kept, because the two disagreeing means one
+ * of them is stale and the board has no way of knowing which.
+ */
+it('derives the XP the fragments imply, beside the figure typed in', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.research-xp', 90), ['research_xp' => 100_000]);
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['blueprint_fragments' => 2]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('xp.rows.0.cells.8.unlocks.xp', 100_000)
+        ->where('xp.rows.0.cells.8.unlocks.full_xp', 149_400)
+        // Two of a tier IX's ten, at 9% each.
+        ->where('xp.rows.0.cells.8.unlocks.blueprint_xp', 122_508),
+    );
+});
+
+/**
+ * Blueprints are a tier II-X system, so a tier XI unlock has no derived figure
+ * at all — null rather than the full price, so "outside the system" stays
+ * distinct from "nothing built yet".
+ */
+it('leaves the derived XP unset where blueprints do not reach', function () {
+    $user = User::factory()->create();
+    tallLine($user);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('xp.rows.0.cells.10.unlocks.blueprint_xp', null)
+        ->where('xp.rows.0.cells.9.unlocks.blueprint_xp', 100_000),
+    );
+});
+
+/**
+ * Reported, never spent. The board's own total still follows the figure that
+ * was typed in, so recording fragments cannot quietly move what the tree owes.
+ */
+it('does not let the derived figure move what the XP board owes', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['blueprint_fragments' => 5]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('xp.rows.0.cells.8.unlocks.xp', 149_400)
+        ->where('xp.rows.0.cells.8.unlocks.blueprint_xp', 82_170)
+        ->where('xp.rows.0.xp_remaining', 684_400),
+    );
+});
+
 it('keeps a recorded zero apart from no discount at all', function () {
     $user = User::factory()->create();
     freeXpLine($user);
@@ -2091,17 +2144,19 @@ it('records fragments against a vehicle', function () {
     $user = User::factory()->create();
     $account = freeXpLine($user);
 
-    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['blueprint_fragments' => 42])
+    // Ten is what a tier IX blueprint takes, and the ceiling the request now
+    // enforces: a figure above it could never have been built.
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['blueprint_fragments' => 10])
         ->assertRedirect();
 
     expect(WotTankPurchase::where('wot_account_id', $account->id)->where('tank_id', 90)->first()->blueprint_fragments)
-        ->toBe(42);
+        ->toBe(10);
 
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
-        ->where('blueprints.rows.0.cells.9.fragments', 42)
-        ->where('blueprints.rows.0.fragments', 42)
-        ->where('blueprints.blueprint_fragments', 42)
-        ->where('totals.blueprint_fragments', 42),
+        ->where('blueprints.rows.0.cells.9.fragments', 10)
+        ->where('blueprints.rows.0.fragments', 10)
+        ->where('blueprints.blueprint_fragments', 10)
+        ->where('totals.blueprint_fragments', 10),
     );
 });
 
@@ -2116,16 +2171,23 @@ it('counts a shared vehicle fragments on one row only', function () {
     WotVehicle::factory()->create(['tank_id' => 101, 'name' => 'Other X', 'short_name' => 'Oth X', 'tier' => 10, 'nation' => $nation, 'next_tanks' => null]);
     WotVehicle::where('tank_id', 90)->update(['next_tanks' => json_encode([100 => 225_000, 101 => 240_000])]);
 
-    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['blueprint_fragments' => 12]);
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['blueprint_fragments' => 10]);
 
     $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
         ->has('blueprints.rows', 2)
         ->where('blueprints.rows.0.cells.9.is_shared', false)
-        ->where('blueprints.rows.0.fragments', 12)
+        ->where('blueprints.rows.0.fragments', 10)
         ->where('blueprints.rows.1.cells.9.is_shared', true)
         ->where('blueprints.rows.1.cells.9.shared_with', 'Oth X')
         ->where('blueprints.rows.1.fragments', 0)
-        ->where('totals.blueprint_fragments', 12),
+        // The figures belong to the tank, so the non-owning row still shows
+        // them; only the totals it contributes to are zero.
+        ->where('blueprints.rows.1.cells.9.base_xp', 149_400)
+        ->where('blueprints.rows.1.planned_fragments', 0)
+        // Its own tier X and nothing else: the shared tier IX's 149,400 is
+        // counted on the row that owns it, as its fragments are.
+        ->where('blueprints.rows.1.xp_remaining', 225_000)
+        ->where('totals.blueprint_fragments', 10),
     );
 });
 
@@ -2155,6 +2217,268 @@ it('rejects a fragment count the board could never produce', function (array $pa
     'negative' => [['blueprint_fragments' => -1]],
     'absurd' => [['blueprint_fragments' => 5000]],
 ]);
+
+/**
+ * The figures the board was built without: what the tank costs undiscounted,
+ * and what the fragments built have already taken off it.
+ */
+it('quotes what a vehicle costs and what its fragments have bought', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 100), ['blueprint_fragments' => 3]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('blueprints.rows.0.cells.10.base_xp', 225_000)
+        ->where('blueprints.rows.0.cells.10.fragments_needed', 12)
+        ->where('blueprints.rows.0.cells.10.percent_per_fragment', 7)
+        // Three of twelve at 7% each.
+        ->where('blueprints.rows.0.cells.10.xp_saved', 47_250)
+        ->where('blueprints.rows.0.cells.10.xp_remaining', 177_750),
+    );
+});
+
+/**
+ * Every fragment removes its listed share except the last, which covers
+ * whatever is left. Eleven of a tier X's twelve come to 77%, not 92%, and the
+ * twelfth takes the remaining 23% rather than another 7.
+ */
+it('lets the last fragment cover whatever the even share leaves', function (int $built, int $saved, int $remaining) {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 100), ['blueprint_fragments' => $built]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('blueprints.rows.0.cells.10.xp_saved', $saved)
+        ->where('blueprints.rows.0.cells.10.xp_remaining', $remaining),
+    );
+})->with([
+    'one short' => [11, 173_250, 51_750],
+    'the whole blueprint' => [12, 225_000, 0],
+]);
+
+/**
+ * Rounded once on the cumulative share rather than per fragment and summed.
+ * Pinned on a price that does not divide evenly, so a later switch to
+ * truncation fails here rather than drifting quietly.
+ */
+it('rounds the discount once, on the share as a whole', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    WotVehicle::where('tank_id', 80)->update(['next_tanks' => json_encode([90 => 149_433])]);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 90), ['blueprint_fragments' => 1]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        // 9% of 149,433 is 13,448.97.
+        ->where('blueprints.rows.0.cells.9.xp_saved', 13_449)
+        ->where('blueprints.rows.0.cells.9.xp_remaining', 135_984),
+    );
+});
+
+/**
+ * A cell earns its figures by having a vehicle below it on the line, not by
+ * being the next thing within reach: fragments are banked against a tank long
+ * before the tank under it is researched.
+ */
+it('quotes a vehicle whose own predecessor is not researched yet', function () {
+    $user = User::factory()->create();
+    tallLine($user);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('blueprints.rows.0.cells.2.is_researchable', true)
+        ->where('blueprints.rows.0.cells.2.base_xp', 100_000)
+        ->where('blueprints.rows.0.cells.2.fragments_needed', 4)
+        ->where('blueprints.rows.0.cells.2.percent_per_fragment', 25),
+    );
+});
+
+/**
+ * Nothing researches into the bottom of a line, so there is no price for
+ * fragments to come off — the cell stays the dash it already was.
+ */
+it('leaves the bottom of a line without a price', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('blueprints.rows.0.cells.8.is_researchable', false)
+        ->where('blueprints.rows.0.cells.8.base_xp', 0)
+        ->where('blueprints.rows.0.cells.8.xp_remaining', 0),
+    );
+});
+
+/**
+ * Researched already, so the figures buy nothing — but they are still reported,
+ * for the same reason the fragment count is: it is a record worth keeping.
+ */
+it('still quotes a vehicle already researched', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+    played($account, 100);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 100), ['blueprint_fragments' => 3]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('blueprints.rows.0.cells.10.is_unlocked', true)
+        ->where('blueprints.rows.0.cells.10.xp_remaining', 177_750)
+        // Playing the tier X means the line below it is researched too, so
+        // nothing on this row is still owed — the cell keeps its figure, the
+        // row does not count XP that has already been paid.
+        ->where('blueprints.rows.0.xp_remaining', 0),
+    );
+});
+
+/**
+ * A fragment is crafted against a nation, and a national blueprint can cross to
+ * another nation in the same group — so the cell has to say which group it is
+ * in, not only which nation.
+ */
+it('carries the vehicle nation and the group its blueprints cross', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('blueprints.rows.0.cells.10.nation', 'ussr')
+        ->where('blueprints.rows.0.cells.10.group.key', 'union')
+        ->where('blueprints.rows.0.cells.10.group.name', 'Union')
+        ->where('blueprints.rows.0.cells.10.group.nations', ['ussr', 'china'])
+        ->where('blueprints.rows.0.cells.10.cost', ['national' => 4, 'group' => 24, 'universal' => 12]),
+    );
+});
+
+/**
+ * The three sources are alternatives chosen per fragment, so a plan records
+ * each separately and only the raw blueprints they come to are added up —
+ * a group fragment costs six times what an own-nation one does.
+ */
+it('costs a plan in raw blueprints, charging group fragments six to one', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 100), [
+        'blueprint_plan_own' => 2,
+        'blueprint_plan_group' => 1,
+        'blueprint_plan_universal' => 3,
+    ]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('blueprints.rows.0.cells.10.planned.own', 2)
+        ->where('blueprints.rows.0.cells.10.planned.group', 1)
+        ->where('blueprints.rows.0.cells.10.planned.universal', 3)
+        ->where('blueprints.rows.0.cells.10.planned.fragments', 6)
+        // 2 x 4 own-nation, plus 1 x 24 across the group.
+        ->where('blueprints.rows.0.cells.10.planned.national_blueprints', 32)
+        ->where('blueprints.rows.0.cells.10.planned.universal_blueprints', 36)
+        ->where('blueprints.rows.0.planned_fragments', 6)
+        ->where('blueprints.planned.fragments', 6)
+        ->where('blueprints.planned.national_blueprints', 32)
+        ->where('blueprints.planned.universal_blueprints', 36),
+    );
+});
+
+/**
+ * What the plan would leave counts the fragments built and the fragments
+ * planned as one pile, and stops at nothing owed however far it overshoots.
+ */
+it('folds built and planned fragments into what the plan would leave', function (int $built, int $planned, int $left) {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 100), [
+        'blueprint_fragments' => $built,
+        'blueprint_plan_own' => $planned,
+    ]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->where('blueprints.rows.0.cells.10.xp_after_plan', $left),
+    );
+})->with([
+    // Seven of twelve at 7%.
+    'part of the way' => [3, 4, 114_750],
+    'past the blueprint' => [6, 8, 0],
+]);
+
+/**
+ * The table is transcribed by hand, so the thing worth testing is that it is
+ * complete: a tier missing a column is a silently wrong figure everywhere it is
+ * read.
+ */
+it('gives every tier from II to X a complete cost row', function () {
+    $costs = (array) config('wargaming.blueprint_costs');
+
+    expect(array_keys($costs))->toBe(range(2, 10));
+
+    foreach ($costs as $tier => $row) {
+        expect(array_keys($row))->toBe(['national', 'group', 'universal', 'fragments', 'percent'])
+            ->and($row['group'])->toBe($row['national'] * 6)
+            // The last fragment covers the remainder, so the even share of the
+            // ones before it has to leave something for it to cover.
+            ->and(($row['fragments'] - 1) * $row['percent'])->toBeLessThan(100, "tier {$tier}");
+    }
+});
+
+/**
+ * A blueprint never leaves its group, so every nation has to be in exactly one
+ * — a nation in none could spend nothing across, and one in two would be two
+ * different pools depending on which was asked.
+ */
+it('puts every nation in exactly one blueprint group', function () {
+    $grouped = collect((array) config('wargaming.nation_groups'))
+        ->flatMap(fn (array $group): array => $group['nations']);
+
+    expect($grouped->sort()->values()->all())
+        ->toBe(collect(array_keys((array) config('wargaming.nations')))->sort()->values()->all())
+        ->and($grouped->duplicates())->toBeEmpty();
+});
+
+/**
+ * The ceiling is the tier's own blueprint now, not headroom: four fragments is
+ * a whole tier II blueprint and a third of a tier X one.
+ */
+it('bounds a fragment count by what the tier takes', function (int $tankId, int $fragments, bool $accepted) {
+    $user = User::factory()->create();
+    tallLine($user);
+
+    $response = $this->actingAs($user)->patch(route('wot.grinding.purchase', $tankId), ['blueprint_fragments' => $fragments]);
+
+    $accepted ? $response->assertRedirect() : $response->assertSessionHasErrors('blueprint_fragments');
+})->with([
+    'a whole tier II blueprint' => [20, 4, true],
+    'one more than tier II takes' => [20, 5, false],
+    'a whole tier X blueprint' => [100, 12, true],
+    'one more than tier X takes' => [100, 13, false],
+]);
+
+it('rejects a planned source count the board could never produce', function (array $payload) {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 100), $payload)->assertSessionHasErrors();
+})->with([
+    'negative own' => [['blueprint_plan_own' => -1]],
+    'over the blueprint' => [['blueprint_plan_group' => 13]],
+    'absurd universal' => [['blueprint_plan_universal' => 500]],
+]);
+
+/**
+ * The fragment ceiling costs a vehicle lookup, so it is only paid for by a
+ * write that sends a fragment field. Every Active Grinding toggle comes through
+ * the same request and must not.
+ */
+it('leaves a write that mentions no fragments unbothered by the ceiling', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 100), ['is_playing' => true])
+        ->assertRedirect();
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        ->has('active', 1),
+    );
+});
 
 it('remembers the Blueprints filters under their own board key', function () {
     $user = User::factory()->create();
@@ -2195,7 +2519,8 @@ it('does not un-own a tank by recording a figure against it', function (string $
     );
 })->with([
     'a blueprint discount' => ['research_xp', 60_000],
-    'a fragment count' => ['blueprint_fragments', 12],
+    'a fragment count' => ['blueprint_fragments', 10],
+    'a blueprint plan' => ['blueprint_plan_own', 2],
 ]);
 
 it('still lets an explicit un-tick beat the back-fill', function () {
