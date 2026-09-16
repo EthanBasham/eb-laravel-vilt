@@ -118,6 +118,28 @@ class WotTankModule extends Model
     }
 
     /**
+     * Marks everything on the Free XP plan researched, and empties the plan.
+     *
+     * The moment the Free XP is actually spent. Until now the plan was a list
+     * of modules to buy; buying them is what researching them means here, and
+     * setModuleResearched() already drops a module from the plan as it goes, so
+     * the plan empties itself rather than being cleared separately.
+     *
+     * A loop of single writes, like researchAllModules() on the controller —
+     * a plan is a handful of modules, and the alternative is a second path
+     * through the tri-state that could disagree with the first.
+     */
+    public function applyPlan(): void
+    {
+        // Copied out first: each write below rewrites planned_module_ids.
+        $planned = $this->planned_module_ids ?? [];
+
+        foreach ($planned as $moduleId) {
+            $this->setModuleResearched($moduleId, true);
+        }
+    }
+
+    /**
      * Adds one module to a set, or removes it.
      *
      * Validated against the encyclopedia rather than trusted: a module id that

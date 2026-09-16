@@ -7,8 +7,10 @@ import { computed, ref } from 'vue';
  * Free XP.
  *
  * Distinct from ModuleResearchPicker, which ticks a module *researched* and
- * spends the tank's banked XP doing it. This one records an intention and
- * changes nothing else.
+ * spends the tank's banked XP doing it. Ticking here records an intention and
+ * changes nothing else; the one control that does write research is the "Free
+ * XP applied" button at the foot, which is the plan being spent rather than a
+ * module being ticked one at a time.
  */
 const props = defineProps({
     cell: { type: Object, required: true },
@@ -16,6 +18,13 @@ const props = defineProps({
 
 const open = ref(false);
 const busy = ref(null);
+
+/*
+ * Applying a plan writes research, so it moves three of the page's boards at
+ * once. Named rather than inline because it is much longer than the plain
+ * ['freexp', 'totals'] the planning writes below get away with.
+ */
+const APPLY_RELOAD = ['active', 'xp', 'freexp', 'totals'];
 
 const planned = computed(() => props.cell.modules.filter((m) => m.is_planned).length);
 
@@ -30,6 +39,24 @@ const planTopGun = () => {
     router.patch(`/wot/grinding/modules/${props.cell.tank_id}/top-gun`, {}, {
         preserveScroll: true,
         only: ['freexp', 'totals'],
+        onFinish: () => (busy.value = null),
+    });
+};
+
+/*
+ * The plan spent. What you know coming back from the garage is that the plan is
+ * done, not which module you clicked last, and ticking each one over on the XP
+ * Remaining board would be the same list a second time.
+ *
+ * The tank's banked XP is deliberately untouched — that is the whole point of
+ * paying out of Free XP — but its module XP and everything downstream of it
+ * move, so the XP board and Active Grinding come back alongside this one.
+ */
+const applyPlan = () => {
+    busy.value = 'apply';
+    router.patch(`/wot/grinding/modules/${props.cell.tank_id}/applied`, {}, {
+        preserveScroll: true,
+        only: APPLY_RELOAD,
         onFinish: () => (busy.value = null),
     });
 };
@@ -146,6 +173,25 @@ const n = (v) => new Intl.NumberFormat().format(v ?? 0);
                     </label>
                 </li>
             </ul>
+
+            <!-- The Free XP actually spent. Offered only while something is
+                 planned: with an empty plan it would be a button that does
+                 nothing, and the plan is the only thing it acts on.
+
+                 Gold rather than the outline the research picker's equivalent
+                 wears — this is the one control here that changes what the
+                 garage says, where everything above it records an intention. -->
+            <button
+                v-if="planned"
+                type="button"
+                class="mt-2 w-full border border-wot-gold px-2 py-1 text-xs font-bold uppercase tracking-wider text-wot-gold transition-colors hover:bg-wot-sunken disabled:opacity-40"
+                :disabled="busy !== null"
+                :title="`Mark the ${planned} planned module${planned === 1 ? '' : 's'} on the ${cell.name} researched, spending ${n(cell.planned_xp)} Free XP. The tank's banked XP is left alone.`"
+                @click="applyPlan"
+            >
+                Free XP applied
+                <span class="tabular-nums">{{ n(cell.planned_xp) }}</span>
+            </button>
 
             <div class="mt-2 flex items-center justify-between border-t border-wot-border-soft pt-2 text-xs">
                 <span class="tabular-nums text-wot-dim">{{ n(cell.planned_xp) }} of {{ n(cell.total_xp) }}</span>

@@ -1114,6 +1114,112 @@ it('takes a module back off the plan', function () {
 });
 
 /**
+ * The plan spent. What you know coming back from the garage is that the plan is
+ * done, not which module you clicked last — and every board that counted those
+ * modules as outstanding has to move at once.
+ */
+it('marks the whole Free XP plan researched in one click', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 80), ['is_playing' => true, 'banked_xp' => 100_000]);
+    $this->actingAs($user)->patch(route('wot.grinding.module-plan', 80), ['module_id' => 100, 'planned' => true]);
+    $this->actingAs($user)->patch(route('wot.grinding.module-plan', 80), ['module_id' => 101, 'planned' => true]);
+    $this->actingAs($user)->patch(route('wot.grinding.module-plan-applied', 80))->assertRedirect();
+
+    $row = WotTankModule::where('wot_account_id', $account->id)->first();
+
+    expect($row->planned_module_ids)->toBe([])
+        ->and($row->researched_module_ids)->toBe([100, 101]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        // Free XP: nothing left planned, on the cell or in the headline card.
+        ->where('freexp.rows.0.cells.8.planned_xp', 0)
+        ->where('totals.free_xp_planned', 0)
+        // XP Remaining: the modules are paid for, so they stop being owed.
+        ->where('xp.rows.0.cells.8.module_xp', 0)
+        // Active Grinding: the same modules again, and the unlock left behind.
+        ->where('active.0.module_xp', 0)
+        ->where('active.0.xp_required', 149_400)
+        ->where('active.0.xp_remaining', 49_400),
+    );
+});
+
+/**
+ * Free XP is a separate pool, and paying out of it is precisely how a module is
+ * researched *without* spending what the tank has banked. Charging the tank as
+ * well would take the XP twice — which is the one way this differs from ticking
+ * the same modules on the XP board.
+ */
+it('leaves banked XP alone when the plan is paid with Free XP', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.purchase', 80), ['is_playing' => true, 'banked_xp' => 100_000]);
+    $this->actingAs($user)->patch(route('wot.grinding.module-plan', 80), ['module_id' => 100, 'planned' => true]);
+    $this->actingAs($user)->patch(route('wot.grinding.module-plan-applied', 80));
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(
+        // 40,000 researched, and every one of the 100,000 still banked.
+        fn ($page) => $page->where('active.0.banked_xp', 100_000)->where('active.0.module_xp', 10_000),
+    );
+});
+
+/**
+ * The button acts on the plan and nothing else. A module you never ticked is
+ * one you have not bought, and finding it researched afterwards would make the
+ * plan pointless as a record of what you decided.
+ */
+it('applies only what was planned', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.module-plan', 80), ['module_id' => 101, 'planned' => true]);
+    $this->actingAs($user)->patch(route('wot.grinding.module-plan-applied', 80));
+
+    expect(WotTankModule::where('wot_account_id', $account->id)->first()->researched_module_ids)->toBe([101]);
+
+    $this->actingAs($user)->get(route('wot.grinding'))->assertInertia(fn ($page) => $page
+        // The gun was never planned, so it is still outstanding.
+        ->where('xp.rows.0.cells.8.module_xp', 40_000)
+        ->where('freexp.rows.0.cells.8.planned_xp', 0),
+    );
+});
+
+it('does nothing for a vehicle with nothing planned', function () {
+    $user = User::factory()->create();
+    $account = freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.module-plan-applied', 80))->assertRedirect();
+
+    // Not even a row: an empty plan applied is a click that said nothing.
+    expect(WotTankModule::where('wot_account_id', $account->id)->count())->toBe(0);
+});
+
+it('rejects applying a plan for a tank the encyclopedia has never heard of', function () {
+    $user = User::factory()->create();
+    freeXpLine($user);
+
+    $this->actingAs($user)->patch(route('wot.grinding.module-plan-applied', 4242))->assertNotFound();
+});
+
+it('will not let one account apply another account plan', function () {
+    $owner = User::factory()->create();
+    $account = freeXpLine($owner);
+
+    $this->actingAs($owner)->patch(route('wot.grinding.module-plan', 80), ['module_id' => 100, 'planned' => true]);
+
+    $intruder = User::factory()->create();
+    WotAccount::factory()->for($intruder)->create(['account_id' => 999_999]);
+
+    $this->actingAs($intruder)->patch(route('wot.grinding.module-plan-applied', 80))->assertRedirect();
+
+    // The route is keyed on the tank, so what protects the owner is that the
+    // write lands on the account doing it — the owner's plan is untouched.
+    expect(WotTankModule::where('wot_account_id', $account->id)->first()->planned_module_ids)->toBe([100]);
+});
+
+/**
  * A stock module is fitted from the start, so planning Free XP against it is
  * meaningless — and it never appears in the dropdown, so a row that accepted it
  * could never be un-ticked again.

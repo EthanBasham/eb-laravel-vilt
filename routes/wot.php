@@ -23,6 +23,10 @@ Route::patch('/grinding/filters', [GrindController::class, 'updateFilters'])->na
 Route::patch('/grinding/purchases/{tankId}', [GrindController::class, 'updatePurchase'])->name('grinding.purchase');
 Route::patch('/grinding/modules/{tankId}', [GrindController::class, 'updateModulePlan'])->name('grinding.module-plan');
 Route::patch('/grinding/modules/{tankId}/top-gun', [GrindController::class, 'planTopGun'])->name('grinding.top-gun');
+// The plan spent rather than another module added to it, so it hangs off the
+// plan's own path rather than the research ones — what it writes is research,
+// but what you are telling it is that the Free XP has gone.
+Route::patch('/grinding/modules/{tankId}/applied', [GrindController::class, 'applyModulePlan'])->name('grinding.module-plan-applied');
 Route::patch('/grinding/research/{tankId}/modules', [GrindController::class, 'updateModuleResearch'])->name('grinding.research-module');
 Route::patch('/grinding/research/{tankId}/modules/all', [GrindController::class, 'researchAllModules'])->name('grinding.research-all');
 Route::patch('/grinding/research/{tankId}', [GrindController::class, 'updateResearchXp'])->name('grinding.research-xp');

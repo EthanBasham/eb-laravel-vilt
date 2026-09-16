@@ -160,6 +160,35 @@ class GrindController extends Controller
     }
 
     /**
+     * Records that the plan has been spent: everything on it is researched now.
+     *
+     * The other end of updateModulePlan(). A plan is a list of modules to buy
+     * with Free XP, and when you come back from the garage having bought them
+     * the thing you know is "that plan is done" — not which module you clicked
+     * last. The model empties the plan as it marks each one, so this needs no
+     * separate clear.
+     *
+     * Banked XP is deliberately left alone, unlike updateModuleResearch(). Free
+     * XP is a separate pool: paying out of it is precisely how you research a
+     * module *without* spending what the tank has banked, so charging the tank
+     * here would take the XP twice.
+     */
+    public function applyModulePlan(Request $request, int $tankId): RedirectResponse
+    {
+        $account = $request->user()->wotAccount;
+
+        abort_unless($account, 404);
+        abort_unless(WotVehicle::where('tank_id', $tankId)->exists(), 404);
+
+        WotTankModule::firstOrNew([
+            'wot_account_id' => $account->id,
+            'tank_id' => $tankId,
+        ])->applyPlan();
+
+        return back(fallback: route('wot.grinding'));
+    }
+
+    /**
      * Marks a module researched on a vehicle, or un-marks it.
      *
      * The XP Remaining counterpart to updateModulePlan(), and keyed the same
