@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Wot\AccountLinkController;
+use App\Http\Controllers\Wot\BookmarkController;
 use App\Http\Controllers\Wot\CrewController;
 use App\Http\Controllers\Wot\DashboardController;
 use App\Http\Controllers\Wot\GrindController;
@@ -74,6 +75,13 @@ Route::post('/news/resync', [NewsController::class, 'resync'])->name('news.resyn
 // schedule views without touching the shared row everyone else reads.
 Route::post('/events/{event}/ignore', [NewsController::class, 'ignore'])->name('events.ignore');
 Route::delete('/events/{event}/ignore', [NewsController::class, 'unignore'])->name('events.unignore');
+
+/*
+ * The bookmarks bar. PUT rather than PATCH because the editor sends the list as
+ * it should stand — see SaveBookmarksRequest. It hangs off the user rather than
+ * the linked account, so unlike everything above it works on Connect too.
+ */
+Route::put('/bookmarks', [BookmarkController::class, 'update'])->name('bookmarks.update');
 
 Route::get('/connect', [AccountLinkController::class, 'create'])->name('link.create');
 Route::get('/connect/callback', [AccountLinkController::class, 'callback'])->name('link.callback');

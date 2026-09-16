@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -29,6 +30,7 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'wot_bookmarks_seeded_at' => 'datetime',
         ];
     }
 
@@ -38,6 +40,19 @@ class User extends Authenticatable
     public function wotAccount(): HasOne
     {
         return $this->hasOne(WotAccount::class);
+    }
+
+    /**
+     * The links in the strip under the World of Tanks header.
+     *
+     * On the user rather than on wotAccount, unlike the rest of the sub-project:
+     * the bar is up before an account is linked.
+     *
+     * @return HasMany<WotBookmark, $this>
+     */
+    public function bookmarks(): HasMany
+    {
+        return $this->hasMany(WotBookmark::class);
     }
 
     /** @return BelongsToMany<WotArticle, $this> */

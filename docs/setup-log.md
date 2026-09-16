@@ -3554,3 +3554,64 @@ Size is the seat count from the encyclopedia — one per body, the same count as
 cell — read from the members the board already ships, so nothing server-side changed but the
 filter key. It is stored as `hidden_crew_sizes` in `crews_filters`, held as what is hidden so a
 size first appearing after a patch starts shown, and validated as integers from 1 to 12.
+
+---
+
+## 2026-09-15 — Bookmarks strip under the World of Tanks header
+
+A one-line row of links out to the community sites, between the header and the page on every
+`/wot` screen. Ten defaults in `config/wotbookmarks.php`, shared as a `bookmarks` Inertia prop
+from `HandleInertiaRequests` and rendered by `resources/js/wot/Components/BookmarkBar.vue`.
+
+**The list is config, not a seeder, because it is about to stop being the live list.** Bookmarks
+become per-user and editable next; at that point the prop keeps its name and starts resolving
+off the user, and this config becomes the set a new account is seeded with. Keeping it in config
+means that starting set can change later without a migration, and meant the bar could be styled
+before any of the persistence existed.
+
+**The row scrolls sideways rather than wrapping.** A wrapping bar changes height as the list
+grows, so the page would shift down by a line the first time someone added an eleventh bookmark.
+Its scrollbar is hidden — Firefox is the only engine that draws one in the flow, where it would
+read as a second grey rule under the strip.
+
+Every entry leaves the app, so they are plain `<a target="_blank" rel="noopener noreferrer">`
+rather than Inertia `<Link>`s, and `url` is asserted absolute in the tests: a relative one would
+resolve against `/wot` and 404 rather than erroring.
+
+One note from surveying the candidates — **wot-life.com publishes AAAA records only**. It was
+left out of the defaults, but if it is ever added: it is reachable from a browser while `curl`
+from this machine times out with no IPv4 route, so it looks dead from the command line and
+isn't.
+
+---
+
+## 2026-09-15 — Bookmarks became the user's own
+
+The strip moved off config and onto a `wot_bookmarks` table, with a **Manage** button at the
+right end of the bar opening a `<dialog>` editor (`BookmarkEditor.vue`).
+
+**Keyed on `users`, not `wot_accounts`** — the one table in the sub-project that is. The bar is
+up on the Connect screen, before there is a linked account to hang anything off, and nothing it
+holds is game data.
+
+**`users.wot_bookmarks_seeded_at` is the point of the design.** The config list is written out
+as the user's own rows the first time their bar is read, and that column records that it
+happened. Without it an empty bar is indistinguishable from a new account, so deleting the last
+bookmark would hand all ten defaults back on the next page load. `BookmarkController` stamps it
+on save too, for the user who empties the bar before ever being seeded. The corollary: editing
+`config/wotbookmarks.php` now only affects accounts that have never loaded `/wot`.
+
+**The editor posts the list whole and the server replaces what it holds** (`PUT /wot/bookmarks`,
+`WotBookmark::replaceFor`), the same bargain the crew editor strikes. Reordering and removing are
+most of what happens in there and neither expresses well as a diff; nothing addresses a bookmark
+by id, so there is nothing for a reconcile to preserve. Reordering is up/down buttons rather than
+dragging — no new dependency, and no keyboard trap.
+
+**URLs validate as `url:http,https`, not `url`.** The bare rule passes `javascript:` and `data:`,
+which is stored XSS as soon as one is rendered into an `href` — and this one is rendered for the
+person who typed it, which is exactly what a self-XSS is aimed at. The request also prepends
+`https://` to anything typed without a scheme, since nobody types one into a bookmarks field and
+`url` refuses a bare host.
+
+The shared prop is a closure so a partial reload that doesn't ask for `bookmarks` neither runs
+the query nor trips the one-time seeding write behind it.

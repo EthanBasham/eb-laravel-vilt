@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use Illuminate\Http\Request;
+use App\Models\WotBookmark;
 use Inertia\Middleware;
 
 /**
@@ -50,6 +51,14 @@ class HandleInertiaRequests extends Middleware
             // so config stays the single source of truth for the flag filenames
             // under public/images/nations and their alt text.
             'nations' => (array) config('wargaming.nations'),
+            /*
+             * The bookmarks strip under the header, this user's own.
+             *
+             * A closure so a partial reload that doesn't ask for it doesn't pay
+             * for the query — and, on a user who has never been here, doesn't
+             * trigger the one-time seeding write behind it.
+             */
+            'bookmarks' => fn () => $user ? WotBookmark::forUser($user) : [],
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'error' => fn () => $request->session()->get('error'),

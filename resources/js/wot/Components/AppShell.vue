@@ -2,6 +2,8 @@
 import { Link, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
 
+import BookmarkBar from './BookmarkBar.vue';
+
 const page = usePage();
 const auth = computed(() => page.props.auth);
 const flash = computed(() => page.props.flash ?? {});
@@ -29,6 +31,8 @@ const flash = computed(() => page.props.flash ?? {});
                 </nav>
             </div>
         </header>
+
+        <BookmarkBar />
 
         <main class="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-6 lg:px-8">
             <p
