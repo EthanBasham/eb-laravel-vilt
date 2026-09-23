@@ -105,6 +105,10 @@ class WotArticle extends Model
                 ->selectRaw('? as updated_at', [now()]),
         );
     }
+    public static function markAllUnseenBy(User $user): void
+    {
+        DB::table('wot_article_views')->where('user_id', $user->id)->delete();
+    }
 
     /**
      * Pins this article to the top of the user's feed.

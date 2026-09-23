@@ -58,6 +58,12 @@ class NewsController extends Controller
 
         return back(fallback: route('wot.news.index'));
     }
+    public function markAllUnseen(Request $request): RedirectResponse
+    {
+        WotArticle::markAllUnseenBy($request->user());
+
+        return back(fallback: route('wot.news.index'));
+    }
 
     public function pin(Request $request, WotArticle $article): RedirectResponse
     {
@@ -71,7 +77,7 @@ class NewsController extends Controller
 
         return back(fallback: route('wot.news.index'));
     }
-    
+
     public function resync(): RedirectResponse
     {
         // The command fetches up to a dozen-plus article bodies with a deliberate pace between requests, so this can take a while

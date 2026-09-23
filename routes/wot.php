@@ -82,6 +82,7 @@ Route::prefix('news')->group(function () {
     Route::get('/', [NewsController::class, 'index'])->name('news.index');
     Route::post('/resync', [NewsController::class, 'resync'])->name('news.resync');
     Route::post('/mark-all-seen', [NewsController::class, 'markAllSeen'])->name('news.articles.mark-all-seen');
+    Route::post('/mark-all-unseen', [NewsController::class, 'markAllUnseen'])->name('news.articles.mark-all-unseen');
     Route::post('/{article}/mark-seen', [NewsController::class, 'markSeen'])->name('news.articles.mark-seen');
     Route::post('/{article}/pin', [NewsController::class, 'pin'])->name('news.articles.pin');
     Route::delete('/{article}/pin', [NewsController::class, 'unpin'])->name('news.articles.unpin');

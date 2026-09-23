@@ -134,14 +134,31 @@ const resync = () => {
                  so Resync stays where it is rather than sliding over. -->
             <span v-if="articles.links.length <= 3" />
 
-            <button
-                type="button"
-                class="ms-auto border border-wot-border px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-wot-dim transition-colors hover:border-wot-gold hover:text-wot-gold disabled:cursor-not-allowed disabled:opacity-50"
-                :disabled="resyncing"
-                @click="resync"
-            >
-                {{ resyncing ? 'Resyncing…' : 'Resync news & calendar' }}
-            </button>
+            <div class="ms-auto flex flex-wrap gap-2">
+                <!-- Not preserving state: the seen tracker remembers which cards
+                     this visit already counted and won't re-arm them, so a
+                     remount is what lets hovering mark them seen again. -->
+                <Link
+                    href="/wot/news/mark-all-unseen"
+                    method="post"
+                    as="button"
+                    preserve-scroll
+                    :preserve-state="false"
+                    :only="['articles', 'unseenCount']"
+                    class="border border-wot-border px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-wot-dim transition-colors hover:border-wot-gold hover:text-wot-gold"
+                >
+                    Mark all unseen
+                </Link>
+
+                <button
+                    type="button"
+                    class="border border-wot-border px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-wot-dim transition-colors hover:border-wot-gold hover:text-wot-gold disabled:cursor-not-allowed disabled:opacity-50"
+                    :disabled="resyncing"
+                    @click="resync"
+                >
+                    {{ resyncing ? 'Resyncing…' : 'Resync news & calendar' }}
+                </button>
+            </div>
         </div>
     </AppShell>
 </template>

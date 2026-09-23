@@ -8,6 +8,7 @@ it('requires auth', function () {
 
     $this->post(route('wot.news.articles.mark-seen', $article))->assertRedirect(route('login'));
     $this->post(route('wot.news.articles.mark-all-seen'))->assertRedirect(route('login'));
+    $this->post(route('wot.news.articles.mark-all-unseen'))->assertRedirect(route('login'));
 });
 
 it('reports every article as unseen to a new user', function () {
@@ -180,6 +181,32 @@ it('marking all again is harmless', function () {
     $this->actingAs($user)->post(route('wot.news.articles.mark-all-seen'));
 
     expect(WotArticle::onlySeenBy($user)->count())->toBe(3);
+});
+
+it('marks everything unseen again', function () {
+    $user = User::factory()->create();
+    WotArticle::factory()->count(3)->create();
+
+    $this->actingAs($user)->post(route('wot.news.articles.mark-all-seen'));
+    $this->actingAs($user)->post(route('wot.news.articles.mark-all-unseen'))->assertRedirect();
+
+    $this->actingAs($user)->get(route('wot.news.index'))->assertInertia(fn ($page) => $page
+        ->where('unseenCount', 3)
+        ->where('articles.data.0.is_seen', false),
+    );
+});
+
+it('leaves other users\' seen state alone when marking everything unseen', function () {
+    $mine = User::factory()->create();
+    $theirs = User::factory()->create();
+    WotArticle::factory()->count(2)->create();
+
+    $this->actingAs($mine)->post(route('wot.news.articles.mark-all-seen'));
+    $this->actingAs($theirs)->post(route('wot.news.articles.mark-all-seen'));
+    $this->actingAs($mine)->post(route('wot.news.articles.mark-all-unseen'));
+
+    expect(WotArticle::onlySeenBy($mine)->count())->toBe(0)
+        ->and(WotArticle::onlySeenBy($theirs)->count())->toBe(2);
 });
 
 /**
