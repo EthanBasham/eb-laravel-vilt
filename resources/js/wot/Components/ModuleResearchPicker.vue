@@ -1,6 +1,7 @@
 <script setup>
 import { router } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
+import { n } from '../lib/format';
 
 /**
  * The XP Remaining board's module control: which of a vehicle's upgrade modules
@@ -60,7 +61,6 @@ const researchAll = () => {
     });
 };
 
-const n = (v) => new Intl.NumberFormat().format(v ?? 0);
 </script>
 
 <template>

@@ -1,6 +1,7 @@
 <script setup>
 import { router } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
+import { n } from '../lib/format';
 
 /**
  * The Free XP board's cell: which of a vehicle's upgrade modules to buy with
@@ -76,7 +77,6 @@ const toggle = (module) => {
     });
 };
 
-const n = (v) => new Intl.NumberFormat().format(v ?? 0);
 </script>
 
 <template>

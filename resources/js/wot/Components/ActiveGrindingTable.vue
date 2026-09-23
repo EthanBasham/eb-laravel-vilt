@@ -5,6 +5,7 @@ import { ref } from 'vue';
 import EditableNumber from './EditableNumber.vue';
 import ModuleResearchPicker from './ModuleResearchPicker.vue';
 import NationFlag from './NationFlag.vue';
+import { n, roman } from '../lib/format';
 
 /**
  * The tanks currently being played, and what each still owes.
@@ -69,11 +70,6 @@ const onTab = (event) => {
     // what makes typing over the old value work.
     next.focus();
 };
-
-const n = (v) => new Intl.NumberFormat().format(v ?? 0);
-
-// Tiers are Roman in game and in every community tool.
-const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI'];
 </script>
 
 <template>
@@ -99,7 +95,7 @@ const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 
                     <td class="px-4 py-2">
                         <NationFlag :nation="row.nation" class="me-2" />
                         <span class="text-wot-heading">{{ row.name }}</span>
-                        <span class="ms-2 text-xs text-wot-dim">{{ ROMAN[row.tier] }}</span>
+                        <span class="ms-2 text-xs text-wot-dim">{{ roman(row.tier) }}</span>
                     </td>
                     <!-- The one number no API can supply. -->
                     <td class="px-4 py-2 text-right">

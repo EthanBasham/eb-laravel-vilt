@@ -1,10 +1,11 @@
 <script setup>
+import { number } from '../lib/format';
+
 defineProps({
     overall: { type: Object, required: true },
     history: { type: Object, required: true },
 });
 
-const number = (v) => (v === null || v === undefined ? '—' : new Intl.NumberFormat().format(v));
 const pct = (v) => (v === null || v === undefined ? '—' : `${v}%`);
 const raw = (v) => (v === null || v === undefined ? '—' : v);
 

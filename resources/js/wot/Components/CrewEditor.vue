@@ -1,6 +1,8 @@
 <script setup>
 import { router } from '@inertiajs/vue3';
 import { nextTick, ref, watch } from 'vue';
+import WotDialog from './WotDialog.vue';
+import { n } from '../lib/format';
 
 /**
  * The crew of one vehicle, edited all at once.
@@ -48,18 +50,12 @@ const load = (cell) => ({
     })),
 });
 
-/*
- * showModal() rather than the `open` attribute, for the reason the rest of the
- * app gives: `open` renders the dialog in normal flow, with no backdrop and no
- * focus trap. After nextTick because the element is behind a v-if.
- */
-watch(() => props.cell, async (cell) => {
+// A working copy is taken as the modal opens, not as it is saved: every
+// control below edits the draft, so cancelling leaves the board as it was.
+watch(() => props.cell, (cell) => {
     if (!cell) return;
 
     draft.value = load(cell);
-
-    await nextTick();
-    dialog.value?.showModal();
 }, { immediate: true });
 
 const close = () => dialog.value?.close();
@@ -87,7 +83,6 @@ const setOnMembers = (member, field, value) => {
     seats.forEach((seat) => (seat[field] = value));
 };
 
-const n = (v) => new Intl.NumberFormat().format(v ?? 0);
 
 /*
  * Grouped while idle, bare while editing — the same bargain EditableNumber
@@ -149,182 +144,173 @@ const clear = () => {
 </script>
 
 <template>
-    <dialog
-        v-if="cell"
-        ref="dialog"
-        class="modal modal--dark modal--wide"
-        :aria-label="`Crew of the ${cell.name}`"
-        @click.self="close"
-        @close="emit('close')"
-    >
-        <div class="border border-wot-border bg-wot-panel-solid p-6">
-            <h3 class="text-lg normal-case tracking-normal text-wot-heading">
-                {{ cell.name }} <span class="text-wot-dim">— crew</span>
-            </h3>
+    <WotDialog ref="dialog" wide :open="Boolean(cell)" :label="cell ? `Crew of the ${cell.name}` : ''" @close="emit('close')">
+        <h3 class="text-lg normal-case tracking-normal text-wot-heading">
+            {{ cell.name }} <span class="text-wot-dim">— crew</span>
+        </h3>
 
-            <p v-if="!cell.has_crew" class="mt-1 text-xs text-wot-bad">
-                No crew recorded. Filling this in puts one in the vehicle.
-            </p>
+        <p v-if="!cell.has_crew" class="mt-1 text-xs text-wot-bad">
+            No crew recorded. Filling this in puts one in the vehicle.
+        </p>
 
-            <div class="mt-4 overflow-x-auto">
-                <table class="min-w-full text-sm">
-                    <thead>
-                        <tr class="text-xs uppercase tracking-wider text-wot-dim">
-                            <th scope="col" class="py-2 pe-3 text-left font-bold">Seat</th>
-                            <th scope="col" class="px-3 py-2 text-left font-bold">Zero-skills</th>
-                            <th scope="col" class="px-3 py-2 text-center font-bold">Max</th>
-                            <th scope="col" class="px-3 py-2 text-left font-bold">Skill level</th>
-                            <th scope="col" class="ps-3 py-2 text-right font-bold">Banked XP</th>
-                        </tr>
-                    </thead>
+        <div class="mt-4 overflow-x-auto">
+            <table class="min-w-full text-sm">
+                <thead>
+                    <tr class="text-xs uppercase tracking-wider text-wot-dim">
+                        <th scope="col" class="py-2 pe-3 text-left font-bold">Seat</th>
+                        <th scope="col" class="px-3 py-2 text-left font-bold">Zero-skills</th>
+                        <th scope="col" class="px-3 py-2 text-center font-bold">Max</th>
+                        <th scope="col" class="px-3 py-2 text-left font-bold">Skill level</th>
+                        <th scope="col" class="ps-3 py-2 text-right font-bold">Banked XP</th>
+                    </tr>
+                </thead>
 
-                    <tbody class="divide-y divide-wot-border-soft">
-                        <tr v-for="member in draft.members" :key="member.slot">
-                            <td class="py-2 pe-3">
-                                <span class="text-wot-text">{{ member.name }}</span>
+                <tbody class="divide-y divide-wot-border-soft">
+                    <tr v-for="member in draft.members" :key="member.slot">
+                        <td class="py-2 pe-3">
+                            <span class="text-wot-text">{{ member.name }}</span>
 
-                                <!-- One body, several jobs. The board spells a
-                                     single letter for this seat, so the other
-                                     roles are only ever said in words — stacked
-                                     under the primary rather than run along one
-                                     line, so a seat covering three reads as
-                                     three things rather than as a sentence. -->
-                                <ul v-if="member.also.length" role="list" class="text-xs text-wot-dim">
-                                    <li v-for="role in member.also" :key="role">+ {{ role }}</li>
-                                </ul>
-                            </td>
+                            <!-- One body, several jobs. The board spells a
+                                 single letter for this seat, so the other
+                                 roles are only ever said in words — stacked
+                                 under the primary rather than run along one
+                                 line, so a seat covering three reads as
+                                 three things rather than as a sentence. -->
+                            <ul v-if="member.also.length" role="list" class="text-xs text-wot-dim">
+                                <li v-for="role in member.also" :key="role">+ {{ role }}</li>
+                            </ul>
+                        </td>
 
-                            <td class="px-3 py-2">
-                                <!--
-                                    Three values, all of them one character, so
-                                    they sit out in the open rather than behind
-                                    a dropdown: the answer is visible without
-                                    opening anything, and setting one is a
-                                    single click instead of two.
+                        <td class="px-3 py-2">
+                            <!--
+                                Three values, all of them one character, so
+                                they sit out in the open rather than behind
+                                a dropdown: the answer is visible without
+                                opening anything, and setting one is a
+                                single click instead of two.
 
-                                    Real radios under the labels rather than
-                                    buttons wearing ARIA. The grouping, the
-                                    arrow keys and the announcement all come
-                                    free, and the input is only visually hidden
-                                    — `sr-only`, never `hidden`, which would
-                                    take it out of the tab order with it.
+                                Real radios under the labels rather than
+                                buttons wearing ARIA. The grouping, the
+                                arrow keys and the announcement all come
+                                free, and the input is only visually hidden
+                                — `sr-only`, never `hidden`, which would
+                                take it out of the tab order with it.
 
-                                    :checked and @change rather than v-model,
-                                    because a change here can land on every seat
-                                    rather than on this one.
-                                -->
-                                <fieldset class="flex gap-1">
-                                    <legend class="sr-only">Zero-skills on the {{ member.name }}</legend>
+                                :checked and @change rather than v-model,
+                                because a change here can land on every seat
+                                rather than on this one.
+                            -->
+                            <fieldset class="flex gap-1">
+                                <legend class="sr-only">Zero-skills on the {{ member.name }}</legend>
 
-                                    <label
-                                        v-for="count in ZERO_SKILLS"
-                                        :key="count"
-                                        class="cursor-pointer border px-2.5 py-0.5 text-xs font-bold tabular-nums transition-colors focus-within:ring-1 focus-within:ring-wot-gold"
-                                        :class="member.zero_skills === count
-                                            ? 'border-wot-gold text-wot-gold'
-                                            : 'border-wot-border text-wot-dim hover:text-wot-text'"
+                                <label
+                                    v-for="count in ZERO_SKILLS"
+                                    :key="count"
+                                    class="cursor-pointer border px-2.5 py-0.5 text-xs font-bold tabular-nums transition-colors focus-within:ring-1 focus-within:ring-wot-gold"
+                                    :class="member.zero_skills === count
+                                        ? 'border-wot-gold text-wot-gold'
+                                        : 'border-wot-border text-wot-dim hover:text-wot-text'"
+                                >
+                                    <input
+                                        type="radio"
+                                        class="sr-only"
+                                        :name="`zero-skills-${member.slot}`"
+                                        :value="count"
+                                        :checked="member.zero_skills === count"
+                                        @change="setOnMembers(member, 'zero_skills', count)"
                                     >
-                                        <input
-                                            type="radio"
-                                            class="sr-only"
-                                            :name="`zero-skills-${member.slot}`"
-                                            :value="count"
-                                            :checked="member.zero_skills === count"
-                                            @change="setOnMembers(member, 'zero_skills', count)"
-                                        >
-                                        {{ count }}
-                                    </label>
-                                </fieldset>
-                            </td>
+                                    {{ count }}
+                                </label>
+                            </fieldset>
+                        </td>
 
-                            <td class="px-3 py-2 text-center">
-                                <input
-                                    :checked="member.is_max"
-                                    type="checkbox"
-                                    class="border"
-                                    :aria-label="`The ${member.name} is maxed`"
-                                    @change="setOnMembers(member, 'is_max', $event.target.checked)"
-                                >
-                            </td>
+                        <td class="px-3 py-2 text-center">
+                            <input
+                                :checked="member.is_max"
+                                type="checkbox"
+                                class="border"
+                                :aria-label="`The ${member.name} is maxed`"
+                                @change="setOnMembers(member, 'is_max', $event.target.checked)"
+                            >
+                        </td>
 
-                            <td class="px-3 py-2">
-                                <select
-                                    :value="member.skill_level"
-                                    class="border border-wot-border bg-wot-sunken px-2 py-1 text-sm"
-                                    :aria-label="`Skill level of the ${member.name}`"
-                                    @change="setOnMembers(member, 'skill_level', Number($event.target.value))"
-                                >
-                                    <option v-for="level in levels" :key="level" :value="level">
-                                        {{ level === 0 ? 'Base — 100%' : level }}
-                                    </option>
-                                </select>
-                            </td>
+                        <td class="px-3 py-2">
+                            <select
+                                :value="member.skill_level"
+                                class="border border-wot-border bg-wot-sunken px-2 py-1 text-sm"
+                                :aria-label="`Skill level of the ${member.name}`"
+                                @change="setOnMembers(member, 'skill_level', Number($event.target.value))"
+                            >
+                                <option v-for="level in levels" :key="level" :value="level">
+                                    {{ level === 0 ? 'Base — 100%' : level }}
+                                </option>
+                            </select>
+                        </td>
 
-                            <td class="ps-3 py-2 text-right">
-                                <input
-                                    :value="display(member)"
-                                    type="text"
-                                    inputmode="numeric"
-                                    autocomplete="off"
-                                    class="w-28 border border-wot-border bg-wot-sunken px-1 py-0.5 text-right text-sm tabular-nums focus:border-wot-gold"
-                                    :aria-label="`Banked XP on the ${member.name}`"
-                                    @input="onBankedInput(member, $event)"
-                                    @focus="onBankedFocus(member, $event)"
-                                    @blur="focused = null"
-                                >
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+                        <td class="ps-3 py-2 text-right">
+                            <input
+                                :value="display(member)"
+                                type="text"
+                                inputmode="numeric"
+                                autocomplete="off"
+                                class="w-28 border border-wot-border bg-wot-sunken px-1 py-0.5 text-right text-sm tabular-nums focus:border-wot-gold"
+                                :aria-label="`Banked XP on the ${member.name}`"
+                                @input="onBankedInput(member, $event)"
+                                @focus="onBankedFocus(member, $event)"
+                                @blur="focused = null"
+                            >
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
 
-            <label class="mt-4 flex items-center gap-2 text-sm text-wot-text">
-                <input v-model="draft.is_balanced" type="checkbox" class="border">
-                This crew is well balanced
-            </label>
+        <label class="mt-4 flex items-center gap-2 text-sm text-wot-text">
+            <input v-model="draft.is_balanced" type="checkbox" class="border">
+            This crew is well balanced
+        </label>
 
-            <!-- Said out loud, because a control that quietly writes four other
-                 rows is a surprise otherwise. -->
-            <p class="mt-1 text-xs text-wot-dim">
-                <template v-if="draft.is_balanced">
-                    The set trains as one: zero-skills, skill level and max apply to every seat. Banked XP stays per member.
-                </template>
-                <template v-else>
-                    Tick this to set zero-skills, skill level and max across the whole set at once.
-                </template>
-            </p>
+        <!-- Said out loud, because a control that quietly writes four other
+             rows is a surprise otherwise. -->
+        <p class="mt-1 text-xs text-wot-dim">
+            <template v-if="draft.is_balanced">
+                The set trains as one: zero-skills, skill level and max apply to every seat. Banked XP stays per member.
+            </template>
+            <template v-else>
+                Tick this to set zero-skills, skill level and max across the whole set at once.
+            </template>
+        </p>
 
-            <div class="mt-6 flex flex-wrap items-center justify-between gap-3">
+        <div class="mt-6 flex flex-wrap items-center justify-between gap-3">
+            <button
+                v-if="cell.has_crew"
+                type="button"
+                class="border border-wot-border px-4 py-2 text-xs font-bold uppercase tracking-wider text-wot-dim transition-colors hover:border-wot-bad hover:text-wot-bad"
+                :disabled="saving"
+                @click="clear"
+            >
+                Empty the tank
+            </button>
+            <span v-else></span>
+
+            <div class="flex flex-wrap gap-3">
                 <button
-                    v-if="cell.has_crew"
                     type="button"
-                    class="border border-wot-border px-4 py-2 text-xs font-bold uppercase tracking-wider text-wot-dim transition-colors hover:border-wot-bad hover:text-wot-bad"
-                    :disabled="saving"
-                    @click="clear"
+                    class="border border-wot-border px-4 py-2 text-xs font-bold uppercase tracking-wider text-wot-muted transition-colors hover:border-wot-gold hover:text-wot-gold"
+                    @click="close"
                 >
-                    Empty the tank
+                    Cancel
                 </button>
-                <span v-else></span>
-
-                <div class="flex flex-wrap gap-3">
-                    <button
-                        type="button"
-                        class="border border-wot-border px-4 py-2 text-xs font-bold uppercase tracking-wider text-wot-muted transition-colors hover:border-wot-gold hover:text-wot-gold"
-                        @click="close"
-                    >
-                        Cancel
-                    </button>
-                    <button
-                        type="button"
-                        class="border border-wot-gold px-4 py-2 text-xs font-bold uppercase tracking-wider text-wot-gold transition-colors hover:bg-wot-gold hover:text-wot-abyss"
-                        :class="saving ? 'opacity-50' : ''"
-                        :disabled="saving"
-                        @click="save"
-                    >
-                        Save crew
-                    </button>
-                </div>
+                <button
+                    type="button"
+                    class="border border-wot-gold px-4 py-2 text-xs font-bold uppercase tracking-wider text-wot-gold transition-colors hover:bg-wot-gold hover:text-wot-abyss"
+                    :class="saving ? 'opacity-50' : ''"
+                    :disabled="saving"
+                    @click="save"
+                >
+                    Save crew
+                </button>
             </div>
         </div>
-    </dialog>
+    </WotDialog>
 </template>

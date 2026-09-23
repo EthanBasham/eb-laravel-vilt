@@ -2,6 +2,7 @@
 paths:
   - 'app/Services/Wargaming/Blueprint*.php'
   - 'resources/js/wot/Components/Blueprint*.vue'
+  - 'resources/js/wot/Components/Grinding/Blueprint*.vue'
   - 'resources/js/wot/Pages/Grinding.vue'
 ---
 
@@ -34,4 +35,4 @@ There is no JS test runner in this project, so any fragment arithmetic done in V
 `BlueprintBoard::MIN_TIER`/`MAX_TIER` and the keys of `blueprint_costs` are the same claim written twice; keep them agreeing. A tier I is researched from nothing and a tier XI sits above where the system stops, so `BlueprintCost::supports()` is false for both and the derived XP on the XP board is null there — which is not the same as zero.
 
 ## The planner binds by tank_id, not by the cell object
-Every write in the modal reloads `blueprints` wholesale while it is still open, so a stored cell object becomes a snapshot from before the edit — showing exactly the figures the save was meant to change. `Grinding.vue` holds `bpEditing` as an id and re-resolves `bpEditingCell` each render, preferring the owning (non-shared) cell. `Crews.vue` stores the object instead and gets away with it only because `CrewEditor` saves once and closes.
+Every write in the modal reloads `blueprints` wholesale while it is still open, so a stored cell object becomes a snapshot from before the edit — showing exactly the figures the save was meant to change. `Components/Grinding/BlueprintsBoard.vue` holds `editing` as an id and re-resolves `editingCell` each render, preferring the owning (non-shared) cell. `Components/Crews/CrewBoard.vue` stores the object instead and gets away with it only because `CrewEditor` saves once and closes.

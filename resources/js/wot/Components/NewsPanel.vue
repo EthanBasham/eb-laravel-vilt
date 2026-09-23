@@ -1,6 +1,7 @@
 <script setup>
 import { Link, router } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
+import { asShortDate } from '../lib/format';
 import { useSeenTracker } from '../composables/useSeenTracker';
 
 const props = defineProps({
@@ -21,7 +22,6 @@ const tabs = [
     { key: 'pinned', label: 'Pinned' },
 ];
 
-const asDate = (iso) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 
 // only: ['news'] so a pin doesn't resend the garage table — several hundred
 // vehicles of JSON that hasn't changed. Both tabs come back together, so the
@@ -91,7 +91,7 @@ const togglePin = (article) => {
                                 aria-hidden="true"
                             />
                             <span class="truncate text-xs uppercase tracking-wider text-wot-dim">
-                                {{ article.category }} · {{ asDate(article.published_at) }}
+                                {{ article.category }} · {{ asShortDate(article.published_at) }}
                                 <span v-if="!article.is_seen" class="sr-only">(unread)</span>
                             </span>
                         </span>

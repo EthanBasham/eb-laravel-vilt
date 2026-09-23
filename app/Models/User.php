@@ -58,9 +58,7 @@ class User extends Authenticatable
     /** @return BelongsToMany<WotArticle, $this> */
     public function pinnedArticles(): BelongsToMany
     {
-        return $this->belongsToMany(WotArticle::class, 'wot_article_pins')
-            ->withPivot('pinned_at')
-            ->orderByPivot('pinned_at', 'desc');
+        return $this->belongsToMany(WotArticle::class, 'wot_article_pins')->withPivot('pinned_at');
     }
 
     /** @return BelongsToMany<WotArticle, $this> */
@@ -73,22 +71,5 @@ class User extends Authenticatable
     public function ignoredEvents(): BelongsToMany
     {
         return $this->belongsToMany(WotEvent::class, 'wot_event_ignores')->withPivot('ignored_at');
-    }
-
-    /**
-     * Records an article as seen, leaving an existing timestamp alone — "first
-     * seen" is the useful fact, and re-reading something shouldn't make it look
-     * freshly discovered.
-     *
-     * Note this is attach-guarded rather than syncWithoutDetaching, which would
-     * rewrite the pivot on every call.
-     */
-    public function markArticleSeen(WotArticle $article): void
-    {
-        if ($this->seenArticles()->whereKey($article->id)->exists()) {
-            return;
-        }
-
-        $this->seenArticles()->attach($article->id, ['seen_at' => now()]);
     }
 }

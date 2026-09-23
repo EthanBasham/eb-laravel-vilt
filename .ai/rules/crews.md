@@ -5,6 +5,7 @@ paths:
   - 'app/Http/Controllers/Wot/CrewController.php'
   - 'resources/js/wot/Pages/Crews.vue'
   - 'resources/js/wot/Components/Crew*.vue'
+  - 'resources/js/wot/Components/Crews/**'
 ---
 
 # Crews

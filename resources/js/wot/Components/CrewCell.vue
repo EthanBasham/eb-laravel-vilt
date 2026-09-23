@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue';
+import { n } from '../lib/format';
 
 /**
  * One vehicle's crew, as a short string of letters.
@@ -26,7 +27,6 @@ const props = defineProps({
 
 defineEmits(['edit']);
 
-const n = (v) => new Intl.NumberFormat().format(v ?? 0);
 
 /**
  * The zeroed XP steps on one member, as a rule under the letter.

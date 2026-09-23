@@ -7,8 +7,7 @@ use App\Services\Wargaming\WargamingClient;
 use App\Services\Wargaming\WargamingException;
 
 /**
- * Answers "is the Wargaming API actually reachable with the configured
- * credentials" without needing a linked account or a browser.
+ * Answers "is the Wargaming API actually reachable with the configured credentials" without needing a linked account.
  *
  * A manual diagnostic, and deliberately the only command in this namespace that
  * is neither scheduled nor covered by a test. It issues a real, unmocked
@@ -17,12 +16,8 @@ use App\Services\Wargaming\WargamingException;
  * would leave this asserting nothing but its own output. WargamingClient itself
  * is covered properly, by WargamingClientTest with Http::fake().
  *
- * It could not be tested here in any case — phpunit.xml pins a dummy
- * WARGAMING_APPLICATION_ID, so under test this would either stop at the guard in
- * WargamingClient or reach the network.
  *
- * Run it by hand after changing a key, changing realm, or moving to a new
- * machine. See README.md, which uses it as the first step of setup.
+ * Run it by hand after changing a key, changing realm, or moving to a new machine. See README.md, which uses it as the first step of setup.
  */
 class PingApi extends Command
 {
@@ -36,7 +31,7 @@ class PingApi extends Command
         $this->line("Realm: {$realm} (".config("wargaming.hosts.{$realm}").')');
 
         try {
-            $accounts = $client->searchAccounts($this->argument('nickname') ?? 'jack', 3);
+            $accounts = $client->searchAccounts($this->argument('nickname') ?? 'AirsoftPro13', 3);
         } catch (WargamingException $e) {
             $this->error($e->getMessage());
 

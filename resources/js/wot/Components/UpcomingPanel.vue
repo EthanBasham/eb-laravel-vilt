@@ -1,11 +1,10 @@
 <script setup>
 import { Link } from '@inertiajs/vue3';
+import { asShortDate } from '../lib/format';
 
 defineProps({
     upcoming: { type: Object, required: true },
 });
-
-const asDate = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : null);
 </script>
 
 <template>
@@ -80,7 +79,7 @@ const asDate = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { day
             <ul role="list" class="mt-1 space-y-0.5">
                 <li v-for="event in upcoming.ongoing" :key="event.id" class="truncate text-xs text-wot-muted">
                     {{ event.title }}
-                    <span v-if="event.ends_at" class="text-wot-dim">· until {{ asDate(event.ends_at) }}</span>
+                    <span v-if="event.ends_at" class="text-wot-dim">· until {{ asShortDate(event.ends_at) }}</span>
                 </li>
             </ul>
         </div>
