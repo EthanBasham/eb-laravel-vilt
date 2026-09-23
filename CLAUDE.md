@@ -262,11 +262,13 @@ dead imports are still removed. Don't "fix" `pint.json` by restoring the default
 scopes → **relationships last**, with `// Scopes` and `// Relationships` header comments
 marking the groups. Only add a header for a group that exists.
 
-`pint.json` sets `class_attributes_separation` to `method: none`, so Pint strips blank lines
-between adjacent methods and each group closes up. A `//` header comment keeps its
-surrounding blank lines, which is what separates the groups; a docblock is the only way to
-space two individual methods apart. When editing that rule, specify **all four** `elements`
-keys — a partial map replaces the defaults rather than merging.
+**Blank lines between methods are the author's call.** `pint.json`'s
+`class_attributes_separation` deliberately omits the `method` key, so Pint neither adds nor
+strips blank lines between methods — use them to group related methods, and close up the ones
+that belong together. (Until 2026-09-23 it was `method: none`, which stripped every one.) The
+`elements` map replaces the fixer's defaults rather than merging, which is what makes omission
+mean "leave alone": keep `const`, `property` and `trait_import` listed so those stay enforced,
+and don't add `method` back to "complete" the map.
 
 **Scope naming.** Filtering scopes read as explicit inclusion or exclusion:
 `scopeOnlyPublished()` / `scopeNotArchived()`, so the call site is unambiguous about whether

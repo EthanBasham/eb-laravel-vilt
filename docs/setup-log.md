@@ -3972,3 +3972,23 @@ the news page, and it redirects there.
 Route names and paths are untouched — `wot.calendar`, `wot.calendar.events.ignore` and
 `wot.calendar.events.unignore` just point at the new class, so no test, view or URL moved. The
 `.ai/rules` globs for `controllers-wot.md` now cover both controllers.
+
+## 2026-09-23 — Pint stops managing blank lines between methods
+
+`class_attributes_separation` in `pint.json` no longer lists `method`. It had been
+`method: none`, carried over from `eb-portfolio`, which stripped every blank line between
+adjacent methods — so the only way to separate two related groups of methods was a `//`
+header comment or a docblock. In practice that fought how methods here are grouped by hand
+(`markAllSeen`/`markAllUnseen` beside each other, then a gap before `pin`/`unpin`), and every
+`pint --dirty` run closed the gaps back up.
+
+Omitting the key rather than setting another value is the mechanism: the `elements` map
+*replaces* the fixer's defaults instead of merging with them, so an element type that isn't
+listed is not processed at all. `const: one`, `property: one` and `trait_import: none` are
+still enforced. Checked on a scratch class before applying — an existing blank line between
+two methods survived, as did an absent one, while constants and properties were still spaced.
+
+This departs from `eb-portfolio`, whose `pint.json` still has `method: none`. The old
+`CLAUDE.md` instruction to "specify all four `elements` keys" is reversed accordingly, and
+existing files aren't reformatted: their closed-up methods stay as they are until someone
+regroups them.

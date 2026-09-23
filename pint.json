@@ -4,7 +4,6 @@
         "class_attributes_separation": {
             "elements": {
                 "const": "one",
-                "method": "none",
                 "property": "one",
                 "trait_import": "none"
             }
