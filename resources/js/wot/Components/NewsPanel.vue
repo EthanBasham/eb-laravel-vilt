@@ -1,8 +1,9 @@
 <script setup>
-import { Link, router } from '@inertiajs/vue3';
+import { Link } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 import { asShortDate } from '../lib/format';
-import { useSeenTracker } from '../composables/useSeenTracker';
+import { useArticlePin } from '../composables/useArticlePin';
+import { useArticleSeenTracker } from '../composables/useArticleSeenTracker';
 
 const props = defineProps({
     news: { type: Object, required: true },
@@ -10,7 +11,7 @@ const props = defineProps({
 
 // Rows mark themselves seen once the pointer has rested on one for 1.5s, the
 // same as the cards on /wot/news.
-const { track, isMarked } = useSeenTracker();
+const { track, isMarked } = useArticleSeenTracker();
 
 const tab = ref('latest');
 
@@ -22,17 +23,31 @@ const tabs = [
     { key: 'pinned', label: 'Pinned' },
 ];
 
+/*
+ * only: ['news'] so a pin doesn't resend the garage table — several hundred
+ * vehicles of JSON that hasn't changed. Both tabs come back together, so the
+ * Pinned list stays correct without a second request.
+ *
+ * The same article can be in both tabs, so the pin flips wherever it appears,
+ * and an unpin drops the row from Pinned straight away. A pin doesn't add one
+ * there: where it lands among the other pins is the server's to decide.
+ */
+const { togglePin } = useArticlePin({
+    only: ['news'],
+    optimistic: (pageProps, article, pinning) => {
+        const flip = (row) => (row.id === article.id ? { ...row, is_pinned: pinning } : row);
 
-// only: ['news'] so a pin doesn't resend the garage table — several hundred
-// vehicles of JSON that hasn't changed. Both tabs come back together, so the
-// Pinned list stays correct without a second request.
-const togglePin = (article) => {
-    const options = { preserveScroll: true, preserveState: true, only: ['news'] };
-
-    article.is_pinned
-        ? router.delete(`/wot/news/${article.id}/pin`, options)
-        : router.post(`/wot/news/${article.id}/pin`, {}, options);
-};
+        return {
+            news: {
+                ...pageProps.news,
+                latest: pageProps.news.latest.map(flip),
+                pinned: pinning
+                    ? pageProps.news.pinned.map(flip)
+                    : pageProps.news.pinned.filter((row) => row.id !== article.id),
+            },
+        };
+    },
+});
 </script>
 
 <template>

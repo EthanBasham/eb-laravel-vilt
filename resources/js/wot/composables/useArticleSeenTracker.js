@@ -30,7 +30,7 @@ import { onBeforeUnmount, reactive } from 'vue';
  * NEW badge, the dashboard's dot) the moment the hover lands: waiting for the
  * round trip would leave it sitting there long enough to look broken.
  */
-export function useSeenTracker({ hoverMs = 1500 } = {}) {
+export function useArticleSeenTracker({ hoverMs = 1500 } = {}) {
     const timers = new Map();
     // Weak: rows come and go as tabs switch and partial reloads land, and a
     // strong map here would pin every detached node for the page's lifetime.

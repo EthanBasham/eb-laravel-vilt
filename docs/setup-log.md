@@ -4007,3 +4007,22 @@ already read reads as a bug.
 change: `markSeen` still reloads only `unseenCount`, because `isMarked()` covers the card until
 the next full load brings `is_seen` from the server. The dashboard's `NewsPanel` only ever
 showed a dot, which already cleared on hover, so it is unchanged.
+
+## 2026-09-23 — Pinning moved into useArticlePin; the seen tracker was renamed
+
+`/wot/news` and the dashboard's `NewsPanel` each carried their own `togglePin` — the same URL
+and POST-or-DELETE choice, written twice. That now lives once in
+`resources/js/wot/composables/useArticlePin.js`, and both pages call it. What the composable
+deliberately does *not* own is anything about a page's props: each caller passes `only` and
+an `optimistic(pageProps, article, pinning)` callback, because the News page holds a paginator
+at `articles.data` and the dashboard holds `news.latest` / `news.pinned`. A composable that
+reached into either shape would break on the other — the same reason the pin stays an emit
+from `ArticleCard` rather than living in the card.
+
+The dashboard pin gained an optimistic update in the move: it flips `is_pinned` in both tabs
+and drops the row from Pinned on an unpin. A pin doesn't add a row to Pinned — where it lands
+among the other pins is the server's ordering, so the reply brings it.
+
+`useSeenTracker` became `useArticleSeenTracker` (file and export) so the pair reads as
+article-specific and leaves the generic name free. Only `News.vue` and `NewsPanel.vue` imported
+it. The split is recorded as a rule in `.ai/rules/js-wot.md`.

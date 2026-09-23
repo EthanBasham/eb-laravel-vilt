@@ -8,9 +8,10 @@ import PageHeader from '../Components/PageHeader.vue';
 import Pagination from '../Components/Pagination.vue';
 import ArticleCard from '../Components/News/ArticleCard.vue';
 import NewsToolbar from '../Components/News/NewsToolbar.vue';
-import { useSeenTracker } from '../composables/useSeenTracker';
+import { useArticlePin } from '../composables/useArticlePin';
+import { useArticleSeenTracker } from '../composables/useArticleSeenTracker';
 
-const props = defineProps({
+defineProps({
     articles: { type: Object, required: true },
     categories: { type: Array, default: () => [] },
     activeCategory: { type: String, default: null },
@@ -20,40 +21,26 @@ const props = defineProps({
 });
 
 // Cards mark themselves seen once the pointer has rested on one for 1.5s.
-const { track, isMarked } = useSeenTracker();
-
-const markAllSeen = () => {
-    router.post('/wot/news/mark-all-seen', {}, { preserveScroll: true });
-};
+const { track, isMarked } = useArticleSeenTracker();
 
 /*
- * Both filters navigate, since the server pages the list — and each carries the
- * other along, so narrowing to a category does not silently drop the pinned
- * filter you already had on.
+ * The pin lights and the count moves on the click; the card only moves to its
+ * pinned-first place when the server's list arrives, since that order is the
+ * server's to decide. Nothing else on the page changes, so the categories and
+ * unseen count aren't rebuilt for it.
  */
-const filterBy = (category) => {
-    router.get('/wot/news', {
-        ...(category ? { category } : {}),
-        ...(props.pinnedOnly ? { pinned: 1 } : {}),
-    }, { preserveScroll: true });
-};
-
-const togglePinnedOnly = () => {
-    router.get('/wot/news', {
-        ...(props.activeCategory ? { category: props.activeCategory } : {}),
-        ...(props.pinnedOnly ? {} : { pinned: 1 }),
-    }, { preserveScroll: true });
-};
-
-// preserveScroll so pinning an article halfway down the list doesn't throw the
-// page back to the top; the reordering is visible without losing your place.
-const togglePin = (article) => {
-    const options = { preserveScroll: true, preserveState: false };
-
-    article.is_pinned
-        ? router.delete(`/wot/news/${article.id}/pin`, options)
-        : router.post(`/wot/news/${article.id}/pin`, {}, options);
-};
+const { togglePin } = useArticlePin({
+    only: ['articles', 'pinnedCount'],
+    optimistic: (pageProps, article, pinning) => ({
+        articles: {
+            ...pageProps.articles,
+            data: pageProps.articles.data.map((row) => (
+                row.id === article.id ? { ...row, is_pinned: pinning } : row
+            )),
+        },
+        pinnedCount: pageProps.pinnedCount + (pinning ? 1 : -1),
+    }),
+});
 
 // The command fetches several article bodies with a deliberate pace between
 // requests, so this can take a while — disabled state stops a second click
@@ -102,9 +89,6 @@ const resync = () => {
             :pinned-only="pinnedOnly"
             :pinned-count="pinnedCount"
             :unseen-count="unseenCount"
-            @filter="filterBy"
-            @mark-all-seen="markAllSeen"
-            @toggle-pinned-only="togglePinnedOnly"
         />
 
         <ul role="list" class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
