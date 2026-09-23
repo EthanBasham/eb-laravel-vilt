@@ -7,8 +7,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Wot\MarkArticlesSeenRequest;
 use App\Models\User;
 use App\Models\WotArticle;
 use App\Models\WotEvent;
@@ -24,12 +24,7 @@ class NewsController extends Controller
         $user = $request->user();
 
         return Inertia::render('News', [
-            // A closure so Inertia partial reloads (the seen-tracker flushes
-            // ask only for unseenCount) skip this query entirely.
             'articles' => fn () => WotArticle::query()
-                // Qualified: pinnedFirstFor joins wot_article_pins, which also
-                // has a category-free `id`, so an unqualified column here would
-                // be ambiguous.
                 ->when($category, fn ($query) => $query->where('wot_articles.category', $category))
                 ->when($pinnedOnly, fn ($query) => $query->onlyPinnedBy($user))
                 ->withCount('events')
@@ -38,20 +33,11 @@ class NewsController extends Controller
                 ->paginate(24)
                 ->withQueryString()
                 ->through(fn (WotArticle $article): array => [
-                    'id' => $article->id,
-                    'title' => $article->title,
-                    'url' => $article->url,
+                    ...$article->card_entry,
                     'description' => $article->description,
-                    'category' => $article->category,
-                    'image_url' => $article->image_url,
-                    'published_at' => $article->published_at->toIso8601String(),
                     'events_count' => $article->events_count,
-                    // pinned_at comes from the join in pinnedFirstFor(); its
-                    // presence is what "pinned" means here.
-                    'is_pinned' => $article->pinned_at !== null,
-                    'is_seen' => $article->seen_at !== null,
                 ]),
-            'categories' => WotArticle::query()
+            'categories' => fn () => WotArticle::query()
                 ->select('category')
                 ->distinct()
                 ->orderBy('category')
@@ -60,37 +46,39 @@ class NewsController extends Controller
                 ->values(),
             'activeCategory' => $category,
             'pinnedOnly' => $pinnedOnly,
-            'pinnedCount' => $user->pinnedArticles()->count(),
-            'unseenCount' => WotArticle::onlyUnseenBy($user)->count(),
+            'pinnedCount' => fn () => WotArticle::onlyPinnedBy($user)->count(),
+            'unseenCount' => fn () => WotArticle::notSeenBy($user)->count(),
         ]);
     }
 
     /**
-     * Marks a batch of articles seen.
+     * Marks one article seen.
      *
-     * A batch rather than one call per article: the client observes cards
-     * scrolling past and would otherwise fire a request every second or so
-     * during a scroll.
+     * One article per call because the client earns them one at a time: a card
+     * is marked when the pointer has rested on it, and only one card can be
+     * under the pointer. This took an array of ids while marks came from a
+     * visibility tracker, where a single scroll could finish a screenful of
+     * dwells at once — see the 2026-09-22 setup-log entry.
+     *
+     * Route model binding replaces the form request that validated those ids:
+     * an unknown id is now a 404 rather than a silently dropped element.
      */
-    public function markSeen(MarkArticlesSeenRequest $request): RedirectResponse
+    public function markSeen(Request $request, WotArticle $article): RedirectResponse
     {
-        $user = $request->user();
+        $now = now();
 
-        // Only ids that exist are marked, so a stale client sending an id for a
-        // since-deleted article can't fail the whole batch.
-        $ids = WotArticle::whereIn('id', $request->validated('ids'))->pluck('id');
-
-        // attach(), not syncWithoutDetaching(). The latter calls
-        // updateExistingPivot for ids already present, which would rewrite
-        // seen_at every time a card scrolled past again — and "first seen" is
-        // the fact worth keeping. Already-seen ids are filtered out instead.
-        $unseen = $ids->diff(
-            $user->seenArticles()->whereIn('wot_articles.id', $ids)->pluck('wot_articles.id'),
-        );
-
-        $user->seenArticles()->attach(
-            $unseen->mapWithKeys(fn (int $id): array => [$id => ['seen_at' => now()]])->all(),
-        );
+        // One statement, no read first. The unique index decides whether this
+        // is a new sighting, so a row that already exists is left exactly as it
+        // is — "first seen" is the fact worth keeping, and a re-hover cannot
+        // overwrite it. See markAllSeen() for why this shape rather than a
+        // select followed by an insert.
+        DB::table('wot_article_views')->insertOrIgnore([
+            'user_id' => $request->user()->id,
+            'wot_article_id' => $article->id,
+            'seen_at' => $now,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
 
         return back(fallback: route('wot.news.index'));
     }
@@ -98,23 +86,39 @@ class NewsController extends Controller
     /**
      * Clears the whole backlog — the escape hatch for coming back after a
      * while and not wanting to scroll past two months of articles.
+     *
+     * One INSERT ... SELECT, so the ids are never in PHP at all. This read the
+     * unseen ids and wrote them back in chunks until 2026-09-22, which was
+     * check-then-act: two overlapping requests from the same user — a
+     * double-clicked button, or a card's own mark landing mid-flight — both
+     * read the same ids, and the second insert died on the unique index. The
+     * conflict clause makes that outcome unreachable rather than unlikely.
+     *
+     * notSeenBy() is kept even though the conflict clause would cover it: it
+     * keeps the inserted set to what is actually new, and it is where the rule
+     * about never rewriting a first-seen timestamp stays visible.
      */
     public function markAllSeen(Request $request): RedirectResponse
     {
         $user = $request->user();
+        $now = now();
 
-        $unseen = WotArticle::onlyUnseenBy($user)->pluck('id');
-
-        // Chunked because this is unbounded: it grows with the feed, and a
-        // single insert of every article a user has never seen is the one place
-        // here that could get large.
-        foreach ($unseen->chunk(500) as $chunk) {
-            // Safe to attach outright: the query above selected only rows with
-            // no existing pivot.
-            $user->seenArticles()->attach(
-                $chunk->mapWithKeys(fn (int $id): array => [$id => ['seen_at' => now()]])->all(),
-            );
-        }
+        /*
+         * The constant columns are bound rather than interpolated, and their
+         * bindings land in the `select` group — which precedes the `where`
+         * bindings notSeenBy() adds, so the order holds. Getting that wrong
+         * would be silent, writing one column's value into another, which is
+         * why ArticleSeenTest asserts the stored seen_at and not just a count.
+         */
+        DB::table('wot_article_views')->insertOrIgnoreUsing(
+            ['user_id', 'wot_article_id', 'seen_at', 'created_at', 'updated_at'],
+            WotArticle::notSeenBy($user)
+                ->selectRaw('? as user_id', [$user->id])
+                ->addSelect('wot_articles.id')
+                ->selectRaw('? as seen_at', [$now])
+                ->selectRaw('? as created_at', [$now])
+                ->selectRaw('? as updated_at', [$now]),
+        );
 
         // No flash: every NEW badge and the button itself disappear, which
         // reports the outcome more directly than a banner restating it.

@@ -266,7 +266,7 @@ it('shows the five newest articles and the pinned ones separately', function () 
         'title' => "Article {$i}",
         'published_at' => now()->subDays(7 - $i),
     ]));
-    $this->actingAs($user)->post(route('wot.news.pin', $articles->first()));
+    $this->actingAs($user)->post(route('wot.news.articles.pin', $articles->first()));
 
     Http::fake([
         '*/account/info/*' => Http::response(accountInfoResponse(7)),
@@ -298,7 +298,7 @@ it('marks unseen articles in the panel', function () {
     $this->actingAs($user)->get(route('wot.dashboard'))
         ->assertInertia(fn ($page) => $page->where('news.latest.0.is_seen', false));
 
-    $this->actingAs($user)->post(route('wot.news.seen'), ['ids' => [$article->id]]);
+    $this->actingAs($user)->post(route('wot.news.articles.mark-seen', $article));
 
     $this->actingAs($user)->get(route('wot.dashboard'))
         ->assertInertia(fn ($page) => $page->where('news.latest.0.is_seen', true));
@@ -451,7 +451,7 @@ it('reports pinned state in the dashboard news panel', function () {
         ->where('news.latest.0.is_pinned', false),
     );
 
-    $this->actingAs($user)->post(route('wot.news.pin', $older));
+    $this->actingAs($user)->post(route('wot.news.articles.pin', $older));
 
     // Pinning does not hoist on the Latest tab — it stays newest-first — but
     // the pinned row still reports is_pinned so its toggle reflects state.

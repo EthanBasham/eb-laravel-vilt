@@ -3747,3 +3747,175 @@ field out exactly as before.
 **Production needs `php artisan migrate`.**
 
 Suite: **374 passed, 2700 assertions.**
+
+## 2026-09-22 — The five Vue pages, broken into components
+
+The `resources/js/wot/Pages/` files had grown the way vibe-coded pages do: `Grinding.vue` was
+1,644 lines, `Crews.vue` 990, and between them they carried the same markup several times over —
+seventeen hand-written filter-chip rows in three polarities, five copies of the tech-tree table,
+nine copies of `const n = …`, six of the Roman-numeral array, six native-`<dialog>` set-ups each
+with its own copy of the same explanatory comment. **Pages went from 3,801 lines to 828, and the
+shipped bundle from 342.6 kB to 329.8 kB** — the second figure is the real one, since the first
+only says where the code moved to.
+
+Nothing about what the app does changed. What follows is only what is worth knowing before
+touching it again.
+
+**Shared primitives now live in three places.** `lib/` holds pure functions — `format.js`
+(`n`, `number`, `short`, `inK`, `roman`, the date forms), `events.js` (a calendar event's
+confidence → its colour), `sale.js`, `achievements.js`. `composables/` holds state —
+`useNations`, `useTableSort`, `useBoardTotals`, `useGrindBoard`. `Components/` holds markup, with
+a subfolder per page for the pieces only that page uses.
+
+**`n` and `number` are deliberately two functions.** `n` renders nothing-recorded as `0`, which is
+what a count wants; `number` renders it as an em dash, which is what a measurement wants — a
+vehicle with no WN8 has no expected values published for it, which is not a score of zero. Merging
+them would quietly turn every unknown on the dashboard into a nought.
+
+**One behaviour did change, and it was a bug.** The dashboard had its own ten-entry Roman numeral
+array where every other copy had eleven, so a tier XI vehicle in the garage printed as a bare
+"11". It now reads XI like the rest of the app. An empty purchase-board cell also prints the `·`
+the other four boards print, rather than nothing.
+
+**`useGrindBoard` is instantiated on the page, not in the board component.** Two of the headline
+cards report a *filtered* board total and are on show whichever tab is up, while only one tab's
+table is mounted at a time — four boards of four hundred rows is not something to render for the
+sake of a card. So the state outlives the view of it. It returns a `reactive` bundle, which is
+what lets the refs inside read as plain properties in a template and lets a board component write
+a checkbox straight back (`v-model="board.hide_done"`), through to the ref `useBoardFilters` is
+watching. That round trip is pinned by the Node check described below.
+
+**A board's own rules are the only thing that differs between the four**, and they sit together in
+`Grinding.vue` as `rules(filters)` returning `cellValue`, `keepRow` and an optional `isDone` — so
+the four can be read against each other. That is how the Free XP board's
+`is_maxed`-versus-`is_researched` split and the blueprint board's line-done test stay legible
+as the deliberate differences they are.
+
+**The Battle Pass add row and roster row are one component.** They were the same eight columns
+written twice, which is eight chances to drift apart. `BattlePassRow` takes `draft` and every
+control reports a change the same way — a patch of one field — leaving the parent to decide
+whether that is a write to the server or a line in the draft. Consequence worth knowing: the
+draft's fields now commit on `change` rather than on every keystroke, so `toSeason` normalises as
+you leave the field instead of at submit.
+
+**Verification, given there is still no JS test runner.** `npm run build` catches template and
+import errors only; it will happily ship an identifier that does not exist at runtime — that is how
+a dropped `nextTick` import in `CrewEditor` was nearly missed. So: a scripted sweep for used-but-
+unimported identifiers across every `.vue`, and an eighteen-assertion Node script exercising
+`useBoardTotals` and the `reactive` bundle directly (shared/bought cells excluded from totals,
+hiding a tier taking its price off the bill, writes through the bundle reaching the underlying
+ref). The script was run from the project root and deleted; it is worth rewriting rather than
+reaching for if this area is touched again. The real gap this leaves is visual: nothing here
+proves a page still *looks* right.
+
+Suite: **342 passed, 2,619 assertions** (`tests/Feature/Wot`) — unchanged, as no PHP was touched.
+
+---
+
+## 2026-09-22 — Seen marks post one article at a time
+
+**First, a correction to the record.** The 2026-09-08 entry above still describes the seen
+tracker as viewport dwell — `IntersectionObserver` at 60% for 1.5s — and compares five
+approaches, rejecting "hover dwell 3s" as structurally wrong. That decision was reversed on
+2026-09-11 in `1892abe`, which moved to `mouseenter`/`mouseleave` at 1.5s because the viewport
+tracker marked cards nobody had looked at. Per this log's own rule the reversal should have
+been recorded then and wasn't, so the older entry read as current for two weeks. It stays as
+written; this entry supersedes it.
+
+**The flush was inherited, not chosen.** Marks were queued and posted every two seconds. That
+earned its keep under the viewport tracker: one scroll armed a dwell timer on every visible
+card simultaneously, they finished together, and a screenful left as one request instead of
+twenty-four. Hover is serial — only one card is under the pointer, and `mouseleave` cancels
+the dwell, so only one timer is ever live. The queue was therefore holding the single id it
+had just been handed and delaying it by up to two seconds. The hover commit carried the
+machinery across without re-asking the question, and three separate comments went on
+justifying it by the scrolling it no longer did.
+
+Each mark now posts as it is earned. That also closes a small hole rather than opening one:
+`pending.clear()` ran *before* `router.post`, and Inertia treats a request interrupted by a
+new visit as cancelled, so a flush racing a navigation took its ids down with it. The
+`onBeforeUnmount` flush existed to cover exactly that window and was itself the request most
+likely to be interrupted. The unmount hook now only cancels a dwell in progress, which is
+correct: leaving the page is not the same as having looked at the card.
+
+**One article per request, so the payload had nothing left to carry.**
+`POST /wot/news/seen` with `{ids: [...]}` became `POST /wot/news/{article}/mark-seen`, matching
+`/news/{article}/pin` beside it, and `MarkArticlesSeenRequest` is gone — route model binding
+does what its rules did. The trade is deliberate: an id the client holds for a since-deleted
+article was silently dropped from the batch and is now a 404. Nothing is written either way,
+and a 404 is the more honest answer to a stale client. `/news/seen-all` was renamed
+`/news/mark-all-seen` in the same pass, so the two writes read as the pair they are and the
+path matches the `markAllSeen()` it has always reached. Nothing else about that endpoint
+moved.
+
+**The file was regrouped while this was open, and the names went with it.** `/news`,
+`/calendar` and `/connect` each became a `Route::prefix(...)` group, which moved the ignore
+routes from `/wot/events/{event}/ignore` to `/wot/calendar/events/{event}/ignore` — the only
+*path* that changed, and `Calendar.vue` is its only caller. Names are still written out in
+full on each route rather than taking a `name()` prefix from the group: a full
+`wot.news.articles.pin` in the file is greppable and copies straight into `route()`, which a
+prefix would cost. The four article writes are now `news.articles.*` (`mark-seen`, `pin`,
+`unpin` and `mark-all-seen`) and the two event writes `calendar.events.*`, so a name says what
+it acts on rather than only where it lives. `mark-all-seen` joins the `articles` set despite
+taking no `{article}`: it is the same act over the whole feed. The paths were left alone —
+`news.articles.pin` still lives at `/news/{article}/pin`, since nesting the URLs too would
+churn every caller for no gain.
+
+`markSeen()` still selects through `notSeenBy()` and still writes via `attachSeen()` for its
+one id rather than attaching directly. Both are load-bearing: the scope is what makes the
+write safe against the pivot's unique constraint and against rewriting a first-seen timestamp,
+and routing the single id through the shared helper keeps one place where a seen row is
+written under one rule.
+
+**Verification.** `tests/Feature/Wot`: **340 passed, 2,616 assertions**. The batch tests became
+their per-article equivalents — marking a second card leaves the first's `seen_at` alone, and
+the form request's validation cases became a 404 case covering both a deleted id and a
+malformed one. Two fewer tests than the last entry's 342: the three-case `validates the batch`
+dataset became a two-case `404s for an article id that resolves to nothing`, and the mixed-batch
+test folded into the one beside it. `npm run build` clean; the composable's remaining verification
+is still by hand, there being no JS test runner.
+
+---
+
+## 2026-09-22 — Both seen writes became one conflict-tolerant statement
+
+Follows the entry above, same day. `markAllSeen()` read every unseen id with `pluck()` and wrote
+them back through `attach()` in chunks of 500; `markSeen()` did the same for its single id. Both
+now write directly — `insertOrIgnore()` for one row, `insertOrIgnoreUsing()` as one
+`INSERT ... SELECT` for the backlog — and `attachSeen()` is gone.
+
+**The reason is not the one it looks like.** Loading the ids into PHP is the visible waste, but
+at five articles a week the unseen set is small and the 500-row chunking had never once looped:
+under that size `attach()` was already a single insert, so the change is two queries to one.
+What actually mattered is that `pluck()` then `attach()` is check-then-act with a gap in the
+middle. Two overlapping requests from the same user — a double-clicked "mark all as seen", or a
+card's own mark landing mid-flight, which got likelier when marks started posting per card
+rather than per two-second flush — both read the same ids, and the second insert died on
+`wot_article_views`' unique index. A 500 on a button whose whole job is idempotent. The unique
+index now decides per row inside one statement, so that outcome is unreachable rather than
+unlikely.
+
+`insertOrIgnoreUsing()` compiles correctly on both drivers with no branch in the code:
+PostgresGrammar appends `on conflict do nothing`, SQLiteGrammar rewrites the verb to `insert or
+ignore`. Verified by compiling the real statement against the pgsql grammar, and on SQLite by the
+suite, which runs there and exercises it.
+
+**`notSeenBy()` stays in the SELECT, with a changed job.** It used to be what made the write safe.
+The conflict clause is that now, and `DO NOTHING` never updates, so a first-seen timestamp cannot
+be rewritten. The scope remains because it keeps the inserted set to rows that are actually new.
+`.ai/rules` was updated to say so — and `record-rule` filed it under `crews.md`, widening that
+file's globs to claim `NewsController`; it was moved to `controllers-wot.md`, which already owns
+that file, and the crews globs put back. Worth knowing the tool guesses at placement.
+
+**The trap this leaves is silent.** The constant columns (`user_id` and three timestamps) are
+bound through `selectRaw`, and those bindings land in the builder's `select` group, which is
+emitted before the `where` binding `notSeenBy()` contributes. Confirmed by compiling the
+statement: five bindings, `[user_id, seen_at, created_at, updated_at, user_id]`. Get that order
+wrong and one column's value is written into another with no error anywhere — so the tests assert
+the stored `seen_at` and `user_id`, not just that rows appeared.
+
+**Verification.** `tests/Feature/Wot`: **343 passed, 2,630 assertions**, three tests added — the
+stored values on a single mark, the stored values on every row of a mark-all, and a mark-all run
+against a row that already exists. That last one is as close as this suite gets to the race:
+genuine concurrency isn't reproducible here, so what is pinned is the property that makes it
+safe, namely that an existing row neither errors nor changes.

@@ -113,16 +113,9 @@ class DashboardController extends Controller
      */
     private function articles($query, ?User $user): array
     {
-        return $query->limit(5)->get()->map(fn (WotArticle $article): array => [
-            'id' => $article->id,
-            'title' => $article->title,
-            'url' => $article->url,
-            'category' => $article->category,
-            'image_url' => $article->image_url,
-            'published_at' => $article->published_at->toIso8601String(),
-            'is_seen' => $article->seen_at !== null,
-            'is_pinned' => $article->pinned_at !== null,
-        ])->all();
+        return $query->limit(5)->get()
+            ->map(fn (WotArticle $article): array => $article->card_entry)
+            ->all();
     }
 
     /**

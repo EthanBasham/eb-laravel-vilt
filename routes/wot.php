@@ -9,12 +9,22 @@ use App\Http\Controllers\Wot\GrindController;
 use App\Http\Controllers\Wot\NewsController;
 
 /*
- * World of Tanks sub-project. Mounted at /wot by routes/web.php, which also
- * applies the Inertia middleware and the auth guard to this whole group — every
- * route here is personal to the signed-in user.
- */
+* World of Tanks sub-project. Mounted at /wot by routes/web.php, which also
+* applies the Inertia middleware and the auth guard to this whole group — every
+* route here is personal to the signed-in user.
+*/
 
+// WOT Hub : Dashboard / Bookmarks
 Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
+Route::post('/refresh', [DashboardController::class, 'refresh'])->name('dashboard.refresh');
+Route::put('/bookmarks', [BookmarkController::class, 'update'])->name('bookmarks.update');
+
+// WOT Hub : Connect
+Route::prefix('connect')->group(function () {
+    Route::get('/', [AccountLinkController::class, 'create'])->name('link.create');
+    Route::get('/callback', [AccountLinkController::class, 'callback'])->name('link.callback');
+    Route::delete('/', [AccountLinkController::class, 'destroy'])->name('link.destroy');
+});
 
 Route::get('/grinding', [GrindController::class, 'index'])->name('grinding');
 Route::patch('/grinding/filters', [GrindController::class, 'updateFilters'])->name('grinding.filters');
@@ -66,31 +76,19 @@ Route::post('/crews/battle-pass', [CrewController::class, 'storeBattlePassCrew']
 Route::patch('/crews/battle-pass/{crew}', [CrewController::class, 'updateBattlePassCrew'])->name('crews.battle-pass.update');
 Route::delete('/crews/battle-pass/{crew}', [CrewController::class, 'destroyBattlePassCrew'])->name('crews.battle-pass.destroy');
 
-Route::post('/refresh', [DashboardController::class, 'refresh'])->name('dashboard.refresh');
+// WOT Hub : News
+Route::prefix('news')->group(function () {
+    Route::get('/', [NewsController::class, 'index'])->name('news.index');
+    Route::post('/resync', [NewsController::class, 'resync'])->name('news.resync');
+    Route::post('/mark-all-seen', [NewsController::class, 'markAllSeen'])->name('news.articles.mark-all-seen');
+    Route::post('/{article}/mark-seen', [NewsController::class, 'markSeen'])->name('news.articles.mark-seen');
+    Route::post('/{article}/pin', [NewsController::class, 'pin'])->name('news.articles.pin');
+    Route::delete('/{article}/pin', [NewsController::class, 'unpin'])->name('news.articles.unpin');
+});
 
-Route::get('/news', [NewsController::class, 'index'])->name('news.index');
-Route::get('/calendar', [NewsController::class, 'calendar'])->name('calendar');
-
-// Pins are per user, so these live under the authenticated group like
-// everything else here.
-Route::post('/news/seen', [NewsController::class, 'markSeen'])->name('news.seen');
-Route::post('/news/seen-all', [NewsController::class, 'markAllSeen'])->name('news.seen-all');
-Route::post('/news/{article}/pin', [NewsController::class, 'pin'])->name('news.pin');
-Route::delete('/news/{article}/pin', [NewsController::class, 'unpin'])->name('news.unpin');
-Route::post('/news/resync', [NewsController::class, 'resync'])->name('news.resync');
-
-// Ignoring is per user, like pins: it hides an event from this person's
-// schedule views without touching the shared row everyone else reads.
-Route::post('/events/{event}/ignore', [NewsController::class, 'ignore'])->name('events.ignore');
-Route::delete('/events/{event}/ignore', [NewsController::class, 'unignore'])->name('events.unignore');
-
-/*
- * The bookmarks bar. PUT rather than PATCH because the editor sends the list as
- * it should stand — see SaveBookmarksRequest. It hangs off the user rather than
- * the linked account, so unlike everything above it works on Connect too.
- */
-Route::put('/bookmarks', [BookmarkController::class, 'update'])->name('bookmarks.update');
-
-Route::get('/connect', [AccountLinkController::class, 'create'])->name('link.create');
-Route::get('/connect/callback', [AccountLinkController::class, 'callback'])->name('link.callback');
-Route::delete('/connect', [AccountLinkController::class, 'destroy'])->name('link.destroy');
+// WOT Hub : Calendar
+Route::prefix('calendar')->group(function () {
+    Route::get('/', [NewsController::class, 'calendar'])->name('calendar');
+    Route::post('/events/{event}/ignore', [NewsController::class, 'ignore'])->name('calendar.events.ignore');
+    Route::delete('/events/{event}/ignore', [NewsController::class, 'unignore'])->name('calendar.events.unignore');
+});

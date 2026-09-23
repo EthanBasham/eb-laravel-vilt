@@ -74,8 +74,8 @@ it('leaves a single-day session unmarked', function () {
 it('requires auth to ignore', function () {
     $event = WotEvent::factory()->create();
 
-    $this->post(route('wot.events.ignore', $event))->assertRedirect(route('login'));
-    $this->delete(route('wot.events.unignore', $event))->assertRedirect(route('login'));
+    $this->post(route('wot.calendar.events.ignore', $event))->assertRedirect(route('login'));
+    $this->delete(route('wot.calendar.events.unignore', $event))->assertRedirect(route('login'));
 });
 
 it('drops an ignored event from the grid but keeps it in coming up', function () {
@@ -87,7 +87,7 @@ it('drops an ignored event from the grid but keeps it in coming up', function ()
         'ends_at' => '2026-09-15 17:59:00',
     ]);
 
-    $this->actingAs($user)->post(route('wot.events.ignore', $event))->assertRedirect();
+    $this->actingAs($user)->post(route('wot.calendar.events.ignore', $event))->assertRedirect();
 
     $props = september($user)->viewData('page')['props'];
 
@@ -105,7 +105,7 @@ it('drops an ignored campaign from running all month', function () {
         'ends_at' => '2026-11-24 01:30:00',
     ]);
 
-    $this->actingAs($user)->post(route('wot.events.ignore', $campaign))->assertRedirect();
+    $this->actingAs($user)->post(route('wot.calendar.events.ignore', $campaign))->assertRedirect();
 
     $props = september($user)->viewData('page')['props'];
 
@@ -122,8 +122,8 @@ it('restores an event on reconsidering it', function () {
         'ends_at' => '2026-09-15 17:59:00',
     ]);
 
-    $this->actingAs($user)->post(route('wot.events.ignore', $event));
-    $this->actingAs($user)->delete(route('wot.events.unignore', $event))->assertRedirect();
+    $this->actingAs($user)->post(route('wot.calendar.events.ignore', $event));
+    $this->actingAs($user)->delete(route('wot.calendar.events.unignore', $event))->assertRedirect();
 
     $props = september($user)->viewData('page')['props'];
 
@@ -144,7 +144,7 @@ it('keeps one user\'s ignores out of another\'s calendar', function () {
         'ends_at' => '2026-09-15 17:59:00',
     ]);
 
-    $this->actingAs($user)->post(route('wot.events.ignore', $event));
+    $this->actingAs($user)->post(route('wot.calendar.events.ignore', $event));
 
     $days = collect(september($other)->viewData('page')['props']['days']);
 

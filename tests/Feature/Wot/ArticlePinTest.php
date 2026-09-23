@@ -6,7 +6,7 @@ use App\Models\WotArticle;
 it('requires auth to pin', function () {
     $article = WotArticle::factory()->create();
 
-    $this->post(route('wot.news.pin', $article))->assertRedirect(route('login'));
+    $this->post(route('wot.news.articles.pin', $article))->assertRedirect(route('login'));
 });
 
 it('pins an article and hoists it above newer ones', function () {
@@ -14,7 +14,7 @@ it('pins an article and hoists it above newer ones', function () {
     $newest = WotArticle::factory()->create(['title' => 'Newest', 'published_at' => now()]);
     $older = WotArticle::factory()->create(['title' => 'Older', 'published_at' => now()->subWeek()]);
 
-    $this->actingAs($user)->post(route('wot.news.pin', $older))->assertRedirect();
+    $this->actingAs($user)->post(route('wot.news.articles.pin', $older))->assertRedirect();
 
     $this->actingAs($user)->get(route('wot.news.index'))->assertInertia(fn ($page) => $page
         // The older article now leads, purely because it is pinned.
@@ -33,9 +33,9 @@ it('orders several pins by published date, not by when they were pinned', functi
 
     // Pin the older article second, after the newer one — pin order must not
     // override publish order within the pinned group.
-    $this->actingAs($user)->post(route('wot.news.pin', $newer));
+    $this->actingAs($user)->post(route('wot.news.articles.pin', $newer));
     $this->travel(1)->minutes();
-    $this->actingAs($user)->post(route('wot.news.pin', $older));
+    $this->actingAs($user)->post(route('wot.news.articles.pin', $older));
 
     $this->actingAs($user)->get(route('wot.news.index'))->assertInertia(fn ($page) => $page
         ->where('articles.data.0.title', 'Newer')
@@ -47,10 +47,10 @@ it('unpins', function () {
     $user = User::factory()->create();
     $article = WotArticle::factory()->create();
 
-    $this->actingAs($user)->post(route('wot.news.pin', $article));
-    $this->actingAs($user)->delete(route('wot.news.unpin', $article))->assertRedirect();
+    $this->actingAs($user)->post(route('wot.news.articles.pin', $article));
+    $this->actingAs($user)->delete(route('wot.news.articles.unpin', $article))->assertRedirect();
 
-    expect($user->pinnedArticles()->count())->toBe(0);
+    expect(WotArticle::onlyPinnedBy($user)->count())->toBe(0);
 });
 
 /**
@@ -61,13 +61,13 @@ it('re-pinning is idempotent', function () {
     $first = WotArticle::factory()->create(['title' => 'First']);
     $second = WotArticle::factory()->create(['title' => 'Second']);
 
-    $this->actingAs($user)->post(route('wot.news.pin', $first));
+    $this->actingAs($user)->post(route('wot.news.articles.pin', $first));
     $this->travel(1)->minutes();
-    $this->actingAs($user)->post(route('wot.news.pin', $second));
+    $this->actingAs($user)->post(route('wot.news.articles.pin', $second));
     $this->travel(1)->minutes();
-    $this->actingAs($user)->post(route('wot.news.pin', $first))->assertRedirect();
+    $this->actingAs($user)->post(route('wot.news.articles.pin', $first))->assertRedirect();
 
-    expect($user->pinnedArticles()->count())->toBe(2);
+    expect(WotArticle::onlyPinnedBy($user)->count())->toBe(2);
 });
 
 /**
@@ -81,7 +81,7 @@ it('keeps pins private to the user who made them', function () {
     $article = WotArticle::factory()->create(['published_at' => now()->subWeek()]);
     WotArticle::factory()->create(['title' => 'Newer', 'published_at' => now()]);
 
-    $this->actingAs($mine)->post(route('wot.news.pin', $article));
+    $this->actingAs($mine)->post(route('wot.news.articles.pin', $article));
 
     $this->actingAs($theirs)->get(route('wot.news.index'))->assertInertia(fn ($page) => $page
         ->where('articles.data.0.title', 'Newer')
@@ -95,7 +95,7 @@ it('filters to pinned only', function () {
     $pinned = WotArticle::factory()->create(['title' => 'Kept']);
     WotArticle::factory()->create(['title' => 'Ignored']);
 
-    $this->actingAs($user)->post(route('wot.news.pin', $pinned));
+    $this->actingAs($user)->post(route('wot.news.articles.pin', $pinned));
 
     $this->actingAs($user)->get(route('wot.news.index', ['pinned' => 1]))->assertInertia(fn ($page) => $page
         ->has('articles.data', 1)
@@ -110,7 +110,7 @@ it('combines a category filter with pinned-first ordering', function () {
     WotArticle::factory()->create(['category' => 'Updates', 'title' => 'Newer update', 'published_at' => now()]);
     WotArticle::factory()->create(['category' => 'Specials', 'title' => 'A special', 'published_at' => now()]);
 
-    $this->actingAs($user)->post(route('wot.news.pin', $pinned));
+    $this->actingAs($user)->post(route('wot.news.articles.pin', $pinned));
 
     $this->actingAs($user)->get(route('wot.news.index', ['category' => 'Updates']))->assertInertia(fn ($page) => $page
         ->has('articles.data', 2)
@@ -122,10 +122,10 @@ it('drops pins when the article is removed', function () {
     $user = User::factory()->create();
     $article = WotArticle::factory()->create();
 
-    $this->actingAs($user)->post(route('wot.news.pin', $article));
+    $this->actingAs($user)->post(route('wot.news.articles.pin', $article));
     $article->delete();
 
-    expect($user->pinnedArticles()->count())->toBe(0);
+    expect(WotArticle::onlyPinnedBy($user)->count())->toBe(0);
 });
 
 /**
@@ -157,6 +157,6 @@ it('flashes no message, because the reordering is the feedback', function () {
     $user = User::factory()->create();
     $article = WotArticle::factory()->create();
 
-    $this->actingAs($user)->post(route('wot.news.pin', $article))->assertSessionMissing('success');
-    $this->actingAs($user)->delete(route('wot.news.unpin', $article))->assertSessionMissing('success');
+    $this->actingAs($user)->post(route('wot.news.articles.pin', $article))->assertSessionMissing('success');
+    $this->actingAs($user)->delete(route('wot.news.articles.unpin', $article))->assertSessionMissing('success');
 });

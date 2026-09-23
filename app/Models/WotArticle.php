@@ -16,6 +16,7 @@ use Database\Factories\WotArticleFactory;
  * A news article from worldoftanks.com's RSS feed.
  *
  * @property-read bool $has_events
+ * @property-read array{id: int, title: string, url: string, category: ?string, image_url: ?string, published_at: string, is_pinned: bool, is_seen: bool} $card_entry
  */
 #[Fillable(['guid', 'url', 'title', 'description', 'category', 'image_url', 'published_at', 'body_fetched_at', 'body_hash'])]
 class WotArticle extends Model
@@ -39,6 +40,34 @@ class WotArticle extends Model
     protected function hasEvents(): Attribute
     {
         return Attribute::get(fn (): bool => $this->events_count > 0 || $this->events->isNotEmpty());
+    }
+
+    /**
+     * The fields every article card renders, wherever it is drawn — the news
+     * grid and both dashboard tabs. Written once because the two had already
+     * drifted apart while saying the same thing twice.
+     *
+     * Requires withPinnedFor() and withSeenFor() on the query: `is_pinned` and
+     * `is_seen` read the columns those scopes add, and without them both report
+     * false rather than failing. The news grid's two extra fields stay at its
+     * own call site, `events_count` especially — it exists only under
+     * withCount('events'), and reading it unset would send has_events off to
+     * lazy-load the relationship a row at a time.
+     */
+    protected function cardEntry(): Attribute
+    {
+        return Attribute::get(fn (): array => [
+            'id' => $this->id,
+            'title' => $this->title,
+            'url' => $this->url,
+            'category' => $this->category,
+            'image_url' => $this->image_url,
+            'published_at' => $this->published_at->toIso8601String(),
+            // pinned_at and seen_at come from the query, not the table; their
+            // presence is what "pinned" and "seen" mean here.
+            'is_pinned' => $this->pinned_at !== null,
+            'is_seen' => $this->seen_at !== null,
+        ]);
     }
 
     /**
@@ -121,6 +150,9 @@ class WotArticle extends Model
             ->orderByDesc('wot_articles.id');
     }
 
+    /**
+     * Articles this user has pinned.
+     */
     public function scopeOnlyPinnedBy(Builder $query, User $user): Builder
     {
         return $query->whereHas('pinnedBy', fn (Builder $pins) => $pins->whereKey($user->id));
@@ -147,7 +179,24 @@ class WotArticle extends Model
         ]);
     }
 
-    public function scopeOnlyUnseenBy(Builder $query, User $user): Builder
+    /**
+     * Articles this user has already seen. The mirror of onlyPinnedBy().
+     */
+    public function scopeOnlySeenBy(Builder $query, User $user): Builder
+    {
+        return $query->whereHas('seenBy', fn (Builder $views) => $views->whereKey($user->id));
+    }
+
+    /**
+     * The unseen backlog — and what every write of a seen row selects first,
+     * since the absence of a pivot row is exactly what makes an id safe to
+     * attach.
+     *
+     * `not` rather than `onlyUnseen`, matching WotEvent::scopeNotIgnoredBy():
+     * both exclude rows by the absence of a pivot, and naming one of them as an
+     * inclusion hid that the two were the same shape.
+     */
+    public function scopeNotSeenBy(Builder $query, User $user): Builder
     {
         return $query->whereDoesntHave('seenBy', fn (Builder $views) => $views->whereKey($user->id));
     }

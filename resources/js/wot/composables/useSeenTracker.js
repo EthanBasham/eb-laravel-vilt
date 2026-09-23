@@ -1,5 +1,5 @@
 import { router } from '@inertiajs/vue3';
-import { onBeforeUnmount, onMounted, reactive } from 'vue';
+import { onBeforeUnmount, reactive } from 'vue';
 
 /**
  * Marks article cards seen once the pointer has rested on one.
@@ -15,39 +15,34 @@ import { onBeforeUnmount, onMounted, reactive } from 'vue';
  * Touch devices fire no mouseenter, so nothing marks itself seen there — "mark
  * all as seen" is the path on those, the same as when the tracker is inert.
  *
- * Marks are batched and flushed on a timer rather than sent per card, so
- * working down a full page is one request instead of twenty-four.
+ * Each card posts the moment it is earned. Marks used to be queued and
+ * flushed on a two-second timer, which paid for itself under the visibility
+ * tracker: one scroll armed a dwell on every visible card at once and they
+ * finished together, so a screenful left as a single request. Hover is serial
+ * — mouseleave cancels the dwell, so only one timer is ever live — so that
+ * queue held the one id it had just been handed and sat on it for up to two
+ * seconds. Posting straight away is also less to lose: the queue was cleared
+ * before its request went out, and a flush racing a navigation is interrupted
+ * by it, taking those ids with it.
  *
  * `isMarked(id)` reports what this visit has counted, ahead of the server
  * knowing it. Callers use it to clear a card's unseen dot the moment the hover
- * lands: waiting for the flush (up to flushMs later) or for the round trip
- * would leave the dot sitting there long enough to look broken.
+ * lands: waiting for the round trip would leave the dot sitting there long
+ * enough to look broken.
  */
-export function useSeenTracker({
-    hoverMs = 1500,
-    flushMs = 2000,
-    onMarked = null,
-} = {}) {
+export function useSeenTracker({ hoverMs = 1500 } = {}) {
     const timers = new Map();
     // Weak: rows come and go as tabs switch and partial reloads land, and a
     // strong map here would pin every detached node for the page's lifetime.
     const listeners = new WeakMap();
-    const pending = new Set();
     const marked = reactive(new Set());
-
-    let flushHandle = null;
 
     const isMarked = (id) => marked.has(id);
 
-    const flush = () => {
-        if (pending.size === 0) {
-            return;
-        }
+    const markSeen = (id) => {
+        marked.add(id);
 
-        const ids = [...pending];
-        pending.clear();
-
-        router.post('/wot/news/seen', { ids }, {
+        router.post(`/wot/news/${id}/mark-seen`, {}, {
             preserveScroll: true,
             preserveState: true,
             // Only the counter comes back, and on pages without one that is an
@@ -58,8 +53,6 @@ export function useSeenTracker({
             // that the hover registered.
             only: ['unseenCount'],
         });
-
-        onMarked?.(ids);
     };
 
     const cancelTimer = (element) => {
@@ -103,8 +96,7 @@ export function useSeenTracker({
 
             timers.set(element, window.setTimeout(() => {
                 cancelTimer(element);
-                pending.add(id);
-                marked.add(id);
+                markSeen(id);
                 releaseListeners(element);
             }, hoverMs));
         };
@@ -116,22 +108,13 @@ export function useSeenTracker({
         listeners.set(element, { enter, leave });
     };
 
-    onMounted(() => {
-        flushHandle = window.setInterval(flush, flushMs);
-    });
-
+    // A dwell in progress is abandoned rather than counted: leaving the page is
+    // not the same as having looked at the card. Nothing else needs cleaning up
+    // — anything earned has already been posted, and the listeners go with the
+    // nodes they are attached to.
     onBeforeUnmount(() => {
         timers.forEach((timer) => window.clearTimeout(timer));
         timers.clear();
-
-        if (flushHandle) {
-            window.clearInterval(flushHandle);
-        }
-
-        // Anything queued but not yet sent goes now, so navigating away
-        // mid-interval doesn't lose it. The listeners need no removal: they go
-        // with the nodes they're attached to.
-        flush();
     });
 
     return { track, isMarked };
