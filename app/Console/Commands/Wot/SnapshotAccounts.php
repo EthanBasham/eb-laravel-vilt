@@ -20,7 +20,7 @@ use App\Services\Wargaming\WargamingException;
  * Scheduled hourly. More frequent captures buy finer period boundaries and a
  * more accurate "last 1000 battles"; they cost one API call per account.
  */
-class Snapshot extends Command
+class SnapshotAccounts extends Command
 {
     protected $signature = 'wot:snapshot {--account= : Limit to one Wargaming account id}';
 
