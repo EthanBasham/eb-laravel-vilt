@@ -4,14 +4,9 @@ namespace App\Http\Controllers\Wot;
 
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Artisan;
-use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
-use App\Models\User;
 use App\Models\WotArticle;
-use App\Models\WotEvent;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -51,312 +46,39 @@ class NewsController extends Controller
         ]);
     }
 
-    /**
-     * Marks one article seen.
-     *
-     * One article per call because the client earns them one at a time: a card
-     * is marked when the pointer has rested on it, and only one card can be
-     * under the pointer. This took an array of ids while marks came from a
-     * visibility tracker, where a single scroll could finish a screenful of
-     * dwells at once — see the 2026-09-22 setup-log entry.
-     *
-     * Route model binding replaces the form request that validated those ids:
-     * an unknown id is now a 404 rather than a silently dropped element.
-     */
     public function markSeen(Request $request, WotArticle $article): RedirectResponse
     {
-        $now = now();
-
-        // One statement, no read first. The unique index decides whether this
-        // is a new sighting, so a row that already exists is left exactly as it
-        // is — "first seen" is the fact worth keeping, and a re-hover cannot
-        // overwrite it. See markAllSeen() for why this shape rather than a
-        // select followed by an insert.
-        DB::table('wot_article_views')->insertOrIgnore([
-            'user_id' => $request->user()->id,
-            'wot_article_id' => $article->id,
-            'seen_at' => $now,
-            'created_at' => $now,
-            'updated_at' => $now,
-        ]);
+        $article->markSeenBy($request->user());
 
         return back(fallback: route('wot.news.index'));
     }
-
-    /**
-     * Clears the whole backlog — the escape hatch for coming back after a
-     * while and not wanting to scroll past two months of articles.
-     *
-     * One INSERT ... SELECT, so the ids are never in PHP at all. This read the
-     * unseen ids and wrote them back in chunks until 2026-09-22, which was
-     * check-then-act: two overlapping requests from the same user — a
-     * double-clicked button, or a card's own mark landing mid-flight — both
-     * read the same ids, and the second insert died on the unique index. The
-     * conflict clause makes that outcome unreachable rather than unlikely.
-     *
-     * notSeenBy() is kept even though the conflict clause would cover it: it
-     * keeps the inserted set to what is actually new, and it is where the rule
-     * about never rewriting a first-seen timestamp stays visible.
-     */
     public function markAllSeen(Request $request): RedirectResponse
     {
-        $user = $request->user();
-        $now = now();
+        WotArticle::markAllSeenBy($request->user());
 
-        /*
-         * The constant columns are bound rather than interpolated, and their
-         * bindings land in the `select` group — which precedes the `where`
-         * bindings notSeenBy() adds, so the order holds. Getting that wrong
-         * would be silent, writing one column's value into another, which is
-         * why ArticleSeenTest asserts the stored seen_at and not just a count.
-         */
-        DB::table('wot_article_views')->insertOrIgnoreUsing(
-            ['user_id', 'wot_article_id', 'seen_at', 'created_at', 'updated_at'],
-            WotArticle::notSeenBy($user)
-                ->selectRaw('? as user_id', [$user->id])
-                ->addSelect('wot_articles.id')
-                ->selectRaw('? as seen_at', [$now])
-                ->selectRaw('? as created_at', [$now])
-                ->selectRaw('? as updated_at', [$now]),
-        );
-
-        // No flash: every NEW badge and the button itself disappear, which
-        // reports the outcome more directly than a banner restating it.
         return back(fallback: route('wot.news.index'));
     }
 
-    /**
-     * Pin an article to the top of this user's feed.
-     *
-     * Idempotent: pinning something already pinned refreshes pinned_at rather
-     * than failing on the unique constraint. That timestamp no longer drives
-     * ordering — see WotArticle::scopePinnedFirstFor() — but is kept current
-     * for the "pinned" state itself.
-     */
     public function pin(Request $request, WotArticle $article): RedirectResponse
     {
-        // syncWithoutDetaching already refreshes pinned_at on a row that exists
-        // — its attachNew() calls updateExistingPivot for ids already present —
-        // so a second call isn't needed here.
-        $request->user()->pinnedArticles()->syncWithoutDetaching([
-            $article->id => ['pinned_at' => now()],
-        ]);
+        $article->pinBy($request->user());
 
-        // No flash message: the card gains its pinned styling and jumps into
-        // the pinned group, which says it more directly than a banner would.
         return back(fallback: route('wot.news.index'));
     }
-
     public function unpin(Request $request, WotArticle $article): RedirectResponse
     {
-        $request->user()->pinnedArticles()->detach($article->id);
+        $article->unpinBy($request->user());
 
         return back(fallback: route('wot.news.index'));
     }
-
-    /**
-     * Runs the scheduled news/event sync immediately, for whenever three times
-     * a day isn't soon enough.
-     *
-     * The command fetches up to a dozen-plus article bodies with a deliberate
-     * pace between requests, so this can take a while — lift the PHP time
-     * limit rather than have it get cut off mid-run.
-     */
+    
     public function resync(): RedirectResponse
     {
+        // The command fetches up to a dozen-plus article bodies with a deliberate pace between requests, so this can take a while
         set_time_limit(0);
 
         Artisan::call('wot:sync-news');
 
         return back(fallback: route('wot.news.index'))->with('success', 'News and calendar resynced.');
-    }
-
-    /**
-     * A month of events.
-     *
-     * Days are assembled server-side rather than in Vue because a window event
-     * spans many days and has to appear on each of them — resolving that once
-     * here is simpler than teaching the calendar component to expand ranges,
-     * and it keeps the payload to exactly what is rendered.
-     */
-    public function calendar(Request $request): Response
-    {
-        $month = rescue(
-            fn (): Carbon => Carbon::createFromFormat('Y-m', $request->string('month')->toString())->startOfMonth(),
-            fn (): Carbon => Carbon::now()->startOfMonth(),
-            report: false,
-        );
-
-        // The grid is whole weeks, so it runs from the Monday on or before the
-        // 1st to the Sunday on or after the last day.
-        $gridStart = $month->copy()->startOfWeek(Carbon::MONDAY);
-        $gridEnd = $month->copy()->endOfMonth()->endOfWeek(Carbon::SUNDAY);
-
-        // Ignored events are gone from the grid and the long-campaign list
-        // below — the whole point of ignoring one. They stay in "Coming up",
-        // which is where they are reconsidered.
-        $events = WotEvent::with('article:id,title,url')
-            ->notIgnoredBy($request->user())
-            ->onlyBetween($gridStart, $gridEnd)
-            ->orderBy('starts_at')
-            ->get();
-
-        // Long campaigns are pulled out of the grid. A Battle Pass season runs
-        // for three months, and repeating it in all 35 squares buried the
-        // individual stream sessions that are the reason to look at a calendar
-        // at all. They appear once, above the grid, still with their dates.
-        [$ongoing, $dated] = $events->partition(fn (WotEvent $event): bool => $this->isLongRunning($event));
-
-        return Inertia::render('Calendar', [
-            'month' => $month->format('Y-m'),
-            'monthLabel' => $month->format('F Y'),
-            'previousMonth' => $month->copy()->subMonth()->format('Y-m'),
-            'nextMonth' => $month->copy()->addMonth()->format('Y-m'),
-            'days' => $this->days($gridStart, $gridEnd, $month, $dated, $ongoing),
-            'ongoing' => $ongoing->map(fn (WotEvent $event): array => $this->event($event))->values()->all(),
-            'upcoming' => $this->upcoming($request->user()),
-        ]);
-    }
-
-    /**
-     * Spans longer than a week, which would otherwise occupy every square.
-     *
-     * Only ever true of window events: a calendar session is a single sitting,
-     * so a long one would mean the extraction misread something.
-     */
-    private function isLongRunning(WotEvent $event): bool
-    {
-        return $event->ends_at !== null
-            && $event->starts_at->diffInDays($event->ends_at) > 7;
-    }
-
-    /**
-     * @param  Collection<int, WotEvent>  $events
-     * @param  Collection<int, WotEvent>  $ongoing
-     * @return list<array<string, mixed>>
-     */
-    private function days(Carbon $start, Carbon $end, Carbon $month, Collection $events, Collection $ongoing): array
-    {
-        $days = [];
-
-        for ($date = $start->copy(); $date->lte($end); $date->addDay()) {
-            $dayStart = $date->copy()->startOfDay();
-            $dayEnd = $date->copy()->endOfDay();
-
-            $onThisDay = $events->filter(function (WotEvent $event) use ($dayStart, $dayEnd): bool {
-                $eventEnd = $event->ends_at ?? $event->starts_at;
-
-                return $event->starts_at->lte($dayEnd) && $eventEnd->gte($dayStart);
-            });
-
-            $days[] = [
-                'date' => $date->toDateString(),
-                'day' => $date->day,
-                'in_month' => $date->month === $month->month,
-                'is_today' => $date->isToday(),
-                'events' => $onThisDay->map(fn (WotEvent $event): array => $this->event($event, $dayStart))->values()->all(),
-                // The long campaigns covering this day. Ids only: they are
-                // already in the `ongoing` prop, and repeating each one in
-                // every square it spans is the duplication that keeps them out
-                // of the grid to begin with. The day view looks them up.
-                'ongoing_ids' => $ongoing
-                    ->filter(fn (WotEvent $event): bool => $event->starts_at->lte($dayEnd)
-                        && ($event->ends_at ?? $event->starts_at)->gte($dayStart))
-                    ->pluck('id')
-                    ->values()
-                    ->all(),
-            ];
-        }
-
-        return $days;
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function event(WotEvent $event, ?Carbon $day = null): array
-    {
-        return [
-            'id' => $event->id,
-            'title' => $event->title,
-            'type' => $event->event_type,
-            'source' => $event->source,
-            // Only a session that actually starts on this day shows a time; a
-            // multi-day window rendered with "16:00" on every square would be
-            // stating something untrue.
-            'time' => $day && $event->source === WotEvent::SOURCE_CALENDAR && $event->starts_at->isSameDay($day)
-                ? $event->starts_at->format('H:i')
-                : null,
-            'ends_time' => $day && $event->source === WotEvent::SOURCE_CALENDAR && $event->ends_at?->isSameDay($day)
-                ? $event->ends_at->format('H:i')
-                : null,
-            // The last square of a run that actually spans days. A single
-            // sitting is excluded deliberately: every one-day event would
-            // otherwise announce itself as ending, which says nothing.
-            //
-            // False without a day, which is the long-campaign list above the
-            // grid: those occupy no square, so "which square is the last one"
-            // has no answer there and a flag computed against the grid's first
-            // day would fire on an arbitrary one.
-            'is_final_day' => $day !== null
-                && $event->ends_at !== null
-                && $event->ends_at->isSameDay($day)
-                && ! $event->starts_at->isSameDay($event->ends_at),
-            'starts_at' => $event->starts_at->toIso8601String(),
-            'ends_at' => $event->ends_at?->toIso8601String(),
-            'metadata' => $event->metadata,
-            'article' => ['title' => $event->article?->title, 'url' => $event->article?->url],
-        ];
-    }
-
-    /**
-     * @return list<array<string, mixed>>
-     */
-    private function upcoming(?User $user): array
-    {
-        // Deliberately not filtered by notIgnoredBy(): this listing is the only
-        // place an ignored event can be reconsidered, so hiding it here would
-        // make the decision irreversible.
-        return WotEvent::with('article:id,title,url')
-            ->withIgnoredFor($user)
-            ->onlyUpcoming()
-            ->orderBy('starts_at')
-            ->limit(10)
-            ->get()
-            ->map(fn (WotEvent $event): array => [
-                'id' => $event->id,
-                'title' => $event->title,
-                'type' => $event->event_type,
-                'source' => $event->source,
-                'starts_at' => $event->starts_at->toIso8601String(),
-                'ends_at' => $event->ends_at?->toIso8601String(),
-                'is_ignored' => $event->ignored_at !== null,
-                'article' => ['title' => $event->article?->title, 'url' => $event->article?->url],
-            ])
-            ->all();
-    }
-
-    /**
-     * Hide an event from this user's schedule views.
-     *
-     * Idempotent, like pinning: ignoring something already ignored refreshes
-     * the timestamp rather than failing on the unique constraint.
-     */
-    public function ignore(Request $request, WotEvent $event): RedirectResponse
-    {
-        $request->user()->ignoredEvents()->syncWithoutDetaching([
-            $event->id => ['ignored_at' => now()],
-        ]);
-
-        // No flash: the event leaves the grid and its row gains the muted
-        // styling, which reports the outcome more directly than a banner.
-        return back(fallback: route('wot.calendar'));
-    }
-
-    public function unignore(Request $request, WotEvent $event): RedirectResponse
-    {
-        $request->user()->ignoredEvents()->detach($event->id);
-
-        return back(fallback: route('wot.calendar'));
     }
 }

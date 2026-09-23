@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Wot\AccountLinkController;
 use App\Http\Controllers\Wot\BookmarkController;
+use App\Http\Controllers\Wot\CalendarController;
 use App\Http\Controllers\Wot\CrewController;
 use App\Http\Controllers\Wot\DashboardController;
 use App\Http\Controllers\Wot\GrindController;
@@ -88,7 +89,7 @@ Route::prefix('news')->group(function () {
 
 // WOT Hub : Calendar
 Route::prefix('calendar')->group(function () {
-    Route::get('/', [NewsController::class, 'calendar'])->name('calendar');
-    Route::post('/events/{event}/ignore', [NewsController::class, 'ignore'])->name('calendar.events.ignore');
-    Route::delete('/events/{event}/ignore', [NewsController::class, 'unignore'])->name('calendar.events.unignore');
+    Route::get('/', [CalendarController::class, 'calendar'])->name('calendar');
+    Route::post('/events/{event}/ignore', [CalendarController::class, 'ignore'])->name('calendar.events.ignore');
+    Route::delete('/events/{event}/ignore', [CalendarController::class, 'unignore'])->name('calendar.events.unignore');
 });

@@ -3919,3 +3919,56 @@ stored values on a single mark, the stored values on every row of a mark-all, an
 against a row that already exists. That last one is as close as this suite gets to the race:
 genuine concurrency isn't reproducible here, so what is pinned is the property that makes it
 safe, namely that an existing row neither errors nor changes.
+
+---
+
+## 2026-09-23 — The seen writes moved onto WotArticle
+
+`NewsController` held `DB::table('wot_article_views')` twice, which is a table name at the
+wrong altitude. They are now `$article->markSeenBy($user)` and
+`WotArticle::markAllSeenBy($user)`, and the controller holds no table name at all — the shape
+`BookmarkController` already had with `WotBookmark::replaceFor()`.
+
+**Not a pivot model, which was the other option.** `WotArticleView::query()` would read well, but
+none of the three pivot tables here — `wot_article_views`, `wot_article_pins`,
+`wot_event_ignores` — has a model, and that is deliberate: they are presence-only rows, reached
+through `belongsToMany` or, where a statement has to be raw, through `DB::table()` inside the
+owning model. `WotArticle::scopeWithSeenFor()` and `WotEvent` both already did exactly that. A
+model would also buy nothing mechanically, since a builder insert bypasses events, casts and
+timestamps either way; it would be a class existing to hold a string, and this project's rules
+would then want a factory for it.
+
+The binding-order warning moved with the query, which is the point — it is a note for whoever
+edits that SELECT, and it now sits next to it rather than a file away. `.ai/rules` was amended
+by hand this time rather than through `record-rule`, since the rule already existed and only its
+location changed; `record-rule` had filed the original under `crews.md`.
+
+**Verification.** Full suite: **376 passed, 2,714 assertions** — unchanged, as the tests go
+through the routes and never saw the difference. `npm run build` clean.
+
+Pins followed the same day, for the same reason: `$article->pinBy($user)` and
+`$article->unpinBy($user)`, with `NewsController` delegating. The write goes through the
+article's own `pinnedBy()` rather than the user's `pinnedArticles()` — the write belongs to the
+side the method hangs off, and `pinnedArticles()` is now purely a read path.
+
+Worth stating because the two pairs look alike and are deliberately not: `pinBy()` uses
+`syncWithoutDetaching`, which calls `updateExistingPivot` and so *refreshes* `pinned_at` on a
+second pin, while `markSeenBy()` uses `insertOrIgnore` and leaves `seen_at` alone on a second
+sighting. First sighting is a fact worth preserving; the moment a pin was last set is not, and
+keeping it current is what makes a repeat pin safe against the unique constraint.
+
+**The calendar moved out of NewsController the same day.** `calendar()`, `ignore()`,
+`unignore()` and the four private helpers behind them (`isLongRunning()`, `days()`, `event()`,
+`upcoming()`) are now `CalendarController`, which left `NewsController` at 81 lines against 214.
+The two share a source — events are extracted from article bodies by `wot:sync-news` — but
+nothing else: the calendar half reads `wot_events` and `wot_event_ignores` and renders a grid,
+and not one of those helpers was reachable from a news route. Four imports went with them
+(`Carbon`, `Collection`, `User`, `WotEvent`), which is the clearest sign they were a separate
+concern sharing a file.
+
+`resync()` stayed, even though the command it runs syncs the calendar too: it is the button on
+the news page, and it redirects there.
+
+Route names and paths are untouched — `wot.calendar`, `wot.calendar.events.ignore` and
+`wot.calendar.events.unignore` just point at the new class, so no test, view or URL moved. The
+`.ai/rules` globs for `controllers-wot.md` now cover both controllers.

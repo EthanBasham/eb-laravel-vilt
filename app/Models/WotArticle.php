@@ -83,6 +83,59 @@ class WotArticle extends Model
             || $this->published_at->gt($this->body_fetched_at);
     }
 
+    public function markSeenBy(User $user): void
+    {
+        DB::table('wot_article_views')->insertOrIgnore([
+            'user_id' => $user->id,
+            'wot_article_id' => $this->id,
+            'seen_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+    public static function markAllSeenBy(User $user): void
+    {
+        DB::table('wot_article_views')->insertOrIgnoreUsing(
+            ['user_id', 'wot_article_id', 'seen_at', 'created_at', 'updated_at'],
+            static::query()->notSeenBy($user)
+                ->selectRaw('? as user_id', [$user->id])
+                ->addSelect('wot_articles.id')
+                ->selectRaw('? as seen_at', [now()])
+                ->selectRaw('? as created_at', [now()])
+                ->selectRaw('? as updated_at', [now()]),
+        );
+    }
+
+    /**
+     * Pins this article to the top of the user's feed.
+     *
+     * Idempotent, and deliberately not in the way markSeenBy() is: pinning
+     * something already pinned refreshes pinned_at rather than leaving the
+     * earlier value, since syncWithoutDetaching calls updateExistingPivot for a
+     * row that exists. A first sighting is a fact worth preserving; the moment
+     * a pin was last set is not, and keeping it current is what makes a second
+     * call safe against the unique constraint. That timestamp no longer drives
+     * ordering either — see scopePinnedFirstFor().
+     *
+     * Written through the article's own pinnedBy() rather than the user's
+     * pinnedArticles(): the write belongs to the side the method hangs off.
+     */
+    public function pinBy(User $user): void
+    {
+        $this->pinnedBy()->syncWithoutDetaching([
+            $user->id => ['pinned_at' => now()],
+        ]);
+    }
+
+    /**
+     * Unpins this article. Detaching a row that isn't there is a no-op, so this
+     * needs no guard.
+     */
+    public function unpinBy(User $user): void
+    {
+        $this->pinnedBy()->detach($user->id);
+    }
+
     // Scopes
 
     public function scopeOnlyWithEvents(Builder $query): Builder
