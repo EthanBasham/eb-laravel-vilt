@@ -116,9 +116,13 @@ const resync = () => {
                 :ref="(el) => track(el, article.id, article.is_seen)"
                 class="relative"
             >
+                <!-- New until the server says it's seen, or this visit's
+                     hover counts it — whichever comes first. A hover's reply
+                     only carries the count, so is_seen lags until the next
+                     full load, and isMarked() covers the gap. -->
                 <ArticleCard
                     :article="article"
-                    :counted="isMarked(article.id)"
+                    :is-new="!article.is_seen && !isMarked(article.id)"
                     @toggle-pin="togglePin(article)"
                 />
             </li>

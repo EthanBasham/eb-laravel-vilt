@@ -26,9 +26,9 @@ import { onBeforeUnmount, reactive } from 'vue';
  * by it, taking those ids with it.
  *
  * `isMarked(id)` reports what this visit has counted, ahead of the server
- * knowing it. Callers use it to clear a card's unseen dot the moment the hover
- * lands: waiting for the round trip would leave the dot sitting there long
- * enough to look broken.
+ * knowing it. Callers use it to clear a card's unseen marker (the News page's
+ * NEW badge, the dashboard's dot) the moment the hover lands: waiting for the
+ * round trip would leave it sitting there long enough to look broken.
  */
 export function useSeenTracker({ hoverMs = 1500 } = {}) {
     const timers = new Map();
@@ -46,11 +46,9 @@ export function useSeenTracker({ hoverMs = 1500 } = {}) {
             preserveScroll: true,
             preserveState: true,
             // Only the counter comes back, and on pages without one that is an
-            // empty payload. The NEW badges deliberately stay put for the rest
-            // of this visit — cards restyling wholesale under the pointer is
-            // distracting — and clear on the next load. The unseen dot is the
-            // exception: `marked` clears it immediately, as the acknowledgement
-            // that the hover registered.
+            // empty payload. The card doesn't need `articles` to update:
+            // `marked` already clears its NEW badge (or the dashboard's dot) the
+            // moment the hover lands.
             only: ['unseenCount'],
         });
     };

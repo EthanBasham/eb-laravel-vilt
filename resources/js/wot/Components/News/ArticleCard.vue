@@ -1,25 +1,9 @@
 <script setup>
 import { asDate } from '../../lib/format';
 
-/**
- * One article in the news grid.
- *
- * Deliberately not a single element: the badge and the pin sit *over* the card,
- * and a button nested inside an anchor is invalid markup that would follow the
- * link as well as fire its own click. The three roots are positioned against
- * the `<li>` the page puts them in, which is also what the seen-tracker
- * watches — so the hover that counts an article as read is the whole card,
- * pin included.
- */
 defineProps({
     article: { type: Object, required: true },
-    /*
-     * Whether this visit has already counted the article, ahead of the server
-     * knowing it. The NEW badge deliberately stays put for the rest of the
-     * visit — cards restyling wholesale under the pointer is distracting — so
-     * this clears the dot alone, as the acknowledgement that the hover landed.
-     */
-    counted: { type: Boolean, default: false },
+    isNew: { type: Boolean, default: false },
 });
 
 defineEmits(['togglePin']);
@@ -29,13 +13,10 @@ defineEmits(['togglePin']);
     <!-- Sits opposite the pin so the two never collide on a card that is both
          new and pinned. -->
     <span
-        v-if="!article.is_seen"
+        v-if="isNew"
         class="absolute left-2 top-2 z-10 flex items-center gap-1 border border-wot-good bg-wot-good/20 px-1.5 py-0.5 text-xs font-bold uppercase tracking-wider text-wot-good backdrop-blur-sm"
     >
-        <!-- Drops out of the flow once the hover has counted the card, so the
-             badge closes up around the word rather than keeping a gap where the
-             square was. -->
-        <span v-if="!counted" class="h-1.5 w-1.5 shrink-0 bg-wot-good" aria-hidden="true" />
+        <span class="h-1.5 w-1.5 shrink-0 bg-wot-good" aria-hidden="true" />
 
         New
     </span>

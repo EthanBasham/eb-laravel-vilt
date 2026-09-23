@@ -3992,3 +3992,18 @@ This departs from `eb-portfolio`, whose `pint.json` still has `method: none`. Th
 `CLAUDE.md` instruction to "specify all four `elements` keys" is reversed accordingly, and
 existing files aren't reformatted: their closed-up methods stay as they are until someone
 regroups them.
+
+## 2026-09-23 — The NEW badge clears on hover, not on the next load
+
+On `/wot/news` a counted card now loses its whole NEW badge the moment the hover lands.
+Previously only the square inside it went, and the badge itself stayed until the next page
+load. That reverses the "badges deliberately do not clear mid-scroll" entry from the viewport
+dwell tracker: under that tracker a scroll counted a screenful of cards at once, and clearing
+all their badges together made the grid shimmer. The hover tracker counts one card at a time,
+the one under the pointer, so that reason had lapsed — and a NEW label on a card you have
+already read reads as a bug.
+
+`ArticleCard`'s `counted` prop now gates the badge rather than the dot inside it. No server
+change: `markSeen` still reloads only `unseenCount`, because `isMarked()` covers the card until
+the next full load brings `is_seen` from the server. The dashboard's `NewsPanel` only ever
+showed a dot, which already cleared on hover, so it is unchanged.
