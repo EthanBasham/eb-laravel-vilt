@@ -107,7 +107,7 @@ class WotArticle extends Model
     {
         return $query->orderByDesc('wot_articles.published_at')->orderByDesc('wot_articles.id');
     }
-    
+
     public function scopeWithPinnedFor(Builder $query, ?User $user): Builder
     {
         if (! $user) {
