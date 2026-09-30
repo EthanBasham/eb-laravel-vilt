@@ -4026,3 +4026,35 @@ among the other pins is the server's ordering, so the reply brings it.
 `useSeenTracker` became `useArticleSeenTracker` (file and export) so the pair reads as
 article-specific and leaves the generic name free. Only `News.vue` and `NewsPanel.vue` imported
 it. The split is recorded as a rule in `.ai/rules/js-wot.md`.
+
+## 2026-09-30 — pinnedFirstFor() split into withPinnedFor() + inPinnedFirstOrder()
+
+Reverses the 2026-09-09 entry's decision to keep `pinnedFirstFor()` for the Pinned tab and
+`/wot/news`. That scope did two jobs, the pins join and the hoisting sort. It's gone. Callers
+now chain `withPinnedFor($user)` for the join and `inPinnedFirstOrder()` for the sort, the
+same way `inDefaultOrder()` is a sort-only scope. `/wot/news` uses both. The dashboard's Pinned
+tab uses `withPinnedFor($user)->inDefaultOrder()`, because hoisting pins above other pins
+did nothing there.
+
+`inPinnedFirstOrder()` requires `withPinnedFor()` with a user: it sorts on
+`wot_article_pins.pinned_at is null`. It can't sort on the `pinned_at` alias instead, because
+Postgres accepts an output alias in `ORDER BY` only as a bare name, not inside an expression.
+If the join is missing, the query fails with a missing FROM-clause error, so the mistake shows
+up immediately. The one behaviour lost is `pinnedFirstFor(null)` falling back to
+`inDefaultOrder()`. Every `/wot` route requires auth, so nothing can reach that case today.
+
+`inDefaultOrder()` now sorts on `wot_articles.published_at` / `wot_articles.id`. Before, it
+used bare names, which only worked after the pins join (which also has an `id`) because
+Postgres matched them against the output columns first.
+
+## 2026-09-30 — NewsToolbar folded back into News.vue
+
+This undoes the extraction from `af304c8`. `Components/News/NewsToolbar.vue` was only used by
+`Pages/News.vue`, and everything it did belonged to that page. Its five props were the page's
+own props passed straight through. It hardcoded `/wot/news`. Its `markAllSeen` optimistic
+callback rewrote `articles.data`, which is the page's paginator shape, and `js-wot.md` says a
+page should keep that kind of logic for itself. Moving it back removes the prop wiring. The
+category and pinned-filter handlers, the optimistic callback, and the `chip` / `lit` / `unlit`
+class constants now live in `News.vue`'s script.
+
+`ArticleCard` stays a separate component, because it's the part that could be reused.

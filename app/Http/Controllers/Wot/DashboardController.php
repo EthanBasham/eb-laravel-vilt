@@ -99,7 +99,7 @@ class DashboardController extends Controller
                 // Both tabs are sent up front: five rows each is a trivial
                 // payload, and switching tabs shouldn't cost a round trip.
                 'pinned' => $this->articles(
-                    WotArticle::query()->onlyPinnedBy($user)->withSeenFor($user)->pinnedFirstFor($user),
+                    WotArticle::query()->onlyPinnedBy($user)->withSeenFor($user)->withPinnedFor($user)->inDefaultOrder(),
                     $user,
                 ),
             ],

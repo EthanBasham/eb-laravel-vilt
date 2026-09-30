@@ -14,7 +14,7 @@ None of the three pivot tables has a model, deliberately: they are presence-only
 
 Naming: `*By($user)` filters and takes a non-nullable User (`onlyPinnedBy`, `onlySeenBy`, `notSeenBy`, `notIgnoredBy`); `*For($user)` only decorates the rows with the pivot timestamp and takes `?User` (`withPinnedFor`, `withSeenFor`, `withIgnoredFor`). Exclusion is `not*`, never `onlyUn*`.
 
-The reason: a read on the User side grows its own filtering and ordering that then contradicts the scopes. `pinnedArticles()` carried an `orderByPivot('pinned_at','desc')` that fought scopePinnedFirstFor(), which deliberately orders pins by published_at.
+The reason: a read on the User side grows its own filtering and ordering that then contradicts the scopes. `pinnedArticles()` carried an `orderByPivot('pinned_at','desc')` that fought scopeInPinnedFirstOrder(), which deliberately orders pins by published_at.
 
 `notSeenBy($user)` is what a read of the backlog uses, and what keeps `markAllSeen()`'s insert to the rows that are actually new. It is no longer what makes the write *safe* — see the rule below.
 

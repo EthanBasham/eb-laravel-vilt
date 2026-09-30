@@ -16,6 +16,7 @@ use Database\Factories\WotArticleFactory;
  * A news article from worldoftanks.com's RSS feed.
  *
  * @property-read bool $has_events
+ * @property-read bool $needs_body_fetch
  * @property-read array{id: int, title: string, url: string, category: ?string, image_url: ?string, published_at: string, is_pinned: bool, is_seen: bool} $card_entry
  */
 #[Fillable(['guid', 'url', 'title', 'description', 'category', 'image_url', 'published_at', 'body_fetched_at', 'body_hash'])]
@@ -24,11 +25,6 @@ class WotArticle extends Model
     /** @use HasFactory<WotArticleFactory> */
     use HasFactory;
 
-    /**
-     * Get the attributes that should be cast.
-     *
-     * @return array<string, string>
-     */
     protected function casts(): array
     {
         return [
@@ -42,18 +38,6 @@ class WotArticle extends Model
         return Attribute::get(fn (): bool => $this->events_count > 0 || $this->events->isNotEmpty());
     }
 
-    /**
-     * The fields every article card renders, wherever it is drawn — the news
-     * grid and both dashboard tabs. Written once because the two had already
-     * drifted apart while saying the same thing twice.
-     *
-     * Requires withPinnedFor() and withSeenFor() on the query: `is_pinned` and
-     * `is_seen` read the columns those scopes add, and without them both report
-     * false rather than failing. The news grid's two extra fields stay at its
-     * own call site, `events_count` especially — it exists only under
-     * withCount('events'), and reading it unset would send has_events off to
-     * lazy-load the relationship a row at a time.
-     */
     protected function cardEntry(): Attribute
     {
         return Attribute::get(fn (): array => [
@@ -63,26 +47,17 @@ class WotArticle extends Model
             'category' => $this->category,
             'image_url' => $this->image_url,
             'published_at' => $this->published_at->toIso8601String(),
-            // pinned_at and seen_at come from the query, not the table; their
-            // presence is what "pinned" and "seen" mean here.
             'is_pinned' => $this->pinned_at !== null,
             'is_seen' => $this->seen_at !== null,
         ]);
     }
 
-    /**
-     * Whether the body should be fetched to look for event dates.
-     *
-     * Re-fetching is driven by the feed rather than by a timer: an article
-     * whose publish date hasn't moved since it was last read cannot have gained
-     * new event markup, and this is someone else's server to be polite to.
-     */
-    public function needsBodyFetch(): bool
+    protected function needsBodyFetch(): Attribute
     {
-        return $this->body_fetched_at === null
-            || $this->published_at->gt($this->body_fetched_at);
+        return Attribute::get(fn (): bool => ($this->body_fetched_at === null) || $this->published_at->gt($this->body_fetched_at));
     }
 
+    // Article : Mark Seen
     public function markSeenBy(User $user): void
     {
         DB::table('wot_article_views')->insertOrIgnore([
@@ -110,31 +85,13 @@ class WotArticle extends Model
         DB::table('wot_article_views')->where('user_id', $user->id)->delete();
     }
 
-    /**
-     * Pins this article to the top of the user's feed.
-     *
-     * Idempotent, and deliberately not in the way markSeenBy() is: pinning
-     * something already pinned refreshes pinned_at rather than leaving the
-     * earlier value, since syncWithoutDetaching calls updateExistingPivot for a
-     * row that exists. A first sighting is a fact worth preserving; the moment
-     * a pin was last set is not, and keeping it current is what makes a second
-     * call safe against the unique constraint. That timestamp no longer drives
-     * ordering either — see scopePinnedFirstFor().
-     *
-     * Written through the article's own pinnedBy() rather than the user's
-     * pinnedArticles(): the write belongs to the side the method hangs off.
-     */
+    // Article : Pin
     public function pinBy(User $user): void
     {
         $this->pinnedBy()->syncWithoutDetaching([
             $user->id => ['pinned_at' => now()],
         ]);
     }
-
-    /**
-     * Unpins this article. Detaching a row that isn't there is a no-op, so this
-     * needs no guard.
-     */
     public function unpinBy(User $user): void
     {
         $this->pinnedBy()->detach($user->id);
@@ -148,24 +105,9 @@ class WotArticle extends Model
     }
     public function scopeInDefaultOrder(Builder $query): Builder
     {
-        // The id tiebreaker is not cosmetic. Many articles share a publish date,
-        // and without a deterministic final sort the database is free to return
-        // tied rows in a different order per query — which, across a paginated
-        // set, can show one article on two pages and another on none.
-        return $query->orderByDesc('published_at')->orderByDesc('id');
+        return $query->orderByDesc('wot_articles.published_at')->orderByDesc('wot_articles.id');
     }
-
-    /**
-     * Exposes this user's pin as a `pinned_at` column, without changing the
-     * order. Split out of pinnedFirstFor() so a caller that wants the
-     * dashboard's plain-newest ordering can still show pin state and offer
-     * the pin/unpin toggle on each row.
-     *
-     * A left join rather than a `whereHas`, because pinned-ness has to be
-     * available to a caller's own ORDER BY — and this way one query still
-     * serves the paginator. `wot_articles.*` is selected explicitly since the
-     * join puts an `id` on both sides.
-     */
+    
     public function scopeWithPinnedFor(Builder $query, ?User $user): Builder
     {
         if (! $user) {
@@ -177,82 +119,36 @@ class WotArticle extends Model
                 $join->on('wot_article_pins.wot_article_id', '=', 'wot_articles.id')
                     ->where('wot_article_pins.user_id', '=', $user->id);
             })
-            // addSelect, not select: select() resets the column list, which
-            // silently discarded withSeenFor()'s subquery when the two scopes
-            // were chained in the other order. Qualified because the join puts
-            // an `id` on both sides.
             ->addSelect('wot_articles.*')
             ->addSelect('wot_article_pins.pinned_at as pinned_at');
     }
-
-    /**
-     * Newest first, but with this user's pinned articles hoisted above
-     * everything else as a group. Pinning only groups; it does not reorder
-     * within the group, so a pinned article still sits by `published_at`
-     * among the other pins.
-     */
-    public function scopePinnedFirstFor(Builder $query, ?User $user): Builder
-    {
-        if (! $user) {
-            return $query->inDefaultOrder();
-        }
-
-        return $query
-            ->withPinnedFor($user)
-            // Postgres sorts false before true, so "is null" ascending puts the
-            // pinned rows first without needing a CASE expression.
-            ->orderByRaw('wot_article_pins.pinned_at is null')
-            ->orderByDesc('wot_articles.published_at')
-            // Deterministic tiebreaker; see inDefaultOrder().
-            ->orderByDesc('wot_articles.id');
-    }
-
-    /**
-     * Articles this user has pinned.
-     */
     public function scopeOnlyPinnedBy(Builder $query, User $user): Builder
     {
         return $query->whereHas('pinnedBy', fn (Builder $pins) => $pins->whereKey($user->id));
     }
+    public function scopeInPinnedFirstOrder(Builder $query): Builder
+    {
+        return $query->orderByRaw('wot_article_pins.pinned_at is null')->inDefaultOrder();
+    }
 
-    /**
-     * Exposes when this user saw each article, as a `seen_at` column.
-     *
-     * A correlated subquery rather than another left join: a second join would
-     * risk duplicating rows, and a subquery composes with pinnedFirstFor() in
-     * either order. Both scopes use addSelect for the same reason.
-     */
     public function scopeWithSeenFor(Builder $query, ?User $user): Builder
     {
         if (! $user) {
             return $query->selectRaw('null as seen_at');
         }
 
-        return $query->addSelect(['seen_at' => DB::table('wot_article_views')
-            ->select('seen_at')
-            ->whereColumn('wot_article_views.wot_article_id', 'wot_articles.id')
-            ->where('wot_article_views.user_id', $user->id)
-            ->limit(1),
+        return $query->addSelect([
+            'seen_at' => DB::table('wot_article_views')
+                ->select('seen_at')
+                ->whereColumn('wot_article_views.wot_article_id', 'wot_articles.id')
+                ->where('wot_article_views.user_id', $user->id)
+                ->limit(1),
         ]);
     }
-
-    /**
-     * Articles this user has already seen. The mirror of onlyPinnedBy().
-     */
     public function scopeOnlySeenBy(Builder $query, User $user): Builder
     {
         return $query->whereHas('seenBy', fn (Builder $views) => $views->whereKey($user->id));
     }
-
-    /**
-     * The unseen backlog — and what every write of a seen row selects first,
-     * since the absence of a pivot row is exactly what makes an id safe to
-     * attach.
-     *
-     * `not` rather than `onlyUnseen`, matching WotEvent::scopeNotIgnoredBy():
-     * both exclude rows by the absence of a pivot, and naming one of them as an
-     * inclusion hid that the two were the same shape.
-     */
     public function scopeNotSeenBy(Builder $query, User $user): Builder
     {
         return $query->whereDoesntHave('seenBy', fn (Builder $views) => $views->whereKey($user->id));

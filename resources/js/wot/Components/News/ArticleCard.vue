@@ -10,8 +10,6 @@ defineEmits(['togglePin']);
 </script>
 
 <template>
-    <!-- Sits opposite the pin so the two never collide on a card that is both
-         new and pinned. -->
     <span
         v-if="isNew"
         class="absolute left-2 top-2 z-10 flex items-center gap-1 border border-wot-good bg-wot-good/20 px-1.5 py-0.5 text-xs font-bold uppercase tracking-wider text-wot-good backdrop-blur-sm"
@@ -35,12 +33,6 @@ defineEmits(['togglePin']);
         <span class="sr-only">{{ article.is_pinned ? 'Unpin' : 'Pin' }} {{ article.title }}</span>
     </button>
 
-    <!-- A real external link: these open the article on worldoftanks.com, which
-         is outside this SPA.
-
-         The border stays a hover affordance only. Using it for pinned state too
-         would make a resting card look identical to a hovered one, so the pin
-         button carries that state. -->
     <a
         :href="article.url"
         target="_blank"
@@ -57,7 +49,6 @@ defineEmits(['togglePin']);
 
         <div class="flex flex-1 flex-col p-4">
             <p class="text-xs font-bold uppercase tracking-wider text-wot-dim">
-                <span v-if="article.is_pinned" class="text-wot-gold">Pinned · </span>
                 {{ article.category }} · {{ asDate(article.published_at) }}
             </p>
 

@@ -170,7 +170,7 @@ it('does not re-parse an article whose body has not changed', function () {
     $this->artisan('wot:sync-news');
 
     expect($first->fresh()->body_hash)->toBe($hash)
-        ->and($first->fresh()->needsBodyFetch())->toBeFalse();
+        ->and($first->fresh()->needs_body_fetch)->toBeFalse();
 });
 
 it('marks a disallowed article fetched so it is not retried forever', function () {
@@ -183,5 +183,5 @@ it('marks a disallowed article fetched so it is not retried forever', function (
     $article = WotArticle::where('url', 'like', '%wot-assistant%')->first();
 
     expect($article->body_fetched_at)->not->toBeNull()
-        ->and($article->needsBodyFetch())->toBeFalse();
+        ->and($article->needs_body_fetch)->toBeFalse();
 });

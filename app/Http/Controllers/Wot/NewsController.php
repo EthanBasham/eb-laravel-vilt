@@ -23,8 +23,9 @@ class NewsController extends Controller
                 ->when($category, fn ($query) => $query->where('wot_articles.category', $category))
                 ->when($pinnedOnly, fn ($query) => $query->onlyPinnedBy($user))
                 ->withCount('events')
-                ->pinnedFirstFor($user)
+                ->withPinnedFor($user)
                 ->withSeenFor($user)
+                ->inPinnedFirstOrder()
                 ->paginate(24)
                 ->withQueryString()
                 ->through(fn (WotArticle $article): array => [
