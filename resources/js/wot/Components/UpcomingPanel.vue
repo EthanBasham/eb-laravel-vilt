@@ -37,9 +37,9 @@ defineProps({
                         <a
                             v-for="event in day.events"
                             :key="event.id"
-                            :href="event.url ?? '/wot/calendar'"
-                            :target="event.url ? '_blank' : undefined"
-                            :rel="event.url ? 'noopener noreferrer' : undefined"
+                            :href="event.article.url ?? '/wot/calendar'"
+                            :target="event.article.url ? '_blank' : undefined"
+                            :rel="event.article.url ? 'noopener noreferrer' : undefined"
                             class="block border-l-2 ps-2 text-sm transition-opacity hover:opacity-80"
                             :class="event.source === 'calendar'
                                 ? 'border-wot-gold text-wot-gold'

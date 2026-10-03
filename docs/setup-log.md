@@ -4059,6 +4059,180 @@ class constants now live in `News.vue`'s script.
 
 `ArticleCard` stays a separate component, because it's the part that could be reused.
 
+## 2026-09-30 — Resyncs reconcile events instead of replacing them
+
+`SyncNews::store()` used to delete an article's events and re-insert them whenever the page's
+hash changed. `wot_event_ignores` cascades on delete, so any edit to an article silently
+dropped every user's ignores on its events, including events that hadn't changed. Future
+features that attach data to events would have had the same problem.
+
+`WotArticle::syncEvents()` now matches fresh extraction output to the article's existing rows
+and updates them in place, so a matched event keeps its id. It matches in passes, and each
+pass only considers rows the earlier passes left unpaired:
+
+1. source + title + start: unchanged, though end time and metadata are still refreshed
+2. source + title: rescheduled
+3. source + start: renamed
+4. source `window`: the article's single period, whatever changed
+
+Within a pass, rows sharing a key pair up in date order, so a recurring session that shifts
+by a day pairs first with first. Unpaired incoming rows are created and unpaired existing rows
+are deleted, in one transaction, with deletes first. The command's per-article line now adds
+the non-zero counts, e.g. `2 event(s): … (1 kept, 1 moved)`.
+
+Vanished events are still **hard-deleted**, taking their ignores with them. Soft deletes,
+which would restore a row if Wargaming pulls an event and later puts it back, were considered
+and deferred.
+
+A known limit: the markup gives no stable id per session, so matching can only go by what it
+sees. If same-titled sessions shift onto each other's slots (Mon/Tue/Wed become Tue/Wed/Thu),
+pass 1 pairs the overlapping days as exact matches, and Monday's row, with its ignores, moves to
+Thursday.
+
+## 2026-09-30 — app/helpers.php for global helper functions
+
+Added `app/helpers.php` and registered it under `autoload.files` in `composer.json`, then ran
+`composer dump-autoload`. It has no functions yet. Its header asks for each helper to be
+wrapped in `function_exists()`, because Laravel and its packages define their own global
+helpers, and redeclaring one of those names is a fatal error rather than an override.
+
+No deploy or CI change was needed. Both run `composer install`, which rebuilds the autoloader
+from `composer.json`. The `autoload` section isn't part of `composer.lock`'s content hash, so
+the lock file didn't change.
+
+## 2026-09-30 — carbonify(), and the calendar's end-of-month bug
+
+`carbonify($date, $default = null)` is the first helper in `app/helpers.php`. It parses
+leniently with `Carbon::parse()` inside `rescue(..., report: false)`. Empty or unparseable
+input returns `$default`, which goes through `value()` so a closure default only runs when
+it's used. The result is always converted to `config('app.timezone')`, because a string with
+its own offset would otherwise keep it (see "Time and timezones" in CLAUDE.md). It accepts
+anything `strtotime` does, relative dates included, so it's a forgiving parser, not a
+validator.
+
+`CalendarController::calendar` now reads `?month=` with it. The old
+`Carbon::createFromFormat('Y-m', …)` filled in the missing day from today's date. From the
+29th to the 31st, that meant asking for a shorter month rolled over into the next one:
+`?month=2026-09` on 31 August showed October. `Carbon::parse('2026-09')` always gives the 1st.
+`CalendarTest` now covers this, and I confirmed the test fails against the old parsing.
+
+## 2026-09-30 — Calendar weeks run Sunday to Saturday
+
+This reverses the Monday-first grid. `MonthGrid.vue` said it was chosen because the game's own
+week and reset times run Monday to Sunday. The user wants Sunday as the first day. The grid now
+starts on the Sunday on or before the 1st and ends on the Saturday on or after the last day
+(`CalendarController::calendar`), and the weekday labels start with `Sun`. The labels are
+hardcoded in `MonthGrid.vue` and must match where the server starts the week.
+`CalendarTest` now asserts the grid's first and last dates. Before this, nothing tested where
+the grid started.
+
+## 2026-09-30 — APP_LOCALE is en_US
+
+`APP_LOCALE` changed from `en` to `en_US` in `.env` and `.env.example`. Production's
+`shared/.env` needs the same change, made by hand; see below.
+
+This is load-bearing for the calendar. `CalendarController::calendar` calls `startOfWeek()` /
+`endOfWeek()` with no argument, and without one Carbon takes the first day of the week from the
+locale Laravel gives it. Under `en` that is **Monday**; under `en_US` it is Sunday, which is what
+the grid and `MonthGrid.vue`'s hardcoded `Sun … Sat` labels expect. Changing the locale again
+(to `en_GB`, `de`, or back to `en`) silently makes the grid Monday-first and misaligns it with
+the labels. `CalendarTest`'s "whole weeks from Sunday to Saturday" test catches that.
+
+`APP_FALLBACK_LOCALE` stays `en`. The app has no `lang/` directory, so no translation lookups
+change. CI copies `.env.example`, so it picks up `en_US` too. The full suite passes: 399 tests.
+
+**Production:** Claude Code's permission checks blocked access to the server, so the user
+applies this by hand: set `APP_LOCALE=en_US` in `/projects/laravel-vilt/shared/.env`, then
+rebuild the config cache in the current release so the running app sees it.
+
+## 2026-09-30 — App\Models\Model, a base class for model helpers
+
+Added `app/Models/Model.php`, an empty `abstract class Model` that extends Eloquent's `Model`,
+as the place for helpers shared across models. All 19 models in `App\Models` now extend it.
+Since it has the same short name, each model just dropped its
+`use Illuminate\Database\Eloquent\Model;` line, and `extends Model` now resolves to the app's
+own class in the same namespace. Leaving that import in a model would quietly bypass the base
+class, so there's a test for it.
+
+`User` is the exception, because it has to extend `Authenticatable`. A helper `User` also
+needs should go in a trait used by both the base class and `User`.
+
+`tests/Unit/ArchTest.php` (the first file in `tests/Unit`) is a Pest `arch()` test requiring
+every class in `App\Models` to extend `App\Models\Model`, ignoring the base class itself and
+`User`. I confirmed it fails when a model extends Eloquent's class directly.
+
+`php artisan make:model` still generates models that extend Eloquent's class. The arch test
+flags them. Changing the generated code would mean `php artisan stub:publish`, which creates a
+new top-level `stubs/` directory, so that is left for the user to decide.
+
+## 2026-09-30 — Date-range scopes on App\Models\Model
+
+The first shared helpers on the base model are three scopes. They are reworked from a draft the
+user brought, which had four problems:
+- With both bounds, the draft's between-scope silently dropped `NULL` rows. With one bound it
+  included them.
+- A bound `carbonify()` couldn't read became "no bound", which widens the filter.
+- It included `NULL` rows by default.
+- Its names sat close to Laravel's own `whereFuture()` / `whereDate()` / `whereBetween()`.
+
+- `onlyOnOrAfter($column, $date = null, $orNull = false)` and `onlyOnOrBefore(...)` compare to
+  the second and default to now.
+- `onlyWithinDays($column, $from = null, $to = null, $orNull = false)` rounds `$from` to the
+  start of its day and `$to` to the end of its day, in app time. A null end is open, and with
+  neither bound the query is returned untouched.
+- `$orNull` adds rows with no value in every case, including when both bounds are given.
+- A bound that is present but unreadable throws `InvalidArgumentException` instead of being
+  dropped. Only an actual `null` means open-ended.
+- The column is passed through `qualifyColumn()`, so the scopes work under a join.
+  `WotArticle::withPinnedFor()` is the case in this app, since it adds a second `created_at`.
+
+Nothing in the app uses them yet. `WotEvent::scopeOnlyBetween()` tests whether an event's span
+overlaps a range, and `scopeOnlyUpcoming()` ORs two columns, so neither is one column against a
+range. Tests are in `tests/Feature/Models/ModelTest.php`. I confirmed the join test and the
+closed-range `orNull` test fail when those behaviours are removed.
+
+## 2026-09-30 — onlyOverlappingDays(), and WotEvent::scopeOnlyBetween() built on it
+
+`App\Models\Model::scopeOnlyOverlappingDays($startColumn, $endColumn, $from, $to, $openEnded = false)`
+keeps rows whose span overlaps a range of days. It uses the standard two-comparison test: the row
+starts before the range ends, and ends after the range starts. That covers starting inside,
+ending inside and covering the whole range. The user's draft used three OR'd branches over the
+earlier draft helpers, which it relied on for the same result.
+
+Its conventions match `onlyWithinDays()`: whole days in app time, a null bound leaves that end
+open, an unreadable bound throws, and both columns are qualified with the table name.
+
+**A missing end is treated as a single moment by default**, and the row's start stands in for
+its end. The draft treated it as still running forever. That is wrong for `WotEvent`, where a
+missing `ends_at` means a session with no listed end time. Under the draft, a past session would
+have shown up in every later calendar month. `openEnded: true` gives the still-running meaning
+for data that needs it.
+
+`WotEvent::scopeOnlyBetween()` is now a one-line call to it. Its two callers already pass
+day-aligned bounds, so rounding to whole days doesn't change their results: the calendar grid
+runs from midnight on its first Sunday to the end of its last Saturday, and the dashboard from
+today to the end of the fifth day. The calendar and dashboard tests pass unchanged.
+
+The one-moment default is tested only in `ModelTest`. With it broken, no calendar or dashboard
+test fails, because none checks that a past session with no end stays out of later months.
+
+## 2026-09-30 — The calendar grid moved into CalendarBoard
+
+The user doesn't want private methods on controllers. Complexity should sit in the action itself
+or in a service. `CalendarController`'s `days()` and `event()` are gone, and the month grid is
+now `App\Services\WotNews\CalendarBoard::for($month, $user)`. It follows the `*Board` convention
+in `app/Services/Wargaming`: a class whose `for()` returns page props, injected into the action.
+It returns `days` and `ongoing`. The controller keeps the parts specific to the request: reading
+`?month=`, the month labels, and the "Coming up" closure.
+
+The check for whether an event falls on a given day was written out three times: twice in
+`days()` and once in `DashboardController::upcoming()`. It is now `WotEvent::occursOn($day)`. A
+missing end means a single moment, matching `onlyOverlappingDays()`.
+
+`CalendarBoard` was added to `controllers-wot.md`'s paths, since it now does the per-user reading
+that rule covers. `DashboardController`, `CrewController` and `GrindController` still have
+private methods; only the calendar was changed.
+
 ## 2026-10-01 — Financial Fleet sub-project (/finance), first pass
 
 A second Inertia + Vue island, built in one unattended session as a design prototype: the user

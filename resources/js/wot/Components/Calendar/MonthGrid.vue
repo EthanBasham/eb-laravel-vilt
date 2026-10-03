@@ -6,11 +6,11 @@ import DayCell from './DayCell.vue';
  *
  * `days` arrives already padded out to whole weeks by the server, each square
  * carrying whether it falls in the month being shown — so the grid never has to
- * work out where a month starts, and a leading Sunday is a square rather than a
- * gap.
+ * work out where a month starts, and the days either side of it are squares
+ * rather than gaps.
  *
- * Monday first, and the labels are fixed English rather than localised: the
- * game's own week and every reset time it publishes run Monday to Sunday.
+ * Sunday first, and the labels are fixed English rather than localised. The
+ * server decides where the week starts; these labels must match it.
  */
 defineProps({
     days: { type: Array, required: true },
@@ -18,7 +18,7 @@ defineProps({
 
 defineEmits(['selectDay', 'selectEvent']);
 
-const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 </script>
 
 <template>

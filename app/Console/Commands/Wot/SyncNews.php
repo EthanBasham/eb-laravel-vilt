@@ -4,7 +4,6 @@ namespace App\Console\Commands\Wot;
 
 use Illuminate\Console\Command;
 use App\Models\WotArticle;
-use App\Models\WotEvent;
 use App\Services\WotNews\EventExtractor;
 use App\Services\WotNews\FeedParser;
 use App\Services\WotNews\NewsClient;
@@ -109,11 +108,12 @@ class SyncNews extends Command
             }
 
             $extracted = $extractor->extract($html, $article->title);
-            $events += $this->store($article, $extracted);
+            $changes = $article->syncEvents($extracted);
+            $events += count($extracted);
 
             $article->update(['body_fetched_at' => now(), 'body_hash' => $hash]);
 
-            $this->line('  '.count($extracted)." event(s): {$article->title}");
+            $this->line('  '.count($extracted)." event(s): {$article->title}".$this->describe($changes));
 
             // Deliberate pacing. Nothing here is urgent, and a burst of
             // requests at someone else's site is impolite regardless of
@@ -127,19 +127,17 @@ class SyncNews extends Command
     }
 
     /**
-     * @param  list<array<string, mixed>>  $extracted
+     * The non-zero counts from WotArticle::syncEvents(), e.g. " (1 kept, 1 moved)".
+     *
+     * @param  array<string, int>  $changes
      */
-    private function store(WotArticle $article, array $extracted): int
+    private function describe(array $changes): string
     {
-        // Replaced rather than merged: an edited article may have moved or
-        // removed dates, and a stale event nobody can trace back is worse than
-        // re-inserting a few rows.
-        $article->events()->delete();
+        $parts = collect($changes)
+            ->filter()
+            ->map(fn (int $count, string $change): string => "{$count} {$change}")
+            ->implode(', ');
 
-        foreach ($extracted as $event) {
-            WotEvent::create(['wot_article_id' => $article->id, ...$event]);
-        }
-
-        return count($extracted);
+        return $parts === '' ? '' : " ({$parts})";
     }
 }

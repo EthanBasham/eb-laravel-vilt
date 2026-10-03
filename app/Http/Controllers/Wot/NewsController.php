@@ -29,7 +29,7 @@ class NewsController extends Controller
                 ->paginate(24)
                 ->withQueryString()
                 ->through(fn (WotArticle $article): array => [
-                    ...$article->card_entry,
+                    ...$article->list_item_props,
                     'description' => $article->description,
                     'events_count' => $article->events_count,
                 ]),

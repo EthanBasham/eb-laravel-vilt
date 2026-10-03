@@ -333,6 +333,7 @@ it('buckets upcoming events into five days', function () {
         // The session lands on its own day, with a time.
         ->has('upcoming.days.1.events', 1)
         ->where('upcoming.days.1.events.0.time', '16:00')
+        ->where('upcoming.days.1.events.0.article.url', $article->url)
         // The 60-day campaign is summarised once, not repeated across all five.
         ->has('upcoming.ongoing', 1)
         ->where('upcoming.ongoing.0.title', 'Battle Pass')

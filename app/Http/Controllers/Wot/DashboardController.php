@@ -114,7 +114,7 @@ class DashboardController extends Controller
     private function articles($query, ?User $user): array
     {
         return $query->limit(5)->get()
-            ->map(fn (WotArticle $article): array => $article->card_entry)
+            ->map(fn (WotArticle $article): array => $article->list_item_props)
             ->all();
     }
 
@@ -138,55 +138,33 @@ class DashboardController extends Controller
         $events = WotEvent::with('article:id,title,url')
             ->notIgnoredBy($user)
             ->onlyBetween($from, $to)
-            ->orderBy('starts_at')
+            ->inDefaultOrder()
             ->get();
 
-        [$ongoing, $dated] = $events->partition(
-            fn (WotEvent $event): bool => $event->ends_at !== null
-                && $event->starts_at->diffInDays($event->ends_at) > 7,
-        );
+        [$ongoing, $dated] = $events->partition(fn (WotEvent $event): bool => $event->is_long_running);
 
         $days = [];
 
         for ($date = $from->copy(); $date->lte($to); $date->addDay()) {
             $dayStart = $date->copy()->startOfDay();
-            $dayEnd = $date->copy()->endOfDay();
 
             $days[] = [
                 'date' => $date->toDateString(),
                 'label' => $date->isToday() ? 'Today' : $date->format('D j M'),
                 'is_today' => $date->isToday(),
                 'events' => $dated
-                    ->filter(fn (WotEvent $e): bool => $e->starts_at->lte($dayEnd) && ($e->ends_at ?? $e->starts_at)->gte($dayStart))
+                    ->filter(fn (WotEvent $e): bool => $e->occursOn($dayStart))
                     ->map(fn (WotEvent $e): array => [
-                        'id' => $e->id,
-                        'title' => $e->title,
-                        'source' => $e->source,
-                        'url' => $e->article?->url,
-                        // Only a session that starts on this day gets a time; a
-                        // multi-day window showing "16:00" on every square would
-                        // be stating something untrue.
-                        'time' => $e->source === WotEvent::SOURCE_CALENDAR && $e->starts_at->isSameDay($dayStart)
-                            ? $e->starts_at->format('H:i')
-                            : null,
-                        // Same rule as the month calendar: the last day of a run
-                        // that spans days. A single sitting is excluded, or every
-                        // stream session would announce itself as ending.
-                        'is_final_day' => $e->ends_at !== null
-                            && $e->ends_at->isSameDay($dayStart)
-                            && ! $e->starts_at->isSameDay($e->ends_at),
+                        ...$e->list_item_props,
+                        'time' => $e->startTimeOn($dayStart),
+                        'is_final_day' => $e->isFinalDayOn($dayStart),
                     ])->values()->all(),
             ];
         }
 
         return [
             'days' => $days,
-            'ongoing' => $ongoing->map(fn (WotEvent $e): array => [
-                'id' => $e->id,
-                'title' => $e->title,
-                'ends_at' => $e->ends_at?->toIso8601String(),
-                'url' => $e->article?->url,
-            ])->values()->all(),
+            'ongoing' => $ongoing->map(fn (WotEvent $e): array => $e->list_item_props)->values()->all(),
         ];
     }
 

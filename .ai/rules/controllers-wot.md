@@ -1,6 +1,6 @@
 ---
 paths:
-  - 'app/Models/Wot{Article,Event}.php,app/Http/Controllers/Wot/NewsController.php,app/Http/Controllers/Wot/CalendarController.php'
+  - 'app/Models/Wot{Article,Event}.php,app/Http/Controllers/Wot/NewsController.php,app/Http/Controllers/Wot/CalendarController.php,app/Services/WotNews/CalendarBoard.php'
 ---
 
 # Controllers Wot
@@ -8,7 +8,7 @@ paths:
 ## Read per-user article and event state through scopes, not the User relationships
 Pins, seen articles and ignored events live in per-user pivot tables. Query them through WotArticle/WotEvent scopes, never through the User relations.
 
-Writes are methods on the article or event, named for the act and taking the user: `$article->pinBy($user)`, `$article->unpinBy($user)`, `$article->markSeenBy($user)`, `WotArticle::markAllSeenBy($user)` (static, since there is no one article). A controller delegates and names no table and no pivot. Inside those methods the write goes through the model's own side of the relation — `$this->pinnedBy()`, not `$user->pinnedArticles()` — because the write belongs to the side the method hangs off.
+Writes are methods on the article or event, named for the act and taking the user: `$article->pinBy($user)`, `$article->unpinBy($user)`, `$article->markSeenBy($user)`, `WotArticle::markAllSeenBy($user)` (static, since there is no one article). Ignores follow the same shape on the event: `$event->ignoreBy($user)`, `$event->unignoreBy($user)`. A controller delegates and names no table and no pivot. Inside those methods the write goes through the model's own side of the relation — `$this->pinnedBy()`, not `$user->pinnedArticles()`; `$this->ignoredBy()`, not `$user->ignoredEvents()` — because the write belongs to the side the method hangs off.
 
 None of the three pivot tables has a model, deliberately: they are presence-only rows. A statement that cannot go through a relation uses `DB::table()` inside the owning model (WotArticle for views, WotEvent for ignores), never in a controller.
 

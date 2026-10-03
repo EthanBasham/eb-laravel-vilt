@@ -6,18 +6,19 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Carbon\CarbonInterface;
+use Closure;
 use Database\Factories\WotArticleFactory;
 
 /**
  * A news article from worldoftanks.com's RSS feed.
  *
  * @property-read bool $has_events
- * @property-read bool $needs_body_fetch
- * @property-read array{id: int, title: string, url: string, category: ?string, image_url: ?string, published_at: string, is_pinned: bool, is_seen: bool} $card_entry
+ * @property-read array{id: int, title: string, url: string, category: ?string, image_url: ?string, published_at: string, is_pinned: bool, is_seen: bool} $list_item_props
  */
 #[Fillable(['guid', 'url', 'title', 'description', 'category', 'image_url', 'published_at', 'body_fetched_at', 'body_hash'])]
 class WotArticle extends Model
@@ -38,7 +39,7 @@ class WotArticle extends Model
         return Attribute::get(fn (): bool => $this->events_count > 0 || $this->events->isNotEmpty());
     }
 
-    protected function cardEntry(): Attribute
+    protected function listItemProps(): Attribute
     {
         return Attribute::get(fn (): array => [
             'id' => $this->id,
@@ -50,11 +51,6 @@ class WotArticle extends Model
             'is_pinned' => $this->pinned_at !== null,
             'is_seen' => $this->seen_at !== null,
         ]);
-    }
-
-    protected function needsBodyFetch(): Attribute
-    {
-        return Attribute::get(fn (): bool => ($this->body_fetched_at === null) || $this->published_at->gt($this->body_fetched_at));
     }
 
     // Article : Mark Seen
@@ -95,6 +91,98 @@ class WotArticle extends Model
     public function unpinBy(User $user): void
     {
         $this->pinnedBy()->detach($user->id);
+    }
+
+    // Article : Events
+
+    /**
+     * Brings this article's events in line with a fresh extraction, updating
+     * the rows that are still there rather than replacing them, so an event
+     * keeps its id — and the ignores hung off it — across a resync.
+     *
+     * Matched in passes, each over what the previous ones left unpaired:
+     * unchanged (source, title, start), rescheduled (source, title), renamed
+     * (source, start), and finally the article's one window, whatever changed.
+     * Within a pass, rows sharing a key pair in date order, so a recurring
+     * session that shifts a day pairs first with first. Whatever is still
+     * unpaired is created or hard-deleted; a deleted event takes its ignores
+     * with it, which is right when it has gone from the article.
+     *
+     * @param  list<array<string, mixed>>  $extracted  EventExtractor::extract() output.
+     * @return array{kept: int, moved: int, renamed: int, created: int, removed: int}
+     */
+    public function syncEvents(array $extracted): array
+    {
+        $existing = $this->events()->inDefaultOrder()->get();
+        $incoming = collect($extracted)->sortBy(fn (array $event): int => $event['starts_at']->getTimestamp())->values();
+
+        $passes = [
+            ['kept', fn (string $source, string $title, CarbonInterface $startsAt): string => "{$source}|{$title}|{$startsAt->getTimestamp()}"],
+            ['moved', fn (string $source, string $title): string => "{$source}|{$title}"],
+            ['renamed', fn (string $source, string $title, CarbonInterface $startsAt): string => "{$source}|{$startsAt->getTimestamp()}"],
+            ['moved', fn (string $source): ?string => $source === WotEvent::SOURCE_WINDOW ? $source : null],
+        ];
+
+        $counts = ['kept' => 0, 'moved' => 0, 'renamed' => 0, 'created' => 0, 'removed' => 0];
+        $updates = [];
+
+        foreach ($passes as [$label, $key]) {
+            [$pairs, $existing, $incoming] = $this->pairEvents($existing, $incoming, $key);
+
+            $counts[$label] += count($pairs);
+            $updates = [...$updates, ...$pairs];
+        }
+
+        $counts['created'] = $incoming->count();
+        $counts['removed'] = $existing->count();
+
+        // Deletes first: an unpaired row can't hold a key an update is about to
+        // take (it would have paired with it), but clearing it before anything
+        // moves keeps the unique index out of the question entirely.
+        DB::transaction(function () use ($existing, $updates, $incoming): void {
+            $this->events()->whereKey($existing->modelKeys())->delete();
+
+            foreach ($updates as [$event, $attributes]) {
+                $event->update($attributes);
+            }
+
+            foreach ($incoming as $attributes) {
+                $this->events()->create($attributes);
+            }
+        });
+
+        return $counts;
+    }
+    /**
+     * Pairs each incoming event with the earliest existing one sharing its key.
+     * A null key opts that row out of the pass.
+     *
+     * @param  Collection<int, WotEvent>  $existing
+     * @param  Collection<int, array<string, mixed>>  $incoming
+     * @return array{0: list<array{0: WotEvent, 1: array<string, mixed>}>, 1: Collection<int, WotEvent>, 2: Collection<int, array<string, mixed>>}
+     */
+    private function pairEvents(Collection $existing, Collection $incoming, Closure $key): array
+    {
+        $pairs = [];
+        $unpaired = collect();
+
+        foreach ($incoming as $attributes) {
+            $wanted = $key($attributes['source'], $attributes['title'], $attributes['starts_at']);
+
+            $index = $wanted === null
+                ? false
+                : $existing->search(fn (WotEvent $event): bool => $key($event->source, $event->title, $event->starts_at) === $wanted);
+
+            if ($index === false) {
+                $unpaired->push($attributes);
+
+                continue;
+            }
+
+            $pairs[] = [$existing->pull($index), $attributes];
+        }
+
+        return [$pairs, $existing, $unpaired];
     }
 
     // Scopes

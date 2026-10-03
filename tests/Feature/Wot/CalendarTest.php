@@ -6,7 +6,7 @@ use App\Models\WotEvent;
 
 /*
  * Every fixture here is pinned to September 2026, because the grid's shape is
- * part of what is asserted: it runs whole weeks from the Monday on or before
+ * part of what is asserted: it runs whole weeks from the Sunday on or before
  * the 1st, so which square a date lands in depends on the weekday the month
  * opens with. Relative dates would move that from one run to the next.
  *
@@ -21,7 +21,7 @@ beforeEach(fn () => test()->travelTo('2026-09-01 08:00:00'));
 /**
  * The events the month grid puts on one date.
  *
- * Found by date rather than by index: the grid runs whole weeks from the Monday
+ * Found by date rather than by index: the grid runs whole weeks from the Sunday
  * on or before the 1st, so a square's position depends on which weekday the
  * month opens with.
  *
@@ -38,6 +38,33 @@ function september(User $user): TestResponse
 {
     return test()->actingAs($user)->get(route('wot.calendar', ['month' => '2026-09']));
 }
+
+it('lays the month out in whole weeks from Sunday to Saturday', function () {
+    $days = collect(september(User::factory()->create())->viewData('page')['props']['days']);
+
+    // September 2026 opens on a Tuesday and closes on a Wednesday.
+    expect($days->first()['date'])->toBe('2026-08-30')
+        ->and($days->last()['date'])->toBe('2026-10-03')
+        ->and($days)->toHaveCount(35);
+});
+
+/**
+ * On the 31st, parsing "2026-09" with the day filled in from today gave
+ * September 31st, which rolled over to October.
+ */
+it('shows the requested month when today is later than that month has days', function () {
+    $this->travelTo('2026-08-31 10:00:00');
+
+    $this->actingAs(User::factory()->create())
+        ->get(route('wot.calendar', ['month' => '2026-09']))
+        ->assertInertia(fn ($page) => $page->where('month', '2026-09'));
+});
+
+it('falls back to the current month for a month it cannot read', function () {
+    $this->actingAs(User::factory()->create())
+        ->get(route('wot.calendar', ['month' => 'not-a-month']))
+        ->assertInertia(fn ($page) => $page->where('month', '2026-09'));
+});
 
 it('marks only the last square of a run that spans days', function () {
     $user = User::factory()->create();
@@ -76,6 +103,17 @@ it('requires auth to ignore', function () {
 
     $this->post(route('wot.calendar.events.ignore', $event))->assertRedirect(route('login'));
     $this->delete(route('wot.calendar.events.unignore', $event))->assertRedirect(route('login'));
+});
+
+it('re-ignoring is idempotent', function () {
+    $user = User::factory()->create();
+    $event = WotEvent::factory()->calendar()->create();
+
+    $this->actingAs($user)->post(route('wot.calendar.events.ignore', $event));
+    $this->travel(1)->minutes();
+    $this->actingAs($user)->post(route('wot.calendar.events.ignore', $event))->assertRedirect();
+
+    $this->assertDatabaseCount('wot_event_ignores', 1);
 });
 
 it('drops an ignored event from the grid but keeps it in coming up', function () {
@@ -173,6 +211,21 @@ it('tells each day which long campaigns cover it', function () {
         // Still kept out of the squares themselves.
         ->and($days->firstWhere('date', '2026-09-30')['events'])->toBeEmpty();
 });
+
+it('lists only events longer than a week above the grid', function (string $endsAt, int $aboveGrid, int $inSquare) {
+    WotEvent::factory()->create([
+        'starts_at' => '2026-09-08 04:00:00',
+        'ends_at' => $endsAt,
+    ]);
+
+    $response = september(User::factory()->create());
+
+    expect($response->viewData('page')['props']['ongoing'])->toHaveCount($aboveGrid)
+        ->and(eventsOn($response, '2026-09-08'))->toHaveCount($inSquare);
+})->with([
+    'exactly a week stays in the grid' => ['2026-09-15 04:00:00', 0, 1],
+    'a week and a minute goes above it' => ['2026-09-15 04:01:00', 1, 0],
+]);
 
 /**
  * A campaign longer than a week is listed above the grid instead of filling

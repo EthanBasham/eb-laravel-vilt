@@ -1,6 +1,8 @@
 <?php
 
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
+use App\Models\User;
 use App\Models\WotArticle;
 use App\Models\WotEvent;
 use App\Services\WotNews\EventExtractor;
@@ -156,6 +158,35 @@ it('is idempotent — re-syncing updates rather than duplicating', function () {
         ->and(WotEvent::count())->toBe(4);
 });
 
+it('keeps an event and its ignores through a resync that reschedules it', function () {
+    config(['wotnews.categories' => ['live-streams']]);
+    $this->travelTo(Carbon::parse('2026-09-07 12:00:00', 'UTC'));
+    $rss = newsFixture('news.rss');
+    $calendar = newsFixture('calendar-article.html');
+    Http::fake([
+        '*/rss/news/*' => function () use (&$rss) {
+            return Http::response($rss);
+        },
+        '*' => function () use (&$calendar) {
+            return Http::response($calendar);
+        },
+    ]);
+    $this->artisan('wot:sync-news');
+    $user = User::factory()->create();
+    $dayTwo = WotArticle::where('url', 'like', '%token-store%')->sole()
+        ->events()->where('title', 'AMD OLS#7 Phase 1 Day 2')->sole();
+    $this->actingAs($user)->post(route('wot.calendar.events.ignore', $dayTwo));
+
+    // Republished a day later with Day 2 pushed back by a day.
+    $this->travelTo(Carbon::parse('2026-09-08 12:00:00', 'UTC'));
+    $rss = str_replace('Mon, 07 Sep 2026 09:00:00 GMT', 'Tue, 08 Sep 2026 09:00:00 GMT', $rss);
+    $calendar = str_replace('2026-09-10', '2026-09-11', $calendar);
+    $this->artisan('wot:sync-news')->assertSuccessful();
+
+    expect($dayTwo->fresh()->starts_at->utc()->toDateTimeString())->toBe('2026-09-11 16:00:00');
+    $this->assertDatabaseHas('wot_event_ignores', ['user_id' => $user->id, 'wot_event_id' => $dayTwo->id]);
+});
+
 it('does not re-parse an article whose body has not changed', function () {
     config(['wotnews.categories' => ['live-streams']]);
     Http::fake([
@@ -167,10 +198,9 @@ it('does not re-parse an article whose body has not changed', function () {
     $first = WotArticle::where('title', 'like', 'AMD OLS%')->first();
     $hash = $first->body_hash;
 
-    $this->artisan('wot:sync-news');
+    $this->artisan('wot:sync-news')->expectsOutput('No article bodies need fetching.');
 
-    expect($first->fresh()->body_hash)->toBe($hash)
-        ->and($first->fresh()->needs_body_fetch)->toBeFalse();
+    expect($first->fresh()->body_hash)->toBe($hash);
 });
 
 it('marks a disallowed article fetched so it is not retried forever', function () {
@@ -180,8 +210,7 @@ it('marks a disallowed article fetched so it is not retried forever', function (
 
     $this->artisan('wot:sync-news');
 
-    $article = WotArticle::where('url', 'like', '%wot-assistant%')->first();
+    expect(WotArticle::where('url', 'like', '%wot-assistant%')->first()->body_fetched_at)->not->toBeNull();
 
-    expect($article->body_fetched_at)->not->toBeNull()
-        ->and($article->needs_body_fetch)->toBeFalse();
+    $this->artisan('wot:sync-news')->expectsOutput('No article bodies need fetching.');
 });
