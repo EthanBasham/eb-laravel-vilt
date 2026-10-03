@@ -20,6 +20,10 @@ export default defineConfig({
                 // layouts/app.blade.php loads the first three, wot.blade.php
                 // loads the Tailwind entry plus this one.
                 'resources/js/wot/app.js',
+                // The Financial Fleet sub-project's bundle, a third island on
+                // the same terms: finance.blade.php loads the Tailwind entry
+                // plus this one, and nothing else does.
+                'resources/js/finance/app.js',
             ],
             refresh: true,
             // Downloads the font files at build time and serves them from this

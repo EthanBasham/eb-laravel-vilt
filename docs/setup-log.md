@@ -4058,3 +4058,515 @@ category and pinned-filter handlers, the optimistic callback, and the `chip` / `
 class constants now live in `News.vue`'s script.
 
 `ArticleCard` stays a separate component, because it's the part that could be reused.
+
+## 2026-10-01 — Financial Fleet sub-project (/finance), first pass
+
+A second Inertia + Vue island, built in one unattended session as a design prototype: the user
+asked for as much as possible to look at, written so the whole thing can be thrown away. Nothing
+here is committed.
+
+**What it is.** A "fleet" of assets and liabilities (`fin_holdings`), optionally itemised into
+positions, with income streams and expenses (`fin_flows`) that stand alone or hang off a holding.
+Tools read the fleet: Overview, Monthly Budget, Savings Goals, Portfolio Projector, Real Estate
+Comparator, Retirement Strategizer (Roth conversions before RMDs), Projected vs Reality, and four
+calculators. Settings has a "Load the sample fleet" button, which is the quickest way to see it.
+
+### Decisions worth knowing
+
+- **Its own middleware, not a branch in `HandleInertiaRequests`.** That one renders into `wot` and
+  shares World of Tanks props. `HandleFinanceInertiaRequests` has root view `finance` and shares
+  only `auth`, `flash` and the config lists the forms pick from.
+- **`config/inertia.php` had to learn about it.** `pages.paths` listed only `js/wot/Pages`, and
+  `ensure_pages_exist` is on, so every `assertInertia()->component()` on a finance page failed
+  until `js/finance/Pages` was added. A third island will need the same line.
+- **All arithmetic is in PHP** (`app/Services/Finance`), none in Vue. There is no JS test runner,
+  so a figure computed in a template is one nothing checks. The tools are GETs that render from
+  the query string; `useToolQuery` debounces the form and revisits with `preserveState`, so
+  typing recalculates without losing focus. Chart geometry is the only maths in the JS.
+- **Config, not enums**, for holding types, flow categories, frequencies and the tax tables
+  (`config/finance.php`). The same arrays feed the validation rules and, through shared props, the
+  selects, and there was no `app/Enums` to put enums in.
+- **Models are in `App\Models\Finance`, tables are `fin_*`, and `User` is untouched.** Ownership
+  is a `scopeOnlyOwnedBy($user)` on `OwnedModel` rather than relationships on `User`, so no shared
+  file references the sub-project. `tests/Unit/ArchTest.php` still passes: everything extends
+  `App\Models\Model`.
+- **One migration for all seven tables**, so one rollback removes them.
+- **No chart library** — dependencies were not to change without approval. `LineChart.vue` and
+  `DonutChart.vue` are hand-drawn SVG. The six series colours were run through the dataviz
+  palette validator (lightness band, chroma floor, colour-blind separation, 3:1 contrast); the
+  brand navy and gold fail as marks, so the chart blue and gold are mid-tones of them.
+- **Tax figures are tax year 2026** (Rev. Proc. 2025-32). Single and married-joint were checked
+  against the IRS release. **Head-of-household's inner bracket thresholds were typed from memory
+  and not verified** — check them before relying on that filing status.
+- **`updateOrCreate` cannot match a `date` column by string.** SQLite stores a time on it, so the
+  match misses and the insert trips the unique index. Snapshots and budget actuals look the row
+  up with `whereDate` instead. Two tests caught this; it would not have shown on Postgres.
+- **Run rate excludes flows that have not started.** `Flow::current_monthly_amount` is what the
+  cash-flow totals use; `monthly_amount` would credit a household with a pension thirteen years
+  before it starts.
+
+### Known simplifications
+
+The Retirement Strategizer is a comparison model, not a forecast: one growth rate, no tax on
+growth in the taxable bucket, Social Security taxed at a flat 85%, no state tax, IRMAA or Roth
+five-year rules. The projector does not redirect a payment once its debt clears. The base site
+has no link to `/finance` yet. None of the pages has been laid out for a phone.
+
+### Verified
+
+153 tests in `tests/Feature/Finance` (580 in the whole suite, all passing). Every page was also
+loaded in headless Chromium against a throwaway SQLite database, with the sample fleet and with an
+empty one: no console errors, and the dialogs, tool recalculation and budget entry were driven by
+hand. The dev database had the migration run against it and nothing else — no rows were written.
+
+### Removing it
+
+```
+php artisan migrate:rollback --step=1        # only while this is still the last migration;
+                                             # otherwise drop the seven fin_* tables by hand
+rm -r app/Models/Finance app/Services/Finance app/Http/Controllers/Finance \
+      app/Http/Requests/Finance database/factories/Finance tests/Feature/Finance \
+      resources/js/finance
+rm app/Http/Middleware/HandleFinanceInertiaRequests.php routes/finance.php \
+   config/finance.php resources/views/finance.blade.php \
+   database/migrations/2026_10_01_175646_create_fin_tables.php
+```
+
+Then four edits to shared files, each a single marked block:
+
+- `routes/web.php` — the `/finance` route group and its `use` line.
+- `vite.config.js` — the `resources/js/finance/app.js` input.
+- `config/inertia.php` — the `js/finance/Pages` path.
+- `resources/css/app.css` — the `--color-fin-*` tokens, between the "begin" and "end" markers.
+
+## 2026-10-01 — Finance: one Retirement type, and compound accounts
+
+The user's first refinement of the fleet's data structure, in a second migration
+(`2026_10_01_211519_restructure_retirement_holdings`).
+
+**Retirement accounts are one type with two facts.** `traditional` and `roth` were holding types,
+which left nowhere to record the plan. `type` is now `retirement`, with `plan_type` (`ira`,
+`sep_simple_ira`, `401k`, `403b`, `457b`) and `tax_type` (`traditional`, `roth`). Both lists are in
+`config/finance.php`. Nothing reads the plan yet beyond the label; it is there for the rules that
+differ by plan. `Holding::tax_treatment` now comes from `tax_type` for a retirement account, and
+`type_label` reads "Roth IRA" or "Traditional 401(k)". The request clears both columns on any
+other type, so a holding edited out of being a retirement account stops being sorted as one. HSA
+was left as its own type.
+
+The migration converts existing rows and has to guess the plan: a name containing 401, 403 or 457
+gets that plan, anything else becomes an IRA. The dev database held no retirement rows, so nothing
+was guessed there.
+
+**Compound accounts are `parent_id`, one level deep.** A retirement account can hold other
+holdings — brokerage, savings, cash or crypto, the `holds` list on the type in config. With
+children, the parent's value is their sum, its rate their value-weighted blend and its contribution
+their total; its own three figures are ignored and the edit form hides them. A child is taxed as
+its parent is. Making another type compound is giving it a `holds` list.
+
+- **Two reads of the fleet.** `Fleet::holdings()` is top-level only and is what lists and totals
+  use. `Fleet::leaves()` swaps each compound holding for its children and is what the projector and
+  the Retirement Strategizer use, since growing a balance at a rate only means something for a
+  leaf. Totalling a list that included children would count their money twice.
+- **Depth is enforced in the form request, not the schema.** A parent must be the user's own,
+  top-level, and of a type that holds the child's type; a holding with children cannot be moved
+  inside another or changed to a type that holds nothing.
+- Deleting a parent cascades to its children. Rolling the migration back drops `parent_id`, which
+  lifts children out to stand alone rather than deleting them.
+
+176 tests in `tests/Feature/Finance`, the new ones in `RetirementAccountTest.php`. Also driven in
+headless Chromium: adding a 403(b), adding an account inside the sample Roth IRA, and the
+projector and strategizer reading the nested accounts.
+
+Removal now needs `migrate:rollback --step=2` and the second migration file deleted.
+
+## 2026-10-01 — Finance: state and local tax brackets
+
+A third migration (`2026_10_01_215149_add_state_and_local_tax_to_fin_profiles`) puts state and
+local income tax on the profile: `state`, `state_deduction`, `state_brackets`, `local_name`,
+`local_deduction`, `local_brackets`. Brackets are JSON lists of `{rate, up_to}`, with `up_to` null
+on the open top bracket.
+
+- **Presets fill the form; the profile is what counts.** The user asked for Tennessee and New
+  York to auto-populate but stay editable. `config('finance.tax.states')` holds a deduction and a
+  bracket table per filing status for each, and picking a state on the settings page copies them
+  into editable fields. Nothing is looked up from config again after that: the tools tax with the
+  saved copy. So editing config changes what the form offers next, and reaches nobody who has
+  already saved. This is the opposite of the federal table, which is read from config for everyone.
+- **Tennessee** is an empty bracket list — no tax on wages or retirement income.
+  **New York** is tax year 2026, the first step of the FY2026 budget's rate cut. Single and joint
+  thresholds were checked against published tables; **head-of-household thresholds were not**, and
+  one published source still showed pre-cut rates for joint filers, so the figures want checking
+  against the state's own instructions. The high-income recapture is not modelled.
+- **New York City** is included as a local preset (`localities.nyc`), since "state and local" for
+  New York means little without it. Any other locality is typed in by hand.
+- **The tools now use it.** `TaxCalculator::totalTax()` is federal plus `stateAndLocalTax()`, and
+  the Retirement Strategizer taxes with it. The strategies still fill *federal* brackets. A profile
+  with no brackets behaves exactly as before, which is why the existing planner tests did not move.
+- **Known crudeness:** state tax is applied to the same income as federal, less the state's own
+  deduction. No state-specific exclusions — New York's exemption of Social Security and of the
+  first $20,000 of pension and IRA income is not modelled — so it will tend to overstate for a
+  retiree. The Retirement page says so.
+- Bracket order is validated in the request's `after()`: each ceiling above the last, and only
+  the final bracket open-ended, because `TaxCalculator::progressive()` walks the list trusting both.
+
+187 tests in `tests/Feature/Finance`, the new ones in `StateTaxTest.php`. Removal is now
+`migrate:rollback --step=3` and three migration files.
+
+## 2026-10-01 — Finance: a goal for the Retirement Strategizer
+
+The strategizer recommended whichever strategy left the most after tax. The user asked to choose
+what "best" means: Maximum Account Balance, Minimum Tax Burden or Minimum RMD. It is a `?goal=`
+query parameter (`balance`, `tax`, `rmd`), defined in `RothConversionPlanner::GOALS` with the
+summary figure each ranks by.
+
+- **"Maximum account balance" ranks by after-tax wealth, not the raw total.** A traditional dollar
+  still has tax owed on it, so adding the buckets at face value would put "No conversions" first
+  nearly every time just for deferring the bill. The raw total is shown as its own row
+  (`ending_balance`). This is a reading of the user's wording, flagged to them — switching it is
+  changing one `metric` key.
+- **"Minimum RMD" ranks by lifetime RMDs in total** (`total_rmd`, new), not the first or the
+  largest. Both of those are still in the table.
+- **A strategy that runs out of money cannot win**, whatever its figure — otherwise the least tax
+  is paid by the plan that goes broke. Ties on the goal's metric go to the higher after-tax
+  wealth, which is the strategy that converted less to get the same result.
+- `advantage` is now measured on the goal's own metric, always positive when the best strategy
+  beats not converting.
+
+No schema change. 196 tests in `tests/Feature/Finance`.
+
+## 2026-10-01 — Finance: two adaptive strategies for the Retirement Strategizer
+
+The three fixed strategies fill the 12%, 22% or 24% bracket every year whatever the income, so
+someone already in a higher bracket got nothing from any of them. The user asked for both fixes.
+
+- **Fill your current bracket** (`fill_current`). Each year, convert up to the top of whichever
+  federal bracket that year's income and RMD already sit in. It never raises the marginal rate.
+  Income inside the standard deduction fills the deduction (a conversion at no tax); income in
+  the open top bracket converts nothing, as there is no top to fill to.
+- **Optimised year by year** (`optimised`). A local search: start from the best fixed strategy's
+  plan, then for each year of the window try converting nothing or filling to the deduction, 10,
+  12, 22, 24 or 32%, keeping whatever ranks better by the chosen goal, and repeat for up to three
+  rounds. It cannot do worse than a fixed strategy, because it starts from the best one and only
+  accepts improvements. It is not a proof of the optimum — it stops at a plan no single-year
+  change improves. An exhaustive search is seven choices to the power of the window length.
+- **`simulate()` now takes a plan**, age => bracket to fill, instead of one ceiling. A fixed
+  strategy is the same entry for every year. Rows carry `filled_rate`, shown beside each
+  conversion in the year-by-year table.
+- **It had to be made fast.** The optimiser runs the lifetime a few hundred times, and the first
+  version took 0.7 to 4 seconds a request, on a page that recalculates as you type. Each year's
+  income (a sum over every flow), the profile's accessors, the RMD divisors and the tax tables
+  are now read once in `for()` and handed to `simulate()`; `TaxCalculator::totalTaxFor($profile)`
+  returns a closure over the decoded state brackets, since reading a JSON-cast attribute decodes
+  it on every access. Now 60 to 100 ms on the sample fleet.
+- **Known wrinkle:** a year can show "to 32%" while its Bracket column reads 35%. The plan sizes
+  the conversion to the bracket; if taxable savings cannot cover the tax, the rest is drawn from
+  traditional money, which is income too and can spill over the line.
+
+207 tests in `tests/Feature/Finance`. Strategies are appended, not inserted, so the chart colours
+of the original four did not move; all six palette slots are now in use, so a seventh strategy
+would need a different way of telling them apart.
+
+## 2026-10-01 — Finance: the fixed-bracket strategies are no longer offered
+
+The user did not want "Fill the 12% / 22% / 24% bracket" as strategies. The Retirement
+Strategizer now shows three: No conversions, Fill your current bracket, Optimised year by year.
+
+The three fixed plans are still run, as **starting points for the optimiser** (`SEED_CEILINGS`),
+alongside the two plain strategies. A local search only finds the best plan near where it starts,
+and dropping these seeds would have made the optimised plan worse for a reason invisible on the
+page. They are simulated for their summaries only and never returned.
+
+Chart colours now run green, blue, gold for the three. Tests that exercised the mechanics through
+`fill_12` and `fill_24` were rewritten against `fill_current`; still 207 in `tests/Feature/Finance`.
+
+## 2026-10-01 — Finance: the tax left to heirs is counted and shown
+
+The user's point: converting only "wins" on balance if the tax on unspent traditional money is
+counted, and the report hid that. Checking it against the code, half of it was already handled
+and half was a real gap.
+
+- **Already handled, but invisible.** The balance goal ranked by `after_tax_wealth`, which takes
+  the heirs' tax off the traditional balance. Nothing on the page said so beyond a row called
+  "Balance after tax owed" and an input among the assumptions.
+- **The gap.** The tax goal ranked by `lifetime_tax` — tax paid while alive. Converting nothing
+  scored best on it partly by leaving the largest untaxed balance behind: a deferred bill counted
+  as no bill.
+
+What changed: the summary now has `heir_tax` (ending traditional balance times the heirs' rate)
+and `total_tax` (lifetime plus heirs'). The tax goal ranks by `total_tax`. The table shows "Tax you
+pay", "Tax left for your heirs, at N%" and "Total tax, yours and theirs" as three rows, the verdict
+quotes the heirs' tax for the recommended plan and for not converting, and a callout under the
+table states the point outright. Setting the heirs' rate to 0 reproduces the old figures.
+
+The heirs' rate is one flat number (default 22%). Real inherited-IRA tax depends on the heir's own
+bracket and the ten-year withdrawal rule; none of that is modelled. 210 tests in
+`tests/Feature/Finance`.
+
+## 2026-10-02 — Finance: settings page shows IRMAA tiers; state and local tax moves under federal
+
+The settings page was rearranged at the user's request. The state and local card moved out of
+the left column to sit under the federal brackets on the right, and now reads as a static table
+in the federal card's design until **Edit** is pressed, which swaps in the same editor as before.
+Its old place on the left holds a new, read-only IRMAA card.
+
+- **Still one `useForm`.** The state card has its own Save, but both Save buttons send the whole
+  profile — `SaveProfileRequest` requires every field, so splitting the form would have meant
+  splitting the request. Cancel resets only the six state and local fields. A validation error
+  on any of them reopens the editor so the refused row is on show.
+- **The static table reads `profile`, not the form**: it shows what the tools are taxing with.
+- **IRMAA is `config('finance.irmaa')`**, 2026 tiers as `[MAGI ceiling, Part B / month, Part D
+  surcharge / month]` per filing status, sent to the page as the `irmaa` prop. **Display only** —
+  `TaxCalculator` and the Retirement Strategizer still ignore IRMAA. The standard premium
+  ($202.90), the first and last thresholds and the ends of both premium ranges were checked
+  against published 2026 tables; the three inner tiers were not (noted in the config comment).
+
+## 2026-10-02 — Finance: Projections & scenarios
+
+New area at `/finance/scenarios` (rail link under Income & expenses, and a button on that page).
+A scenario is a named set of assumptions about how each income and expense moves from this year
+to the profile's plan-to age. The list page compares scenarios; a scenario's page lists every
+flow as a row that opens onto a rate field and a year-by-year chart with a slider per year.
+
+- **A scenario copies nothing.** `fin_scenarios` holds the name; `fin_scenario_flows` holds only
+  what a scenario changes about one flow: `annual_growth_rate` (null = the flow's own) and
+  `overrides`, a JSON map of year → amount. A flow with no row is projected as it stands, so
+  editing a flow on Income & expenses edits it in every scenario, and a new flow appears in all
+  of them. A row left with no rate and no overrides is deleted rather than kept empty.
+- **Rate first, then pins.** `ScenarioBoard` gets each year from `Flow::amountInYear()` (which
+  gained an optional `$growthRate` argument), so start/end dates and the stop at retirement still
+  apply under a scenario. A pinned year then replaces that year only — it does **not** re-base
+  the years after it. That was the simple, predictable choice; "carry a pin forward" was
+  considered and left out because it tangles with part-year and retirement handling.
+- **Nominal dollars**, and the current year counts as a full year, as `amountInYear()` already did.
+- **The arithmetic stays in PHP.** The chart computes geometry only. A dragged point is itself the
+  figure (the pinned amount) and is sent as-is; the rate-driven line and all totals come back from
+  the server. Each change is a `PUT` of the flow's whole settings, with no flash message.
+- **`ScenarioFlowRow` keeps a local draft** of the rate and pins and sends that, not the props:
+  two quick drags would otherwise have the second save drop the first pin, because the props have
+  not caught up yet.
+- **Trap found in the browser:** pressing on one slider blurs the previously focused one just
+  after `pointerdown`, and a blur handler that commits unconditionally ends the new drag before it
+  moves. `YearSliderChart`'s `onBlur` only settles its own keyboard nudge, never a drag.
+- Rates are limited to ±50%, matching `SaveFlowRequest`. "Clear everything" in Settings now
+  removes scenarios too. A scenario can be copied, carrying its rates and pins.
+- **Not connected to the other tools yet**: the budget, overview and Retirement Strategizer still
+  read flows as entered, not through a scenario.
+
+Checked by driving the pages in headless Chromium against a throwaway SQLite copy (never the dev
+database): create, apply a rate to all incomes, drag, rapid consecutive drags, keyboard nudges,
+reload. Tests are in `tests/Feature/Finance/ScenarioTest.php`.
+
+## 2026-10-02 — Finance: the scenario list leads with the comparison, and draws each plan inline
+
+At the user's request the list's lifetime income / expenses / left-over columns went. In their
+place: "Against nothing adjusted" first, then left over a year as `average [leanest (yr) — best
+(yr)]` — each figure ink when positive, bold red when negative — then an inline sparkline.
+
+- `ScenarioBoard::leftOver()` supplies the average, min and max with their years (the earlier year
+  on a tie; null when there are no flows). `summary` is still sent but the list no longer reads it.
+- `CashflowSparkline` draws expenses in red and income green above them / grey below, with a red
+  wash in the gap. It does not compute where the lines cross: the income line and the band between
+  the lines are each drawn twice through two clip paths (everything above the expense line,
+  everything below it), so the split falls out of the clipping.
+
+## 2026-10-02 — Finance: the scenario list's left over leads with the total, not the average
+
+Reverses part of the entry above. The user preferred the whole-plan total to the yearly average:
+a negative total is the burden the retirement accounts would have to carry over the life of the
+projection, which an average hides. `left_over` is now `total [min (yr) — max (yr)]`; min and max
+are still single years.
+
+## 2026-10-02 — Finance: zero bands and crossing marks on the scenarios chart
+
+`LineChart` gained an opt-in `zeroBands` prop, used only by "What is left each year" on
+`/finance/scenarios`: the plot is washed green above zero and red below, and a hollow ring is
+drawn where each line crosses zero (its tooltip names the first year on the far side). Off by
+default, so every other chart is unchanged. The crossing position is interpolated along the drawn
+segment — geometry, like the rest of the chart, not a financial figure.
+
+## 2026-10-02 — Finance: scenario table figures abbreviated; ages on the projection charts
+
+- The scenarios table prints three significant figures (`$150K`, `$1.57M`) through new
+  `moneyBrief` / `moneyBriefSigned` formatters in `lib/format.js`; the exact amount is the cell's
+  `title`. `moneyShort` was left alone — it rounds to one decimal and other pages depend on that.
+- Year labels on the three projection charts (the list's, a scenario's "Year by year", and each
+  flow's slider chart) read `2040 (66)`: year, then the age reached that year, from the `age`
+  already in each total. The line charts dropped from 8 x-labels to 6 to make room.
+
+## 2026-10-02 — Finance: incomes are taxed, on the cashflow page and in every projection
+
+The user's point: nothing on Income & expenses or in Projections & scenarios took tax off. Asked
+for, and kept deliberately blunt: four tax treatments per income, and settings for the standard
+deduction, the self-employment tax rate and the long-term capital gains brackets.
+
+- **`fin_flows.taxation` replaces `is_taxable`.** Null is "not taxed"; otherwise one of
+  `config('finance.flow_taxations')`: `w2` (income tax + half the SE rate, as FICA),
+  `self_employed` (income tax + the whole SE rate), `income_only` (S-corp profit, pensions, rent),
+  `capital_gains` (the LTCG brackets). The migration backfilled existing taxable incomes from
+  their category — salary → w2, contract → self_employed, everything else → income_only — which
+  is also the default the form offers for a new income (`flow_categories.income.*.taxation`).
+  Business income defaults to `income_only` because the user described it as S-corp profit.
+- **Three new profile columns.** `standard_deduction` and `ltcg_brackets` are nullable, and null
+  means "the built-in figure for the filing status", so they keep following a change of filing
+  status until someone pins their own. `se_tax_rate` defaults to 15.3.
+- **`TaxCalculator::flowTaxFor()` is the one place the rules live.** Ordinary income less the
+  deduction through the federal brackets; capital gains stacked on top through the LTCG brackets,
+  after whatever deduction ordinary income left unused; payroll tax flat on the whole amount;
+  state and local tax on ordinary + gains. **Not modelled:** the Social Security wage base, the
+  92.35% SE adjustment and the half-SE deduction, additional Medicare tax, NIIT, QBI, credits.
+- **`TaxCalculator::forProfile()`** returns a clone carrying the profile's own deduction, for the
+  methods that are only told a filing status. `RothConversionPlanner` swaps its calculator for
+  that clone at the top of `for()`, so the Retirement Strategizer honours a custom deduction too.
+  It still taxes everything as ordinary income — payroll tax and the LTCG brackets are **not** in
+  the strategizer.
+- **Where the tax shows.** `Fleet::cashflow()` takes the monthly tax
+  (`TaxCalculator::monthlyRunRateTax()`: the current run rate annualised, taxed, divided by 12)
+  and reports `taxes`, `tax_rate`, and an after-tax `net` and savings rate — on Income & expenses
+  and the Overview. `ScenarioBoard` taxes each projected year as a whole, on tables indexed by the
+  profile's inflation rate, and adds `taxes` and `take_home` to every year; `net`, "left over",
+  the comparison against the baseline and the list's sparkline are all after tax. A flow's own
+  row stays gross — tax belongs to the year's income together, not to one flow.
+- The 2026 LTCG thresholds in config were typed from memory and are flagged as unchecked there.
+- Existing tests whose totals moved were either given the new figure with the arithmetic in a
+  comment, or had their income marked untaxed where tax was not the point of the test.
+
+## 2026-10-02 — Finance: each income has a taxed portion
+
+`fin_flows.taxed_portion` (percent, default 100) sits beside "Taxed as" on the income form, for
+cases like Social Security where only part of an income is taxable. It replaces the fixed
+`'taxable' => 0.85` that config applied to every Social Security income, which is gone:
+`Flow::taxable_share` is now `taxed_portion / 100` for any income with a treatment.
+
+- **Existing rows were left at 100**, including Social Security, at the user's direction — the
+  real share depends on the household's other income, so it is a setting they own. This raises
+  the taxable income the Retirement Strategizer sees for an existing Social Security flow from
+  85% to 100% until its portion is set.
+- The sample fleet's Social Security is created at 85 so the sample behaves as before.
+- The field only shows when the income has a tax treatment; an expense carries the default.
+
+## 2026-10-02 — Finance: a scenario sets how fast its tax tables rise
+
+`fin_scenarios.bracket_inflation_rate` (nullable, −5 to 15): one flat yearly rate applied to every
+bracket threshold and the standard deduction — federal, capital gains, state and local — when a
+scenario's years are taxed. Null follows the profile's inflation rate, which is what projections
+used before. Set from the "Year by year" card on a scenario's page; copied with the scenario.
+
+- It only moves the tax tables. Incomes and expenses still grow at their own rates.
+- **The baseline ("nothing adjusted") always uses the profile's rate**, so a scenario's own rate
+  shows up in "against nothing adjusted" like any other adjustment.
+- The control saves through the existing `PATCH /scenarios/{scenario}`, sending the name and
+  description along. The request treats the rate as optional, so the list page's rename dialog,
+  which does not send it, leaves it alone; an explicit null hands it back to the profile.
+
+## 2026-10-02 — Finance: the Retirement Strategizer rebuilt around saved conversion strategies
+
+At the user's request the strategizer is no longer one fixed dashboard that recommends a plan. It
+is a tabbed page (`/finance/retirement/{tab?}`; "Roth conversions" plus a placeholder "More to
+come" tab, `RetirementMore`) and the conversions tab compares strategies the user builds.
+
+- **`fin_conversion_strategies`** (`ConversionStrategy`): a kind — `none`, `lump` (the whole
+  balance in one year), `even` (equal parts across a window, 65–72 by default), `fill_bracket`
+  (to the top of a named bracket each year, or of whichever bracket the income is in) — plus the
+  projection it builds on (`scenario_id`, null = flows as entered), an inflation rate, a growth
+  rate, and the heir (a charity, or a person with an income). Nearly everything is nullable and
+  null means a fallback: inflation → the projection's bracket rate → the profile's; growth → the
+  fleet's weighted rate; ages → the kind's usual window, never before today.
+- **`ConversionBoard` is the new engine.** Per year: the projection's income and expenses
+  (`ScenarioBoard::yearly()`, newly public), plus RMD, conversion and any traditional withdrawal
+  as ordinary income, taxed whole by `TaxCalculator::flowTaxFor()` — so payroll tax, the LTCG
+  brackets and state tax are all in, which the old planner did not have. Cash-flow rules were
+  carried over from the old planner: while working only the conversion's extra tax (and IRMAA)
+  must be found; once retired, expenses + tax + IRMAA are met from income and RMD, then taxable,
+  traditional, Roth. Spending now comes from the projection's expenses, not a separate input.
+- **IRMAA is modelled**: from 65, on the income of two years earlier, per person (two on a joint
+  return — the spouse is assumed the same age), tiers rising with inflation.
+- **Heirs**: an inherited traditional balance drawn in ten equal parts on top of the heir's own
+  income, single filer, federal only, built-in deduction. A charity pays nothing. This replaces
+  the old flat "heirs' tax rate".
+- **Everything on the page is in today's dollars**, deflated by the strategy's own inflation
+  rate. That is what makes a tax bracket or an IRMAA tier one flat line: `ThresholdChart` draws a
+  year's income against those lines, with the conversion's share filled in gold.
+- **Dropped from the old tool**: the goal picker, the "recommended" verdict and the per-year
+  optimiser. The user asked to compare strategies they build, not to be handed one.
+- **`RothConversionPlanner` and `tests/Feature/Finance/RothConversionPlannerTest.php` are still in
+  the repo but nothing routes to the planner any more.** They were left because tests are not to
+  be deleted without approval; two other test files (`StateTaxTest`, `RetirementAccountTest`) also
+  call the planner directly. Removing all of it is a follow-up for the user to approve.
+- JS trap hit while building: a `const window = …` in a `<script setup>` shadows the global, and
+  `window.confirm` in the same file then throws. Named `convertsWhen` / `ages` instead.
+
+## 2026-10-02 — Finance: a fifth conversion strategy that respects IRMAA
+
+`fill_bracket_irmaa` ("Fill the tax or IRMAA bracket"): each year convert up to the top of the tax
+bracket — the one the income is in, or a named one — or the top of the IRMAA tier the income is
+already in, whichever comes first. Added to config, so the form and "one of each kind" pick it up.
+
+- The IRMAA ceiling only applies from 63: a premium is set by the income of two years before, so
+  earlier income cannot reach one, and capping it would only convert less for nothing.
+- "The tier already in" is read from the year's income *before* the conversion, RMD included. So
+  it never lets a conversion cross a line, but it cannot stop an RMD that is itself over one —
+  such a year still pays IRMAA, and the strategy then fills to the top of that higher tier.
+- It guards the conversion only. A traditional withdrawal later the same year, to cover
+  spending, can still push income over a line.
+- Kinds that fill a bracket are now marked `fills` in config; `ConversionBoard::window()` and the
+  form read that instead of naming `fill_bracket`.
+
+## 2026-10-02 — Finance: a strategy says where its conversion tax is paid from
+
+Two columns on `fin_conversion_strategies`: `tax_payment` (`outside`, the default and the old
+behaviour; `conversion`; `percent`; `flat` — config `finance.conversion_tax_payments`) and
+`tax_outside_amount`, which the two split modes read as how much comes from **outside** the
+conversion — a percentage of the conversion's tax, or dollars a year in today's money — with the
+remainder withheld from the converted money.
+
+- "The conversion's tax" is the tax the year owes with the conversion less the tax it would owe
+  without it, worked out before any spending withdrawal. Each row now carries `conversion_tax` and
+  `conversion_tax_withheld`; the year-by-year Tax column prints the first in parentheses.
+- Withholding changes only where the tax is found and how much reaches the Roth: the whole
+  conversion still leaves traditional and is still income. The 10% penalty on money withheld
+  before 59½ is **not** modelled.
+- The split is expressed from the outside side on purpose ("I can spare $10,000 a year from
+  savings") — the user asked for a percentage or a flat amount without saying which side.
+
+## 2026-10-02 — Finance: the old RothConversionPlanner removed
+
+At the user's request, `app/Services/Finance/RothConversionPlanner.php` and
+`tests/Feature/Finance/RothConversionPlannerTest.php` are deleted; `ConversionBoard` is the only
+conversion engine. Coverage that was about something other than the old planner was kept:
+
+- `StateTaxTest` — "counts state tax in the retirement strategizer" now runs a `fill_bracket`
+  strategy through `ConversionBoard` (same figures: $16,100 converted, $805 of state tax).
+- `RetirementAccountTest` — the compound-account balances check reads `ConversionBoard`'s
+  `balances`.
+- The "standard deduction is the top of a 0% bracket" check, which only exercised
+  `TaxCalculator`, moved to `TaxCalculatorTest`.
+
+## 2026-10-02 — Finance: Monte Carlo for the conversion strategies
+
+The user's choices: a simple average-plus-volatility return model, random inflation as well, one
+page-wide setting applied to every strategy, and a run count they set, with a background job when
+it is too many for a request.
+
+- **Engine.** `ConversionBoard::simulate()` is public and takes an optional `$path`: a return and
+  an inflation rate for each year. The price index is now compounded year by year instead of
+  `inflation ** years`, which is the same thing for a steady rate. `context()` is split out of
+  `for()` so a run can simulate many times over one context.
+- **`ConversionMonteCarlo`** draws standard normal scores once per run (Box–Muller on a seeded
+  `Random\Randomizer(new Mt19937($seed))`) and every strategy scales the same scores by its own
+  growth and inflation rates and the two volatility settings — common random numbers, so
+  differences between strategies are not luck. Returns floor at −95%, inflation at −5%. Reported:
+  how often the money lasts, how often each beats the first no-conversion strategy on what is left
+  after heirs' tax, 10th/50th/90th percentiles of that, of tax with heirs and of IRMAA, and a
+  yearly percentile band of the total balance (new row field `total_balance`).
+- **Measured cost:** ~0.8 ms per simulation of a 41-year plan, so `finance.monte_carlo.page_limit`
+  is 1,500 simulations (runs × strategies), about 1.2 s. The user guessed 50–100 runs; with four
+  strategies a page load can actually do ~375.
+- **Two paths.** Within the limit, the results are worked out on every page load as a deferred
+  Inertia prop and never stored — so a GET writes nothing. Over it, `RunConversionMonteCarlo`
+  (new `app/Jobs/Finance/`, `ShouldBeUnique` per user) stores results in `fin_monte_carlo_runs`
+  with a sha256 of everything the run read; the page shows them dimmed with a "run again" prompt
+  once that hash stops matching, and polls (`usePoll`, `only: ['monte_carlo']`) while a run is
+  queued or running. Saving settings over the limit queues a run; "New markets" bumps the seed.
+- **Needs a queue worker** for the background path. `composer run dev` already runs
+  `queue:listen` (`QUEUE_CONNECTION=database`); production will need one too.
+- Normal draws understate crashes and ignore bad years clustering; the page says so.

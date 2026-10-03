@@ -24,6 +24,7 @@ return [
          */
         'paths' => [
             resource_path('js/wot/Pages'),
+            resource_path('js/finance/Pages'),
         ],
 
         'extensions' => [

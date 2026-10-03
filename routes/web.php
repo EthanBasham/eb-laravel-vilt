@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use App\Http\Middleware\HandleFinanceInertiaRequests;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\PipelineCheckController;
@@ -34,5 +35,16 @@ Route::middleware(['auth', HandleInertiaRequests::class])
     ->prefix('wot')
     ->name('wot.')
     ->group(base_path('routes/wot.php'));
+
+/*
+ * The Financial Fleet sub-project — a second Inertia + Vue island, with its own
+ * middleware, root view (finance.blade.php) and Vite entry
+ * (resources/js/finance/app.js). Self-contained: see the 2026-10-01 entry in
+ * docs/setup-log.md for the list of everything it added and how to remove it.
+ */
+Route::middleware(['auth', HandleFinanceInertiaRequests::class])
+    ->prefix('finance')
+    ->name('finance.')
+    ->group(base_path('routes/finance.php'));
 
 require __DIR__.'/auth.php';

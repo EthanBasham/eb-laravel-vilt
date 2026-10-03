@@ -89,6 +89,75 @@
     --color-wot-good: #49c7a5;
     --color-wot-bad: #cc4933;
 
+    /*
+     * >>> Financial Fleet sub-project palette (/finance) — begin.
+     *
+     * Only referenced from resources/js/finance/**, and Tailwind v4 emits a
+     * theme variable only when a scanned template uses it, so none of this
+     * reaches the Blade site or the World of Tanks bundle. Delete from this
+     * marker to the matching "end" to remove it.
+     *
+     * A light theme built on one green, rgb(63, 137, 62), which is
+     * --color-fin-green-500. Creams and soft white are the surfaces, charcoal
+     * and near-black the ink and the navigation rail, and gold and navy the two
+     * accents: gold for the thing to look at, navy for the second voice.
+     */
+    --color-fin-green-50: #f2f8f1;
+    --color-fin-green-100: #deeedc;
+    --color-fin-green-200: #bcdcb9;
+    --color-fin-green-300: #8fc38b;
+    --color-fin-green-400: #62a760;
+    --color-fin-green-500: #3f893e;
+    --color-fin-green-600: #326f32;
+    --color-fin-green-700: #29592a;
+    --color-fin-green-800: #234724;
+    --color-fin-green-900: #1c391e;
+
+    --color-fin-white: #fefdfb;
+    --color-fin-cream-50: #faf8f2;
+    --color-fin-cream-100: #f4f0e4;
+    --color-fin-cream-200: #ebe5d3;
+    --color-fin-cream-300: #ddd4bb;
+
+    --color-fin-black: #121513;
+    --color-fin-charcoal: #232825;
+    --color-fin-charcoal-soft: #343a36;
+
+    --color-fin-grey-100: #eef0ed;
+    --color-fin-grey-200: #e0e4df;
+    --color-fin-grey-300: #c8cec8;
+    --color-fin-grey-400: #9aa39c;
+    --color-fin-grey-500: #6c766f;
+    --color-fin-grey-600: #505853;
+
+    --color-fin-gold-100: #fbf2d3;
+    --color-fin-gold-300: #efcf73;
+    --color-fin-gold-400: #e2b33a;
+    --color-fin-gold-600: #a67a10;
+
+    --color-fin-navy-100: #e1e9f3;
+    --color-fin-navy-500: #2e6fb5;
+    --color-fin-navy-700: #1f4470;
+    --color-fin-navy-900: #14273f;
+
+    --color-fin-red-100: #f9e6e1;
+    --color-fin-red-600: #b3432d;
+
+    /*
+     * Chart series, in the fixed order they are assigned. Checked with the
+     * dataviz palette validator against a white surface: lightness band,
+     * chroma floor, colour-blind separation and 3:1 contrast all pass. The
+     * brand navy and gold are too dark and too pale respectively to pass as
+     * marks, which is why slots 2 and 3 are their mid-tones.
+     */
+    --color-fin-chart-1: #3f893e;
+    --color-fin-chart-2: #2e6fb5;
+    --color-fin-chart-3: #b87f0e;
+    --color-fin-chart-4: #8a5aa8;
+    --color-fin-chart-5: #c8553a;
+    --color-fin-chart-6: #1f9a9a;
+    /* <<< Financial Fleet sub-project palette — end. */
+
     /* Warm accent, used sparingly for highlights and "in progress" states. */
     --color-accent-100: oklch(0.94 0.05 75);
     --color-accent-400: oklch(0.79 0.14 75);
