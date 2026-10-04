@@ -37,6 +37,12 @@ class ConversionStrategyFactory extends Factory
      *
      * @param  array<string, mixed>  $settings
      */
+    /** Waiting in the holding area rather than being compared. */
+    public function held(): static
+    {
+        return $this->state(['is_compared' => false]);
+    }
+
     public function ofKind(string $kind, array $settings = []): static
     {
         return $this->state(['kind' => $kind, ...$settings]);

@@ -7,18 +7,21 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use App\Models\User;
 use Database\Factories\Finance\ConversionStrategyFactory;
 
 /**
  * One way of moving traditional money to Roth, and the assumptions it is run
  * under. The Retirement Strategizer runs each and sets them side by side.
  *
- * It holds settings only; the figures are worked out by ConversionBoard.
+ * It holds settings only; the figures are worked out by ConversionBoard —
+ * and only for the strategies being compared (`is_compared`). The rest wait
+ * in the holding area, costing the page nothing.
  *
  * @property-read string $kind_label
  * @property-read array<string, mixed> $props
  */
-#[Fillable(['user_id', 'scenario_id', 'name', 'kind', 'convert_from_age', 'convert_until_age', 'fill_rate', 'conversion_amount', 'tax_payment', 'tax_outside_amount', 'inflation_rate', 'growth_rate', 'heir_is_charity', 'heir_income'])]
+#[Fillable(['user_id', 'scenario_id', 'name', 'kind', 'is_compared', 'convert_from_age', 'convert_until_age', 'fill_rate', 'conversion_amount', 'tax_payment', 'tax_outside_amount', 'inflation_rate', 'growth_rate', 'heir_is_charity', 'heir_income'])]
 class ConversionStrategy extends OwnedModel
 {
     /** @use HasFactory<ConversionStrategyFactory> */
@@ -33,6 +36,7 @@ class ConversionStrategy extends OwnedModel
      */
     protected $attributes = [
         'tax_payment' => 'outside',
+        'is_compared' => true,
     ];
 
     /**
@@ -43,6 +47,7 @@ class ConversionStrategy extends OwnedModel
     protected function casts(): array
     {
         return [
+            'is_compared' => 'boolean',
             'convert_from_age' => 'integer',
             'convert_until_age' => 'integer',
             'fill_rate' => 'float',
@@ -53,6 +58,15 @@ class ConversionStrategy extends OwnedModel
             'heir_is_charity' => 'boolean',
             'heir_income' => 'float',
         ];
+    }
+
+    /**
+     * Whether a user's comparison still has room for a newly made strategy.
+     * Past that it goes to the holding area, to be brought in by hand.
+     */
+    public static function hasRoomToCompare(User $user): bool
+    {
+        return static::query()->onlyOwnedBy($user)->onlyCompared()->count() < (int) config('finance.conversion_comparison.default');
     }
 
     protected function kindLabel(): Attribute
@@ -68,6 +82,7 @@ class ConversionStrategy extends OwnedModel
             'name' => $this->name,
             'kind' => $this->kind,
             'kind_label' => $this->kind_label,
+            'is_compared' => $this->is_compared,
             'scenario_id' => $this->scenario_id,
             'convert_from_age' => $this->convert_from_age,
             'convert_until_age' => $this->convert_until_age,
@@ -83,6 +98,18 @@ class ConversionStrategy extends OwnedModel
     }
 
     // Scopes
+
+    /** The strategies set side by side: the only ones the page simulates. */
+    public function scopeOnlyCompared(Builder $query): Builder
+    {
+        return $query->where('is_compared', true);
+    }
+
+    /** The strategies waiting in the holding area. */
+    public function scopeNotCompared(Builder $query): Builder
+    {
+        return $query->where('is_compared', false);
+    }
 
     /** As added, so a new strategy takes the next column and the next colour. */
     public function scopeInDefaultOrder(Builder $query): Builder

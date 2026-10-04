@@ -1,6 +1,6 @@
 <script setup>
 import { Deferred, router } from '@inertiajs/vue3';
-import { IconCopy, IconPencil, IconPlus, IconSparkles, IconTrash } from '@tabler/icons-vue';
+import { IconArchive, IconCopy, IconPencil, IconPlus, IconSparkles } from '@tabler/icons-vue';
 import { computed, ref, watch } from 'vue';
 import Card from '../Components/Card.vue';
 import ConversionStrategyForm from '../Components/ConversionStrategyForm.vue';
@@ -11,6 +11,7 @@ import LineChart from '../Components/LineChart.vue';
 import MonteCarloCard from '../Components/MonteCarloCard.vue';
 import RetirementTabs from '../Components/RetirementTabs.vue';
 import StatTile from '../Components/StatTile.vue';
+import StrategyHoldingArea from '../Components/StrategyHoldingArea.vue';
 import ThresholdChart from '../Components/ThresholdChart.vue';
 import { chartColors, money, moneyBrief } from '../lib/format';
 
@@ -37,6 +38,10 @@ const props = defineProps({
     brackets: Array,
     irmaa_tiers: Array,
     strategies: Array,
+    // The holding area: strategies not being compared, as settings alone.
+    held: Array,
+    // { count, default, max }: how many are compared, and how many can be.
+    comparison: Object,
     // Deferred: undefined until the follow-up request brings it.
     monte_carlo: Object,
 });
@@ -45,14 +50,18 @@ const form = ref({ open: false, strategy: null });
 const build = () => { form.value = { open: true, strategy: null }; };
 const edit = (strategy) => { form.value = { open: true, strategy }; };
 
-const addStarters = () => router.post('/finance/retirement/strategies/starters', {}, { preserveScroll: true });
-const duplicate = (strategy) => router.post(`/finance/retirement/strategies/${strategy.id}/duplicate`, {}, { preserveScroll: true });
-
-const remove = (strategy) => {
-    if (window.confirm(`Remove ${strategy.name}?`)) {
-        router.delete(`/finance/retirement/strategies/${strategy.id}`, { preserveScroll: true });
+// One of each kind for every saved projection — or, with none saved, one set
+// on the income and expenses as entered.
+const addStarters = () => router.post('/finance/retirement/strategies/starters', { every_projection: true }, { preserveScroll: true });
+const hold = (strategy) => router.delete(`/finance/retirement/strategies/${strategy.id}/compare`, { preserveScroll: true });
+// Sends everything being compared to the holding area. Nothing is removed.
+const clearComparison = () => {
+    if (window.confirm(`Clear the comparison? The ${props.strategies.length} being compared move to the holding area; none is removed.`)) {
+        router.delete('/finance/retirement/strategies/comparison', { preserveScroll: true });
     }
 };
+
+const duplicate = (strategy) => router.post(`/finance/retirement/strategies/${strategy.id}/duplicate`, {}, { preserveScroll: true });
 
 const colorOf = (index) => chartColors[index % chartColors.length];
 const colorOfStrategy = (strategy) => colorOf(props.strategies.findIndex((candidate) => candidate.id === strategy.id));
@@ -190,13 +199,25 @@ const convertsWhen = (strategy) => {
                 There is no traditional balance in your fleet, so there is nothing to convert and every strategy will come out the same.
             </p>
 
-            <EmptyState v-if="!strategies.length" title="No strategies yet" body="A strategy is a way of converting, the projection it runs on, an inflation rate, and who inherits. Build a few and they are set side by side.">
-                <button type="button" class="fin-btn fin-btn-primary" @click="addStarters"><IconSparkles :size="16" /> Start with one of each kind</button>
+            <EmptyState v-if="!strategies.length && !held.length" title="No strategies yet" :body="`A strategy is a way of converting, the projection it runs on, an inflation rate, and who inherits. Build a few and they are set side by side.${scenarios.length > 1 ? ' Starting with a set for each projection compares the first six and puts the rest in the holding area.' : ''}`">
+                <button type="button" class="fin-btn fin-btn-primary" @click="addStarters"><IconSparkles :size="16" /> {{ scenarios.length ? `Start with one of each kind for each projection (${scenarios.length})` : 'Start with one of each kind' }}</button>
                 <button type="button" class="fin-btn fin-btn-quiet" @click="build"><IconPlus :size="16" /> Build one</button>
             </EmptyState>
 
             <template v-else>
-                <Card title="Side by side" subtitle="Over the whole plan, in today's dollars. A green figure is the best in its row." flush>
+                <StrategyHoldingArea :held="held" :kinds="kinds" :scenarios="scenarios" :comparison="comparison" @build="build" @edit="edit" />
+
+                <p v-if="!strategies.length" class="rounded-xl border border-fin-gold-300 bg-fin-gold-100 px-4 py-3 text-sm text-fin-charcoal">
+                    Nothing is being compared. Add a strategy to the comparison from the holding area above.
+                </p>
+            </template>
+
+            <template v-if="strategies.length">
+                <Card title="Side by side" :subtitle="`Over the whole plan, in today's dollars. A green figure is the best in its row. ${comparison.count} of at most ${comparison.max} being compared.`" flush>
+                    <template #actions>
+                        <button type="button" class="fin-btn fin-btn-quiet" @click="clearComparison"><IconArchive :size="16" /> Clear Comparison</button>
+                    </template>
+
                     <div class="overflow-x-auto">
                         <table class="w-full text-sm">
                             <thead>
@@ -213,7 +234,7 @@ const convertsWhen = (strategy) => {
                                         <span class="mt-1 flex justify-end">
                                             <button type="button" class="fin-icon-btn" :aria-label="`Edit ${strategy.name}`" @click="edit(strategy)"><IconPencil :size="15" /></button>
                                             <button type="button" class="fin-icon-btn" :aria-label="`Copy ${strategy.name}`" @click="duplicate(strategy)"><IconCopy :size="15" /></button>
-                                            <button type="button" class="fin-icon-btn" :aria-label="`Remove ${strategy.name}`" @click="remove(strategy)"><IconTrash :size="15" /></button>
+                                            <button type="button" class="fin-icon-btn" :aria-label="`Move ${strategy.name} to the holding area`" title="Move to the holding area" @click="hold(strategy)"><IconArchive :size="15" /></button>
                                         </span>
                                     </th>
                                 </tr>

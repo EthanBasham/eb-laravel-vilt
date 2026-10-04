@@ -88,7 +88,7 @@ class ConversionMonteCarlo
      */
     public function needsBackground(User $user, MonteCarloRun $settings): bool
     {
-        return $settings->runs * ConversionStrategy::query()->onlyOwnedBy($user)->count() > (int) config('finance.monte_carlo.page_limit');
+        return $settings->runs * ConversionStrategy::query()->onlyOwnedBy($user)->onlyCompared()->count() > (int) config('finance.monte_carlo.page_limit');
     }
 
     /**

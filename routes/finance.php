@@ -111,6 +111,14 @@ Route::post('/retirement/withdrawals/strategies/{strategy}/duplicate', [Withdraw
 Route::delete('/retirement/withdrawals/strategies/{strategy}', [WithdrawalStrategyController::class, 'destroy'])->name('retirement.withdrawals.destroy');
 Route::post('/retirement/strategies', [ConversionStrategyController::class, 'store'])->name('retirement.strategies.store');
 Route::post('/retirement/strategies/starters', [ConversionStrategyController::class, 'storeStarters'])->name('retirement.strategies.starters');
+// Which strategies are set side by side. On the comparison as a whole, PUT
+// replaces it and DELETE empties it; the other two move one strategy in or
+// out. The whole-comparison routes come before the wildcard ones so that
+// "comparison" is not read as a strategy's id.
+Route::put('/retirement/strategies/comparison', [ConversionStrategyController::class, 'replaceComparison'])->name('retirement.strategies.comparison');
+Route::delete('/retirement/strategies/comparison', [ConversionStrategyController::class, 'clearComparison'])->name('retirement.strategies.comparison.clear');
+Route::post('/retirement/strategies/{strategy}/compare', [ConversionStrategyController::class, 'compare'])->name('retirement.strategies.compare');
+Route::delete('/retirement/strategies/{strategy}/compare', [ConversionStrategyController::class, 'hold'])->name('retirement.strategies.hold');
 Route::patch('/retirement/strategies/{strategy}', [ConversionStrategyController::class, 'update'])->name('retirement.strategies.update');
 Route::post('/retirement/strategies/{strategy}/duplicate', [ConversionStrategyController::class, 'duplicate'])->name('retirement.strategies.duplicate');
 Route::delete('/retirement/strategies/{strategy}', [ConversionStrategyController::class, 'destroy'])->name('retirement.strategies.destroy');

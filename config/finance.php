@@ -452,6 +452,15 @@ return [
     'conversion_fill_rates' => [10, 12, 22, 24, 32, 35],
 
     /*
+     * How many strategies are set side by side. Only compared strategies are
+     * simulated when the page loads; the rest wait in the holding area.
+     * `default` is how many are compared before a newly made one goes to the
+     * holding area instead; `max` is the most the comparison will take when
+     * strategies are added to it by hand.
+     */
+    'conversion_comparison' => ['default' => 6, 'max' => 12],
+
+    /*
      * Where the tax on a conversion is paid from. `outside` is the year's own
      * surplus — income less expenses, other tax and IRMAA — and caps the
      * conversion at what that surplus can pay the tax on; the whole of what

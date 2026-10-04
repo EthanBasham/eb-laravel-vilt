@@ -4985,3 +4985,41 @@ tipped it a hair over — into the top tier for 2034–2036. `ConversionBoard::I
 today's dollars) now keeps the conversion that far below the line, at the user's request; income
 already inside the margin converts nothing. In a Monte Carlo market realised inflation differs
 from the strategy's, so the margin narrows the risk there rather than removing it.
+
+## 2026-10-03 — Finance: a holding area for conversion strategies
+
+At the user's request, so many strategies can be built on different projections while only a few
+are compared — and so the page only pays for the few. Everything up to this point was committed
+to `main` first (bdf7433); this entry's work is uncommitted.
+
+- New column `fin_conversion_strategies.is_compared` (migration
+  `add_is_compared_to_fin_conversion_strategies`; existing rows past each user's sixth are moved
+  to the holding area). `ConversionBoard::context()` loads only compared strategies, so neither
+  the page nor the Monte Carlo runs simulate a held one; held strategies reach the page as
+  settings alone (`held`).
+- Config `finance.conversion_comparison`: `default` 6 is how many are compared before a newly
+  made strategy (built, copied or a starter) goes to the holding area instead; `max` 12 is the
+  most the comparison takes when strategies are brought in by hand. 12 is a guess at where the
+  table and the six chart colours stop being readable — raise it in config if wanted.
+- Routes: `PUT retirement/strategies/comparison` replaces the whole comparison;
+  `POST|DELETE retirement/strategies/{strategy}/compare` moves one in or out.
+- `StrategyHoldingArea.vue` sits above Side by side: cards with edit, copy, add to comparison
+  and remove; filters by projection and by strategy type; "replace comparison" with everything
+  filtered or with the picked cards. Picking works two ways, a checkbox and Ctrl/Cmd-click, both
+  on purpose — the user means to keep one after trying them. Each compared strategy's column
+  gained a "move to the holding area" button.
+
+**One of each kind, per projection** (2026-10-04, uncommitted). `POST retirement/strategies/starters`
+now takes `scenario_id` (one set on that projection; null or absent is "as entered") or
+`every_projection` (a set for each saved projection, or one as-entered set when none is saved —
+"as entered" is not itself counted as a projection once any are saved). Each is named
+"{kind} · {projection}" and placed by the usual rule, so the first six are compared and the rest
+held. The holding area has a "One of each type for [projection]" control; the empty state's
+button became "Start with one of each kind for each projection".
+
+**Follow-ups on the holding area** (2026-10-04). Strategies can no longer be deleted from Side
+by side — only from a holding-area card — so a column's buttons are edit, copy and move to the
+holding area. Side by side has a "Clear Comparison" button (`DELETE
+retirement/strategies/comparison`), which holds every compared strategy and removes none. The
+projection label on a holding-area card takes the colour that projection has on the Projections
+& scenarios page (the chart colour at its position in the default order; "as entered" is grey).

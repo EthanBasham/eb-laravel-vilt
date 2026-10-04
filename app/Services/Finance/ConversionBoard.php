@@ -15,6 +15,9 @@ use Closure;
  * traditional money to Roth, run over the same lifetime so they can be set
  * side by side.
  *
+ * Only the strategies being compared are run. The rest sit in the holding
+ * area as settings alone (`held`), so building many costs the page nothing.
+ *
  * A strategy chooses four things: how to convert (ConversionStrategy::kind),
  * which projection of income and expenses to build on, how fast prices and the
  * tax tables rise, and who inherits. Everything else is the household's own.
@@ -142,6 +145,14 @@ class ConversionBoard
                 ...$strategy->props,
                 ...$this->simulate($strategy, $world, $years[$strategy->id]),
             ])->values(),
+            // The holding area: settings only, nothing worked out.
+            'held' => ConversionStrategy::query()->onlyOwnedBy($user)->notCompared()->inDefaultOrder()->with('scenario')->get()
+                ->map(fn (ConversionStrategy $strategy): array => [...$strategy->props, 'scenario_name' => $strategy->scenario?->name])
+                ->values(),
+            'comparison' => [
+                'count' => $strategies->count(),
+                ...config('finance.conversion_comparison'),
+            ],
         ];
     }
 
@@ -234,7 +245,9 @@ class ConversionBoard
         $profile = $world['profile'];
         $flows = $this->fleet->flows($user);
 
-        $strategies = ConversionStrategy::query()->onlyOwnedBy($user)->inDefaultOrder()->with('scenario.scenarioFlows')->get();
+        // Only the strategies being compared: the ones in the holding area
+        // are never simulated, which is what lets there be many of them.
+        $strategies = ConversionStrategy::query()->onlyOwnedBy($user)->onlyCompared()->inDefaultOrder()->with('scenario.scenarioFlows')->get();
 
         // Each projection is worked out once, however many strategies build
         // on it. 0 is the flows as entered.
