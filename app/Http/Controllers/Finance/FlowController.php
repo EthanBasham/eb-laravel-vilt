@@ -9,6 +9,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Finance\SaveFlowRequest;
 use App\Models\Finance\Flow;
 use App\Models\Finance\Profile;
+use App\Models\Finance\Transfer;
 use App\Services\Finance\Fleet;
 use App\Services\Finance\TaxCalculator;
 use Inertia\Inertia;
@@ -37,12 +38,13 @@ class FlowController extends Controller
             'income_by_category' => $byCategory('income'),
             'expenses_by_category' => $byCategory('expense'),
             'holdings' => $fleet->holdings($request->user())->map->only(['id', 'name'])->values(),
+            'transfers' => Transfer::query()->onlyOwnedBy($request->user())->inDefaultOrder()->with(['from.parent', 'to.parent'])->get()->map->props->values(),
         ]);
     }
 
     public function store(SaveFlowRequest $request): RedirectResponse
     {
-        $flow = Flow::query()->create([...$request->validated(), 'user_id' => $request->user()->id]);
+        $flow = Flow::query()->create([...$request->flowAttributes(), 'user_id' => $request->user()->id]);
 
         return back(fallback: route('finance.cashflow'))->with('success', "{$flow->name} added.");
     }
@@ -51,7 +53,7 @@ class FlowController extends Controller
     {
         abort_unless($flow->isOwnedBy($request->user()), 404);
 
-        $flow->update($request->validated());
+        $flow->update($request->flowAttributes());
 
         return back(fallback: route('finance.cashflow'))->with('success', "{$flow->name} updated.");
     }
@@ -60,6 +62,7 @@ class FlowController extends Controller
     {
         abort_unless($flow->isOwnedBy($request->user()), 404);
 
+        // Its items go with it, by cascade.
         $flow->delete();
 
         return back(fallback: route('finance.cashflow'))->with('success', "{$flow->name} removed.");

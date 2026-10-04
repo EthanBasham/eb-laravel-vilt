@@ -44,6 +44,26 @@ function monteCarlo(User $user, array $settings = []): array
 // The runs
 
 /**
+ * Expenses are projected at the average inflation. A market whose prices run
+ * at 10% a year instead carries them up with it, so in today's dollars they
+ * hold still rather than shrinking.
+ */
+it('moves the projected expenses with a market\'s own inflation', function () {
+    $user = monteCarloRetiree();
+    Flow::factory()->create(['user_id' => $user->id, 'amount' => 60_000, 'frequency' => 'annual', 'annual_growth_rate' => 2.5]);
+    $strategy = ConversionStrategy::factory()->create(['user_id' => $user->id]);
+
+    $board = app(ConversionBoard::class);
+    ['world' => $world, 'years' => $years] = $board->context($user);
+    $steps = 13;
+
+    $rows = $board->simulate($strategy, $world, $years[$strategy->id], ['shocks' => array_fill(0, $steps, 0.0), 'inflation' => array_fill(0, $steps, 10.0)])['rows'];
+
+    expect($rows[1]['expenses'])->toEqual(60_000)
+        ->and($rows[5]['expenses'])->toEqual(60_000);
+});
+
+/**
  * With no volatility every market is the steady one, so every run is the
  * single run the rest of the page shows, and every percentile agrees with it.
  */

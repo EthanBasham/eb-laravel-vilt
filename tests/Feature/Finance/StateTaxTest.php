@@ -63,6 +63,7 @@ it('saves a profile\'s own deduction, capital gains brackets and self-employment
             ->where('tax.deduction', 20000)
             ->where('tax.fica_rate', 7.1)
             ->where('tax.built_in_deduction', 16100)
+            ->where('tax.additional_deduction', 2050)
             ->where('tax.capital_gains_brackets', [[0, 60000], [18, null]])
             ->where('tax.built_in_capital_gains_brackets.0', [0, 49450]));
 });
@@ -171,7 +172,8 @@ it('counts state tax in the retirement strategizer', function () {
     Holding::factory()->retirement('traditional')->create(['user_id' => $user->id, 'balance' => 1_000_000, 'annual_rate' => 0]);
     Holding::factory()->ofType('brokerage')->create(['user_id' => $user->id, 'balance' => 100_000, 'annual_rate' => 0]);
 
-    ConversionStrategy::factory()->ofKind('fill_bracket', ['growth_rate' => 0])->create(['user_id' => $user->id]);
+    // Withheld from the conversion: there is no income to pay it from.
+    ConversionStrategy::factory()->ofKind('fill_bracket', ['growth_rate' => 0, 'tax_payment' => 'conversion'])->create(['user_id' => $user->id]);
 
     $filled = fn (): array => app(ConversionBoard::class)->for($user)['strategies'][0];
 
@@ -182,11 +184,11 @@ it('counts state tax in the retirement strategizer', function () {
     $with = $filled();
 
     // With no income, the conversion at 68 fills the federal standard
-    // deduction: $16,100, free of federal tax. This state has no deduction
-    // of its own, so a flat 5% on it is $805 that year.
-    expect($without['rows'][0]['conversion'])->toEqual(16100)
+    // deduction: $18,150 at 65 and over, free of federal tax. This state has
+    // no deduction of its own, so a flat 5% on it is $908 that year.
+    expect($without['rows'][0]['conversion'])->toEqual(18150)
         ->and($without['rows'][0]['tax'])->toEqual(0)
-        ->and($with['rows'][0]['conversion'])->toEqual(16100)
-        ->and($with['rows'][0]['tax'] - $without['rows'][0]['tax'])->toEqual(805)
-        ->and($with['summary']['lifetime_tax'] - $without['summary']['lifetime_tax'])->toBeGreaterThan(805);
+        ->and($with['rows'][0]['conversion'])->toEqual(18150)
+        ->and($with['rows'][0]['tax'] - $without['rows'][0]['tax'])->toEqual(908)
+        ->and($with['summary']['lifetime_tax'] - $without['summary']['lifetime_tax'])->toBeGreaterThan(908);
 });

@@ -11,7 +11,8 @@ use App\Models\Finance\Holding;
  * An asset or a liability, created or edited.
  *
  * `side` is not accepted: it follows from the type, and holdingAttributes()
- * sets it from config so the two can never disagree.
+ * sets it from config so the two can never disagree. `armada_id` is cleared
+ * on an account inside another, which follows the outer account's.
  */
 class SaveHoldingRequest extends FormRequest
 {
@@ -57,6 +58,7 @@ class SaveHoldingRequest extends FormRequest
                 Rule::exists('fin_holdings', 'id')->where('user_id', $this->user()->id)->whereNull('parent_id'),
                 Rule::notIn([$this->route('holding')?->id]),
             ],
+            'armada_id' => ['nullable', 'integer', Rule::exists('fin_armadas', 'id')->where('user_id', $this->user()->id)],
             'notes' => ['nullable', 'string', 'max:2000'],
         ];
     }
@@ -121,6 +123,8 @@ class SaveHoldingRequest extends FormRequest
             'plan_type' => $isRetirement ? $validated['plan_type'] : null,
             'tax_type' => $isRetirement ? $validated['tax_type'] : null,
             'parent_id' => $validated['parent_id'] ?? null,
+            // An account inside another sails with the outer one.
+            'armada_id' => ($validated['parent_id'] ?? null) ? null : ($validated['armada_id'] ?? null),
         ];
     }
 }

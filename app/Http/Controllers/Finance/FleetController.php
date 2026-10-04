@@ -31,7 +31,7 @@ class FleetController extends Controller
     {
         abort_unless($holding->isOwnedBy($request->user()), 404);
 
-        $holding->load(['positions', 'parent', 'children.positions', 'children.children', 'flows.holding', 'securedBy', 'securedDebts.positions']);
+        $holding->load(['positions', 'parent', 'children.positions', 'children.children', 'flows.holding', 'flows.account', 'flows.children', 'securedBy', 'securedDebts.positions']);
 
         $debt = (float) $holding->securedDebts->sum->value;
         $income = (float) $holding->flows->where('direction', 'income')->sum->current_monthly_amount;

@@ -11,7 +11,8 @@ defineProps({
 
 const tabs = [
     { key: 'conversions', label: 'Roth conversions', href: '/finance/retirement' },
-    { key: 'more', label: 'More to come', href: '/finance/retirement/more' },
+    { key: 'social-security', label: 'Social Security', href: '/finance/retirement/social-security' },
+    { key: 'withdrawals', label: 'Withdrawals', href: '/finance/retirement/withdrawals' },
 ];
 </script>
 

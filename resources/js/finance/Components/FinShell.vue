@@ -2,7 +2,7 @@
 import { Head, Link, usePage } from '@inertiajs/vue3';
 import {
     IconArrowsExchange, IconBeach, IconBuildingEstate, IconCalculator, IconLayoutDashboard, IconLeaf,
-    IconLogout, IconSailboat, IconScale, IconSettings, IconTarget, IconTimeline, IconTrendingUp, IconWallet,
+    IconLogout, IconSailboat, IconScale, IconSettings, IconShip, IconTarget, IconTimeline, IconTrendingUp, IconWallet,
 } from '@tabler/icons-vue';
 import { computed } from 'vue';
 
@@ -33,6 +33,7 @@ const groups = [
     [
         { href: '/finance', label: 'Overview', icon: IconLayoutDashboard, exact: true },
         { href: '/finance/fleet', label: 'Fleet', icon: IconSailboat },
+        { href: '/finance/armadas', label: 'Armadas', icon: IconShip },
         { href: '/finance/cashflow', label: 'Income & expenses', icon: IconArrowsExchange },
         { href: '/finance/scenarios', label: 'Projections & scenarios', icon: IconTimeline },
         { href: '/finance/budget', label: 'Monthly budget', icon: IconWallet },

@@ -158,7 +158,7 @@ const successTone = (rate) => {
                         </td>
                     </tr>
                     <tr class="border-b border-fin-grey-100">
-                        <th scope="row" class="sticky left-0 bg-fin-white px-5 py-2.5 text-left font-medium text-fin-charcoal">Tax, yours and theirs</th>
+                        <th scope="row" class="sticky left-0 bg-fin-white px-5 py-2.5 text-left font-medium text-fin-charcoal">Tax and IRMAA, yours and theirs</th>
                         <td v-for="strategy in covered" :key="strategy.id" class="px-3 py-2.5 text-right text-fin-black">
                             {{ moneyBrief(resultFor(strategy).tax_with_heirs.p50) }}
                             <span class="block text-[11px] text-fin-grey-500">{{ moneyBrief(resultFor(strategy).tax_with_heirs.p10) }} – {{ moneyBrief(resultFor(strategy).tax_with_heirs.p90) }}</span>

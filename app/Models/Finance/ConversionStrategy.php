@@ -18,7 +18,7 @@ use Database\Factories\Finance\ConversionStrategyFactory;
  * @property-read string $kind_label
  * @property-read array<string, mixed> $props
  */
-#[Fillable(['user_id', 'scenario_id', 'name', 'kind', 'convert_from_age', 'convert_until_age', 'fill_rate', 'tax_payment', 'tax_outside_amount', 'inflation_rate', 'growth_rate', 'heir_is_charity', 'heir_income'])]
+#[Fillable(['user_id', 'scenario_id', 'name', 'kind', 'convert_from_age', 'convert_until_age', 'fill_rate', 'conversion_amount', 'tax_payment', 'tax_outside_amount', 'inflation_rate', 'growth_rate', 'heir_is_charity', 'heir_income'])]
 class ConversionStrategy extends OwnedModel
 {
     /** @use HasFactory<ConversionStrategyFactory> */
@@ -46,6 +46,7 @@ class ConversionStrategy extends OwnedModel
             'convert_from_age' => 'integer',
             'convert_until_age' => 'integer',
             'fill_rate' => 'float',
+            'conversion_amount' => 'float',
             'tax_outside_amount' => 'float',
             'inflation_rate' => 'float',
             'growth_rate' => 'float',
@@ -71,6 +72,7 @@ class ConversionStrategy extends OwnedModel
             'convert_from_age' => $this->convert_from_age,
             'convert_until_age' => $this->convert_until_age,
             'fill_rate' => $this->fill_rate,
+            'conversion_amount' => $this->conversion_amount,
             'tax_payment' => $this->tax_payment,
             'tax_outside_amount' => $this->tax_outside_amount,
             'inflation_rate' => $this->inflation_rate,

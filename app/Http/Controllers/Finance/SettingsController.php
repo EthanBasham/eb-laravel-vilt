@@ -34,6 +34,8 @@ class SettingsController extends Controller
                 // status — the same thing until the profile sets its own.
                 'deduction' => $tax->forProfile($profile)->deduction($profile->filing_status),
                 'built_in_deduction' => $tax->deduction($profile->filing_status),
+                // Added on top from 65, whichever deduction is in force.
+                'additional_deduction' => (float) config("finance.tax.additional_deduction.{$profile->filing_status}"),
                 'brackets' => $tax->brackets($profile->filing_status),
                 'capital_gains_brackets' => $tax->capitalGainsBrackets($profile),
                 // What a W-2 wage pays: the employee's half.

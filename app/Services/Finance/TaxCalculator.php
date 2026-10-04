@@ -22,6 +22,10 @@ use Closure;
  * a profile use it; the ones given only a filing status use the built-in
  * figure unless the instance came from forProfile().
  *
+ * The methods that take an `$age` add the additional standard deduction for
+ * the aged from 65, on top of whichever deduction that is. On a joint return
+ * it is taken for both spouses, as though they were the same age.
+ *
  * `$index` scales every threshold and the deduction together, which is how a
  * future year is modelled: the IRS indexes the tables to inflation each year,
  * so a projection that held them still would drift everyone into higher
@@ -49,9 +53,9 @@ class TaxCalculator
         return $calculator;
     }
 
-    public function tax(float $grossIncome, string $status, float $index = 1.0): float
+    public function tax(float $grossIncome, string $status, float $index = 1.0, ?int $age = null): float
     {
-        $taxable = max(0.0, $grossIncome - $this->deduction($status, $index));
+        $taxable = max(0.0, $grossIncome - $this->deduction($status, $index, $age));
 
         return $this->progressive($taxable, $this->brackets($status), $index);
     }
@@ -124,7 +128,10 @@ class TaxCalculator
      *    the whole amount: all of it for the self-employed, half for a wage;
      *  - state and local tax treat gains as ordinary income.
      *
-     * @return Closure(array<string, float>, float=): array{income: float, capital_gains: float, payroll: float, state_local: float, total: float}
+     * `$age` is the filer's age that year, for the additional deduction from
+     * 65; null leaves it out.
+     *
+     * @return Closure(array<string, float>, float=, int|null=): array{income: float, capital_gains: float, payroll: float, state_local: float, total: float}
      */
     public function flowTaxFor(Profile $profile): Closure
     {
@@ -136,7 +143,7 @@ class TaxCalculator
         $payrollRate = $profile->se_tax_rate / 100;
         $taxations = config('finance.flow_taxations');
 
-        return function (array $amounts, float $index = 1.0) use ($status, $federal, $brackets, $gainsBrackets, $stateAndLocal, $payrollRate, $taxations): array {
+        return function (array $amounts, float $index = 1.0, ?int $age = null) use ($status, $federal, $brackets, $gainsBrackets, $stateAndLocal, $payrollRate, $taxations): array {
             $ordinary = 0.0;
             $gains = 0.0;
             $payroll = 0.0;
@@ -155,7 +162,7 @@ class TaxCalculator
                 $payroll += $amount * $taxations[$taxation]['payroll'] * $payrollRate;
             }
 
-            $deduction = $federal->deduction($status, $index);
+            $deduction = $federal->deduction($status, $index, $age);
             $taxableOrdinary = max(0.0, $ordinary - $deduction);
             $taxableGains = max(0.0, $gains - max(0.0, $deduction - $ordinary));
 
@@ -186,7 +193,7 @@ class TaxCalculator
             ->map(fn (Collection $group): float => (float) $group->sum(fn (Flow $flow): float => $flow->current_monthly_amount * 12 * $flow->taxable_share))
             ->all();
 
-        return $this->flowTaxFor($profile)($amounts)['total'] / 12;
+        return $this->flowTaxFor($profile)($amounts, 1.0, $profile->age)['total'] / 12;
     }
 
     /**
@@ -255,9 +262,9 @@ class TaxCalculator
     /**
      * The rate the next dollar of income would be taxed at.
      */
-    public function marginalRate(float $grossIncome, string $status, float $index = 1.0): float
+    public function marginalRate(float $grossIncome, string $status, float $index = 1.0, ?int $age = null): float
     {
-        $taxable = $grossIncome - $this->deduction($status, $index);
+        $taxable = $grossIncome - $this->deduction($status, $index, $age);
 
         if ($taxable < 0) {
             return 0.0;
@@ -280,26 +287,34 @@ class TaxCalculator
      * Paired with marginalRate(), this answers "how much more income fits in
      * the bracket I am already in": grossCeiling(marginalRate($income)).
      */
-    public function grossCeiling(float $rate, string $status, float $index = 1.0): ?float
+    public function grossCeiling(float $rate, string $status, float $index = 1.0, ?int $age = null): ?float
     {
         // The 0% "bracket" is the standard deduction: income inside it is
         // not taxed, and it tops out where the first real bracket begins.
         if ($rate === 0.0) {
-            return $this->deduction($status, $index);
+            return $this->deduction($status, $index, $age);
         }
 
         foreach ($this->brackets($status) as [$bracketRate, $ceiling]) {
             if ((float) $bracketRate === $rate && $ceiling !== null) {
-                return $ceiling * $index + $this->deduction($status, $index);
+                return $ceiling * $index + $this->deduction($status, $index, $age);
             }
         }
 
         return null;
     }
 
-    public function deduction(string $status, float $index = 1.0): float
+    /**
+     * The standard deduction, plus the additional one for the aged when an
+     * age of 65 or more is given.
+     */
+    public function deduction(string $status, float $index = 1.0, ?int $age = null): float
     {
-        return $this->table($status)['deduction'] * $index;
+        $additional = $age !== null && $age >= (int) config('finance.tax.additional_deduction.age')
+            ? (float) config("finance.tax.additional_deduction.{$status}", config('finance.tax.additional_deduction.single'))
+            : 0.0;
+
+        return ($this->table($status)['deduction'] + $additional) * $index;
     }
 
     /**

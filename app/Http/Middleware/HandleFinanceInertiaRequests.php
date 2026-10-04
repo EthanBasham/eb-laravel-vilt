@@ -3,6 +3,9 @@
 namespace App\Http\Middleware;
 
 use Illuminate\Http\Request;
+use App\Models\Finance\Armada;
+use App\Models\Finance\Holding;
+use App\Services\Finance\Fleet;
 use Inertia\Middleware;
 
 /**
@@ -49,7 +52,18 @@ class HandleFinanceInertiaRequests extends Middleware
                 'flow_taxations' => config('finance.flow_taxations'),
                 'frequencies' => config('finance.frequencies'),
                 'filing_statuses' => config('finance.tax.filing_statuses'),
+                'transfer_kinds' => config('finance.transfer_kinds'),
             ],
+            /*
+             * The user's own lists, which the flow, holding and transfer
+             * forms pick from wherever they are opened: their armadas, and
+             * the accounts money can land in or leave — every asset that
+             * carries a balance of its own. Closures, so a partial reload
+             * that does not ask for them does not pay for them.
+             */
+            'armadas' => fn () => $user ? Armada::query()->onlyOwnedBy($user)->inDefaultOrder()->get()->map->only(['id', 'name'])->values() : [],
+            'accounts' => fn () => $user ? app(Fleet::class)->leaves(app(Fleet::class)->holdings($user))
+                ->map(fn (Holding $holding): array => ['id' => $holding->id, 'name' => $holding->full_name, 'side' => $holding->side])->values() : [],
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'error' => fn () => $request->session()->get('error'),

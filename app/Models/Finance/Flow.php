@@ -14,6 +14,23 @@ use Database\Factories\Finance\FlowFactory;
 /**
  * Money moving on a schedule: an income stream or an expense.
  *
+ * A flow can be compound, as a holding can: a "Household expenses" flow with
+ * items inside (`parent_id`) comes to their sum, in every year and every
+ * month, and its own amount, frequency, rate and dates are ignored while it
+ * has any. With none it is an ordinary flow, and its amount is the estimate.
+ *
+ * The amounts read the items, so load `children` before reading any of them
+ * across a list — Fleet::flows() does.
+ *
+ * Three ids, three different questions. `holding_id` is what the flow belongs
+ * to (the rent on a duplex belongs to the duplex). `account_id` is the asset
+ * it is paid into or out of. `armada_id` is the armada it sails in when it
+ * belongs to no holding; see `armada_key`.
+ *
+ * @property-read bool $is_compound
+ * @property-read bool $is_itemized
+ * @property-read ?int $armada_key
+ * @property-read ?int $routed_account_id
  * @property-read bool $is_income
  * @property-read float $annual_amount
  * @property-read float $monthly_amount
@@ -23,7 +40,7 @@ use Database\Factories\Finance\FlowFactory;
  * @property-read string $category_label
  * @property-read array<string, mixed> $props
  */
-#[Fillable(['user_id', 'holding_id', 'direction', 'category', 'name', 'amount', 'frequency', 'hours_per_week', 'annual_growth_rate', 'taxation', 'taxed_portion', 'is_essential', 'starts_on', 'ends_on'])]
+#[Fillable(['user_id', 'armada_id', 'holding_id', 'parent_id', 'account_id', 'direction', 'category', 'name', 'amount', 'frequency', 'hours_per_week', 'annual_growth_rate', 'taxation', 'taxed_portion', 'is_essential', 'starts_on', 'ends_on'])]
 class Flow extends OwnedModel
 {
     /** @use HasFactory<FlowFactory> */
@@ -74,6 +91,10 @@ class Flow extends OwnedModel
      */
     public function amountInYear(int $year, ?int $retirementYear = null, ?float $growthRate = null): float
     {
+        if ($this->is_compound) {
+            return (float) $this->children->sum(fn (self $item): float => $item->amountInYear($year, $retirementYear, $growthRate));
+        }
+
         if ($this->frequency === 'once') {
             if (($this->starts_on?->year ?? now()->year) === $year) {
                 return $this->amount;
@@ -111,6 +132,10 @@ class Flow extends OwnedModel
      */
     public function plannedFor(CarbonInterface $month): float
     {
+        if ($this->is_compound) {
+            return (float) $this->children->sum(fn (self $item): float => $item->plannedFor($month));
+        }
+
         $start = $month->copy()->startOfMonth();
         $end = $month->copy()->endOfMonth();
 
@@ -134,6 +159,46 @@ class Flow extends OwnedModel
         return Attribute::get(fn (): bool => $this->direction === 'income');
     }
 
+    /** Whether other flows sit inside this one. */
+    protected function isCompound(): Attribute
+    {
+        return Attribute::get(fn (): bool => $this->children->isNotEmpty());
+    }
+
+    /** Whether its category lets it hold items — "Household expenses" does. */
+    protected function isItemized(): Attribute
+    {
+        return Attribute::get(fn (): bool => (bool) config("finance.flow_categories.{$this->direction}.{$this->category}.itemized", false));
+    }
+
+    /**
+     * The armada the flow sails in: its holding's when it belongs to one, the
+     * outer flow's when it is an item, its own otherwise.
+     */
+    protected function armadaKey(): Attribute
+    {
+        return Attribute::get(function (): ?int {
+            if ($this->holding) {
+                return $this->holding->armada_key;
+            }
+
+            if ($this->parent) {
+                return $this->parent->armada_key;
+            }
+
+            return $this->armada_id;
+        });
+    }
+
+    /**
+     * The asset the flow is paid into or out of, if any. An item inside
+     * another is paid from wherever the outer flow is unless it names its own.
+     */
+    protected function routedAccountId(): Attribute
+    {
+        return Attribute::get(fn (): ?int => $this->account_id ?? $this->parent?->account_id);
+    }
+
     /**
      * The run rate: what the flow comes to over a full year at today's amount,
      * whatever its dates. Zero for a one-time flow, which has no run rate.
@@ -141,6 +206,10 @@ class Flow extends OwnedModel
     protected function annualAmount(): Attribute
     {
         return Attribute::get(function (): float {
+            if ($this->is_compound) {
+                return (float) $this->children->sum->annual_amount;
+            }
+
             $perYear = (float) config("finance.frequencies.{$this->frequency}.per_year", 0);
 
             if ($this->frequency === 'hourly') {
@@ -169,6 +238,10 @@ class Flow extends OwnedModel
     protected function currentMonthlyAmount(): Attribute
     {
         return Attribute::get(function (): float {
+            if ($this->is_compound) {
+                return (float) $this->children->sum->current_monthly_amount;
+            }
+
             if ($this->frequency === 'once') {
                 return 0.0;
             }
@@ -207,8 +280,14 @@ class Flow extends OwnedModel
     {
         return Attribute::get(fn (): array => [
             'id' => $this->id,
+            'armada_id' => $this->armada_key,
             'holding_id' => $this->holding_id,
             'holding_name' => $this->holding?->name,
+            'parent_id' => $this->parent_id,
+            'account_id' => $this->account_id,
+            'account_name' => $this->account?->name,
+            'is_itemized' => $this->is_itemized,
+            'items_count' => $this->children->count(),
             'direction' => $this->direction,
             'category' => $this->category,
             'category_label' => $this->category_label,
@@ -226,7 +305,7 @@ class Flow extends OwnedModel
             'ends_on' => $this->ends_on?->toDateString(),
             'monthly_amount' => round($this->monthly_amount, 2),
             'annual_amount' => round($this->annual_amount, 2),
-            'is_running' => $this->frequency === 'once' || $this->current_monthly_amount > 0 || $this->amount == 0,
+            'is_running' => $this->is_compound || $this->frequency === 'once' || $this->current_monthly_amount > 0 || $this->amount == 0,
         ]);
     }
 
@@ -242,6 +321,12 @@ class Flow extends OwnedModel
         return $query->where('direction', 'expense');
     }
 
+    /** Flows that stand on their own, not items inside another. */
+    public function scopeOnlyTopLevel(Builder $query): Builder
+    {
+        return $query->whereNull($query->qualifyColumn('parent_id'));
+    }
+
     /** Income before expenses, then by category, then as entered. */
     public function scopeInDefaultOrder(Builder $query): Builder
     {
@@ -250,10 +335,34 @@ class Flow extends OwnedModel
 
     // Relationships
 
+    /** @return BelongsTo<Armada, $this> */
+    public function armada(): BelongsTo
+    {
+        return $this->belongsTo(Armada::class);
+    }
+
     /** @return BelongsTo<Holding, $this> */
     public function holding(): BelongsTo
     {
         return $this->belongsTo(Holding::class);
+    }
+
+    /** @return BelongsTo<Holding, $this> */
+    public function account(): BelongsTo
+    {
+        return $this->belongsTo(Holding::class, 'account_id');
+    }
+
+    /** @return BelongsTo<Flow, $this> */
+    public function parent(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'parent_id');
+    }
+
+    /** @return HasMany<Flow, $this> */
+    public function children(): HasMany
+    {
+        return $this->hasMany(self::class, 'parent_id');
     }
 
     /** @return HasMany<Actual, $this> */

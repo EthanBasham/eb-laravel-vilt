@@ -263,7 +263,7 @@ const clear = () => {
                     </template>
 
                     <form v-if="editingFederal" class="flex flex-col gap-5 border-t border-fin-grey-100 p-5" @submit.prevent="save">
-                        <Field label="Standard deduction" prefix="$" :hint="`Blank uses the built-in ${money(tax.built_in_deduction)} for ${statuses[profile.filing_status].toLowerCase()}.`" :error="form.errors.standard_deduction">
+                        <Field label="Standard deduction" prefix="$" :hint="`Blank uses the built-in ${money(tax.built_in_deduction)} for ${statuses[profile.filing_status].toLowerCase()}. Either way, ${money(tax.additional_deduction)} more is added from 65.`" :error="form.errors.standard_deduction">
                             <input :value="form.standard_deduction" type="number" min="0" step="1" :placeholder="String(tax.built_in_deduction)" @input="setDeduction">
                         </Field>
 
@@ -297,7 +297,10 @@ const clear = () => {
                         <dl class="border-t border-fin-grey-200 text-sm">
                             <div class="flex items-baseline justify-between gap-4 border-b border-fin-grey-100 px-5 py-2">
                                 <dt class="font-medium text-fin-black">Standard deduction</dt>
-                                <dd class="text-right text-fin-charcoal">{{ money(tax.deduction) }} <span class="text-xs text-fin-grey-500">{{ profile.standard_deduction === null ? 'built in' : 'yours' }}</span></dd>
+                                <dd class="text-right text-fin-charcoal">
+                                    {{ money(tax.deduction) }} <span class="text-xs text-fin-grey-500">{{ profile.standard_deduction === null ? 'built in' : 'yours' }}</span>
+                                    <span class="block text-xs text-fin-grey-500">plus {{ money(tax.additional_deduction) }} from 65</span>
+                                </dd>
                             </div>
                             <div class="flex items-baseline justify-between gap-4 border-b border-fin-grey-100 px-5 py-2">
                                 <dt class="font-medium text-fin-black">Self-employment tax</dt>

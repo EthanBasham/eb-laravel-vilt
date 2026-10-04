@@ -63,4 +63,10 @@ class Scenario extends OwnedModel
     {
         return $this->hasMany(ScenarioFlow::class);
     }
+
+    /** @return HasMany<ScenarioHolding, $this> */
+    public function scenarioHoldings(): HasMany
+    {
+        return $this->hasMany(ScenarioHolding::class);
+    }
 }

@@ -27,6 +27,8 @@ const props = defineProps({
     growthRate: { type: Number, required: true },
     // What a new strategy's heir is taken to earn.
     heirIncome: { type: Number, required: true },
+    // What a fixed-amount strategy converts a year until given its own.
+    conversionAmount: { type: Number, required: true },
 });
 
 const emit = defineEmits(['close']);
@@ -40,6 +42,7 @@ const blank = {
     convert_from_age: null,
     convert_until_age: null,
     fill_rate: 22,
+    conversion_amount: null,
     tax_payment: 'outside',
     tax_outside_amount: null,
     inflation_rate: null,
@@ -82,6 +85,10 @@ const onKindChange = () => {
     if (!props.strategy && form.kind === 'fill_bracket_irmaa') {
         form.fill_rate = null;
     }
+
+    if (kind.value.amount && !form.conversion_amount) {
+        form.conversion_amount = props.conversionAmount;
+    }
 };
 
 const projectionRate = computed(() => props.scenarios.find((scenario) => scenario.id === form.scenario_id)?.bracket_inflation_rate ?? props.profile.inflation_rate);
@@ -118,6 +125,9 @@ const save = () => {
                 <Field v-if="kind.ages === 'window'" label="Through age" :hint="`Blank is ${ages[1]}. RMDs begin at ${profile.rmd_start_age}.`" :error="form.errors.convert_until_age">
                     <input v-model.number="form.convert_until_age" type="number" min="18" max="110" step="1" :placeholder="String(ages[1])">
                 </Field>
+                <Field v-if="kind.amount" label="Convert each year" prefix="$" hint="In today's dollars. Once less than this is left, the rest is converted." :error="form.errors.conversion_amount">
+                    <input v-model.number="form.conversion_amount" type="number" min="1" step="1" required>
+                </Field>
                 <Field v-if="kind.fills" label="Fill to the top of" :error="form.errors.fill_rate">
                     <select v-model="form.fill_rate">
                         <option :value="null">Whichever bracket I am in</option>
@@ -128,7 +138,7 @@ const save = () => {
 
             <div v-if="kind.ages" class="grid items-start gap-4 sm:grid-cols-3">
                 <div class="sm:col-span-2">
-                    <Field label="Pay the conversion's tax" hint="Paid from outside, the whole conversion reaches the Roth. Taken from the converted money, less does." :error="form.errors.tax_payment">
+                    <Field label="Pay the conversion's tax" hint="From spare income, a year converts only what its income left after expenses and tax can pay the tax on, and savings are never touched. Taken from the converted money, there is no cap but less reaches the Roth." :error="form.errors.tax_payment">
                         <select v-model="form.tax_payment">
                             <option v-for="(payment, key) in taxPayments" :key="key" :value="key">{{ payment.label }}</option>
                         </select>
@@ -156,7 +166,7 @@ const save = () => {
                     <Field label="Inflation" suffix="% / yr" :hint="`Prices, tax brackets and IRMAA tiers. Blank follows the projection (${projectionRate}%).`" :error="form.errors.inflation_rate">
                         <input v-model.number="form.inflation_rate" type="number" min="-5" max="15" step="0.1" :placeholder="String(projectionRate)">
                     </Field>
-                    <Field label="Growth" suffix="% / yr" :hint="`Every account, before inflation. Blank is your fleet's own ${growthRate}%.`" :error="form.errors.growth_rate">
+                    <Field label="Growth" suffix="% / yr" :hint="`Every account, before inflation. Blank lets each grow at its own holdings' rate (${growthRate}% overall).`" :error="form.errors.growth_rate">
                         <input v-model.number="form.growth_rate" type="number" min="-10" max="20" step="0.1" :placeholder="String(growthRate)">
                     </Field>
                 </div>

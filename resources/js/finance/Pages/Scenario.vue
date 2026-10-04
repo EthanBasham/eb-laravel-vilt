@@ -6,9 +6,11 @@ import Card from '../Components/Card.vue';
 import EmptyState from '../Components/EmptyState.vue';
 import FinShell from '../Components/FinShell.vue';
 import LineChart from '../Components/LineChart.vue';
+import ScenarioFlowGroup from '../Components/ScenarioFlowGroup.vue';
 import ScenarioFlowRow from '../Components/ScenarioFlowRow.vue';
+import ScenarioHoldingRow from '../Components/ScenarioHoldingRow.vue';
 import StatTile from '../Components/StatTile.vue';
-import { chartColors, money, moneySigned } from '../lib/format';
+import { chartColors, money, moneyBrief, moneyBriefSigned, moneySigned } from '../lib/format';
 
 const props = defineProps({
     scenario: Object,
@@ -19,6 +21,11 @@ const props = defineProps({
     summary: Object,
     net_vs_baseline: Number,
     bracket_inflation: Object,
+    assets: Array,
+    liabilities: Array,
+    net_worth: Array,
+    unfunded: Number,
+    armadas: Array,
 });
 
 const lines = computed(() => [
@@ -32,10 +39,32 @@ const lines = computed(() => [
 const ages = computed(() => Object.fromEntries(props.totals.map((year) => [year.year, year.age])));
 const yearAndAge = (year) => (year in ages.value ? `${year} (${ages.value[year]})` : String(year));
 
+/*
+ * Which armada's rows the lists below show: `undefined` is all of them, and
+ * `null` is whatever belongs to none. It narrows the lists only — the charts
+ * and the totals above stay the whole plan's, since tax is worked out on
+ * every income together.
+ */
+const armadaFilter = ref(undefined);
+const inArmada = (row) => armadaFilter.value === undefined || row.armada_id === armadaFilter.value;
+
 const groups = computed(() => [
-    { direction: 'income', title: 'Income', noun: 'income', flows: props.income, color: chartColors[0] },
-    { direction: 'expense', title: 'Expenses', noun: 'expense', flows: props.expenses, color: chartColors[1] },
+    { direction: 'income', title: 'Income', noun: 'income', flows: props.income.filter(inArmada), color: chartColors[0] },
+    { direction: 'expense', title: 'Expenses', noun: 'expense', flows: props.expenses.filter(inArmada), color: chartColors[1] },
 ]);
+
+const sides = computed(() => [
+    { key: 'asset', title: 'Assets', subtitle: 'What each is worth, year by year — what it gains in value kept apart from the money moved into or out of it.', holdings: props.assets.filter(inArmada), color: chartColors[0], empty: 'No assets.' },
+    { key: 'liability', title: 'Liabilities', subtitle: 'What is owed on each, year by year — the interest it charges kept apart from what is paid off.', holdings: props.liabilities.filter(inArmada), color: chartColors[1], empty: 'No debts.' },
+]);
+
+const worthLines = computed(() => [
+    { label: 'Assets', color: chartColors[0], points: props.net_worth.map((year) => ({ x: year.year, y: year.assets })) },
+    { label: 'Debts', color: chartColors[1], points: props.net_worth.map((year) => ({ x: year.year, y: year.liabilities })) },
+    { label: 'Net worth', color: chartColors[2], dashed: true, points: props.net_worth.map((year) => ({ x: year.year, y: year.net_worth })) },
+]);
+
+const hasHoldings = computed(() => props.assets.length + props.liabilities.length > 0);
 
 /*
  * How fast this scenario's tax tables rise: every bracket threshold and the
@@ -69,13 +98,14 @@ const applyRate = (direction) => {
 </script>
 
 <template>
-    <FinShell :title="scenario.name" :subtitle="scenario.description || `Every income and expense from ${horizon.from} to ${horizon.to}, the year you plan to. Open one to set how it moves.`">
+    <FinShell :title="scenario.name" :subtitle="scenario.description || `Every income, expense, asset and debt from ${horizon.from} to ${horizon.to}, the year you plan to. Open one to set how it moves.`">
         <template #actions>
             <Link href="/finance/scenarios" class="fin-btn fin-btn-quiet"><IconArrowLeft :size="16" /> All scenarios</Link>
         </template>
 
-        <EmptyState v-if="!income.length && !expenses.length" title="Nothing to project yet" body="A scenario adjusts the incomes and expenses you have entered. Add a few and they will appear here.">
+        <EmptyState v-if="!income.length && !expenses.length && !hasHoldings" title="Nothing to project yet" body="A scenario adjusts the incomes, expenses, assets and debts you have entered. Add a few and they will appear here.">
             <Link href="/finance/cashflow" class="fin-btn fin-btn-primary">Go to Income &amp; expenses</Link>
+            <Link href="/finance/fleet" class="fin-btn fin-btn-quiet">Go to the fleet</Link>
         </EmptyState>
 
         <div v-else class="flex flex-col gap-5">
@@ -114,6 +144,53 @@ const applyRate = (direction) => {
                 </p>
             </Card>
 
+            <Card v-if="hasHoldings" title="Net worth, year by year" :subtitle="`Every asset and debt walked forward a month at a time: growth, contributions and payments, the income and expenses that name an account, then your automated transfers.`">
+                <LineChart :series="worthLines" :height="240" :x-ticks="6" :format-x="yearAndAge" />
+
+                <p v-if="unfunded > 0" class="mt-3 rounded-xl border border-fin-red-600/30 bg-fin-red-100 px-4 py-3 text-sm text-fin-red-600">
+                    {{ money(unfunded) }} of expenses over the plan could not be paid from the account they name, because it had run dry. Open the assets below to see which, and when.
+                </p>
+            </Card>
+
+            <Card v-if="armadas.length" title="By armada" subtitle="The plan added up by the part of the fleet it belongs to. Pick one to narrow the lists below to it." flush>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="border-y border-fin-grey-200 bg-fin-cream-50 text-left text-xs text-fin-grey-500">
+                                <th class="px-5 py-2.5 font-medium">Armada</th>
+                                <th class="px-3 py-2.5 text-right font-medium">Income</th>
+                                <th class="px-3 py-2.5 text-right font-medium">Expenses</th>
+                                <th class="px-3 py-2.5 text-right font-medium" title="Income less expenses over the plan, before tax">Cash it throws off</th>
+                                <th class="px-3 py-2.5 text-right font-medium" title="What its assets gain in value, less the interest its debts charge">Value it gains</th>
+                                <th class="px-3 py-2.5 text-right font-medium">Net worth today</th>
+                                <th class="px-5 py-2.5 text-right font-medium">Net worth in {{ horizon.to }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr class="border-b border-fin-grey-100">
+                                <td class="px-5 py-2" colspan="7">
+                                    <button type="button" class="rounded-full border px-3 py-1 text-xs font-medium" :class="armadaFilter === undefined ? 'border-fin-charcoal bg-fin-charcoal text-fin-white' : 'border-fin-grey-300 bg-fin-white text-fin-charcoal hover:bg-fin-cream-100'" :aria-pressed="armadaFilter === undefined" @click="armadaFilter = undefined">
+                                        Show every armada
+                                    </button>
+                                </td>
+                            </tr>
+                            <tr v-for="armada in armadas" :key="armada.id ?? 'none'" class="border-b border-fin-grey-100 last:border-0" :class="{ 'bg-fin-cream-50': armadaFilter === armada.id }">
+                                <td class="px-5 py-2.5">
+                                    <button type="button" class="font-medium hover:underline" :class="armadaFilter === armada.id ? 'text-fin-green-600' : 'text-fin-black'" :aria-pressed="armadaFilter === armada.id" @click="armadaFilter = armada.id">{{ armada.name }}</button>
+                                    <span class="block text-xs text-fin-grey-500">{{ armada.holdings_count }} holdings · {{ armada.flows_count }} lines</span>
+                                </td>
+                                <td class="px-3 py-2.5 text-right text-fin-charcoal" :title="money(armada.income)">{{ moneyBrief(armada.income) }}</td>
+                                <td class="px-3 py-2.5 text-right text-fin-charcoal" :title="money(armada.expenses)">{{ moneyBrief(armada.expenses) }}</td>
+                                <td class="px-3 py-2.5 text-right font-medium" :class="armada.cashflow < 0 ? 'text-fin-red-600' : 'text-fin-green-600'" :title="money(armada.cashflow)">{{ moneyBriefSigned(armada.cashflow) }}</td>
+                                <td class="px-3 py-2.5 text-right font-medium" :class="armada.growth < 0 ? 'text-fin-red-600' : 'text-fin-green-600'" :title="money(armada.growth)">{{ moneyBriefSigned(armada.growth) }}</td>
+                                <td class="px-3 py-2.5 text-right text-fin-charcoal" :title="money(armada.net_worth_start)">{{ moneyBrief(armada.net_worth_start) }}</td>
+                                <td class="px-5 py-2.5 text-right font-medium text-fin-black" :title="money(armada.net_worth_end)">{{ moneyBrief(armada.net_worth_end) }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </Card>
+
             <Card v-for="group in groups" :key="group.direction" :title="group.title" :subtitle="`Open one to set its rate and move individual years.`" flush>
                 <template v-if="group.flows.length" #actions>
                     <form class="flex items-center gap-2" @submit.prevent="applyRate(group.direction)">
@@ -128,13 +205,24 @@ const applyRate = (direction) => {
                     </form>
                 </template>
 
-                <p v-if="!group.flows.length" class="border-t border-fin-grey-100 px-5 py-6 text-sm text-fin-grey-500">No {{ group.noun }} yet.</p>
+                <p v-if="!group.flows.length" class="border-t border-fin-grey-100 px-5 py-6 text-sm text-fin-grey-500">No {{ group.noun }} {{ armadaFilter === undefined ? 'yet' : 'in this armada' }}.</p>
 
-                <ScenarioFlowRow
-                    v-for="flow in group.flows" :key="flow.id"
-                    :flow="flow" :scenario-id="scenario.id" :retirement-year="horizon.retirement_year" :color="group.color"
-                />
+                <template v-for="flow in group.flows" :key="flow.id">
+                    <ScenarioFlowGroup v-if="flow.is_group" :flow="flow" :scenario-id="scenario.id" :retirement-year="horizon.retirement_year" :color="group.color" />
+                    <ScenarioFlowRow v-else :flow="flow" :scenario-id="scenario.id" :retirement-year="horizon.retirement_year" :color="group.color" />
+                </template>
             </Card>
+
+            <template v-if="hasHoldings">
+                <Card v-for="side in sides" :key="side.key" :title="side.title" :subtitle="side.subtitle" flush>
+                    <p v-if="!side.holdings.length" class="border-t border-fin-grey-100 px-5 py-6 text-sm text-fin-grey-500">{{ side.empty }}</p>
+
+                    <ScenarioHoldingRow
+                        v-for="holding in side.holdings" :key="holding.id"
+                        :holding="holding" :scenario-id="scenario.id" :retirement-year="horizon.retirement_year" :color="side.color"
+                    />
+                </Card>
+            </template>
         </div>
     </FinShell>
 </template>

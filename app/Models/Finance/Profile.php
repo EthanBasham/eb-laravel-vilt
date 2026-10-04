@@ -18,7 +18,7 @@ use App\Models\User;
  * @property-read ?string $state_label
  * @property-read array<string, mixed> $props
  */
-#[Fillable(['user_id', 'birth_date', 'filing_status', 'retirement_age', 'life_expectancy', 'inflation_rate', 'state', 'state_deduction', 'state_brackets', 'local_name', 'local_deduction', 'local_brackets', 'standard_deduction', 'se_tax_rate', 'ltcg_brackets'])]
+#[Fillable(['user_id', 'birth_date', 'filing_status', 'retirement_age', 'life_expectancy', 'inflation_rate', 'state', 'state_deduction', 'state_brackets', 'local_name', 'local_deduction', 'local_brackets', 'standard_deduction', 'se_tax_rate', 'ltcg_brackets', 'ss_monthly_benefit', 'spouse_birth_date', 'spouse_ss_monthly_benefit', 'spouse_life_expectancy'])]
 class Profile extends OwnedModel
 {
     protected $table = 'fin_profiles';
@@ -57,6 +57,10 @@ class Profile extends OwnedModel
             'standard_deduction' => 'float',
             'se_tax_rate' => 'float',
             'ltcg_brackets' => 'array',
+            'ss_monthly_benefit' => 'float',
+            'spouse_birth_date' => 'date',
+            'spouse_ss_monthly_benefit' => 'float',
+            'spouse_life_expectancy' => 'integer',
         ];
     }
 

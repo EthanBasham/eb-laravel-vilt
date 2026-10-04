@@ -27,6 +27,8 @@ class SaveConversionStrategyRequest extends FormRequest
             'convert_until_age' => ['nullable', 'integer', 'between:18,110', 'gte:convert_from_age'],
             // Null fills whichever bracket the year's income is already in.
             'fill_rate' => ['nullable', 'numeric', Rule::in(config('finance.conversion_fill_rates'))],
+            // A year's conversion for the fixed-amount kind, in today's dollars.
+            'conversion_amount' => ['nullable', 'required_if:kind,fixed', 'numeric', 'min:1', 'max:999999999'],
             'tax_payment' => ['required', 'string', Rule::in(array_keys(config('finance.conversion_tax_payments')))],
             // How much of the conversion's tax comes from outside it: a
             // percentage, or dollars a year, by the mode. The other two modes
@@ -48,6 +50,7 @@ class SaveConversionStrategyRequest extends FormRequest
     {
         return [
             'convert_until_age.gte' => 'The last age to convert at cannot be before the first.',
+            'conversion_amount.required_if' => 'Say how much to convert each year.',
             'tax_outside_amount.required_if' => 'Say how much of the tax is paid from outside the conversion.',
             'tax_outside_amount.max' => 'No more than all of it can be paid from outside the conversion.',
         ];

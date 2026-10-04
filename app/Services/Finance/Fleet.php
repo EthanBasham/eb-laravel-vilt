@@ -61,11 +61,43 @@ class Fleet
     }
 
     /**
+     * The flows as they are listed: top-level, each carrying the items inside
+     * it. Totalling these counts every dollar once, because a compound flow
+     * comes to its items' sum.
+     *
+     * As with holdings(), each item is handed its parent and an empty set of
+     * items up front, so no accessor goes back to the database to ask.
+     *
      * @return Collection<int, Flow>
      */
     public function flows(User $user): Collection
     {
-        return Flow::query()->onlyOwnedBy($user)->with('holding')->inDefaultOrder()->get();
+        $flows = Flow::query()->onlyOwnedBy($user)->onlyTopLevel()
+            ->with(['holding.parent', 'account', 'children.account'])
+            ->inDefaultOrder()->get();
+
+        $flows->each(function (Flow $flow): void {
+            $flow->setRelation('parent', null);
+
+            $flow->children->each(fn (Flow $item) => $item
+                ->setRelation('parent', $flow)
+                ->setRelation('holding', null)
+                ->setRelation('children', $flow->newCollection()));
+        });
+
+        return $flows;
+    }
+
+    /**
+     * The flows as they are projected and budgeted: every flow that carries
+     * an amount of its own, so a compound flow is replaced by its items.
+     *
+     * @param  Collection<int, Flow>  $flows
+     * @return Collection<int, Flow>
+     */
+    public function flowLeaves(Collection $flows): Collection
+    {
+        return $flows->flatMap(fn (Flow $flow): Collection => $flow->is_compound ? $flow->children : collect([$flow]))->values();
     }
 
     /**

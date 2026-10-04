@@ -125,6 +125,12 @@ return [
     |
     | `essential` is the default for the budget's needs / wants split.
     |
+    | `itemized` marks an expense category whose flows may hold items of their
+    | own: "Household expenses" is one line on the income & expenses page, set
+    | up item by item on the monthly budget. A flow with items inside comes to
+    | their sum; with none, its own amount stands as the estimate. An item
+    | takes any of the other expense categories, never an itemized one.
+    |
     */
 
     'flow_categories' => [
@@ -139,6 +145,7 @@ return [
             'other_income' => ['label' => 'Other income', 'earned' => false, 'taxation' => 'income_only'],
         ],
         'expense' => [
+            'household' => ['label' => 'Household expenses', 'essential' => true, 'itemized' => true],
             'housing' => ['label' => 'Housing', 'essential' => true],
             'utilities' => ['label' => 'Utilities', 'essential' => true],
             'food' => ['label' => 'Food', 'essential' => true],
@@ -178,6 +185,25 @@ return [
         'self_employed' => ['label' => 'Self-employed', 'hint' => 'Income tax plus self-employment tax', 'schedule' => 'ordinary', 'payroll' => 1.0],
         'income_only' => ['label' => 'Income tax only', 'hint' => 'S-corp profit, a pension, rent', 'schedule' => 'ordinary', 'payroll' => 0.0],
         'capital_gains' => ['label' => 'Long-term capital gains', 'hint' => 'The capital gains brackets', 'schedule' => 'capital_gains', 'payroll' => 0.0],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Automated transfers
+    |--------------------------------------------------------------------------
+    |
+    | What a transfer moves from one holding to another each month, once the
+    | month's income, expenses and growth have landed. `amount` says what the
+    | transfer's amount field means for the kind (null: it is an optional cap);
+    | `keeps` which end its `keep_balance` is held in. A transfer never takes
+    | an asset below zero, and never pays a debt past nothing owed.
+    |
+    */
+
+    'transfer_kinds' => [
+        'sweep' => ['label' => 'Sweep what is left over', 'description' => 'Move everything above a balance you choose to keep in the source.', 'amount' => null, 'keeps' => 'from'],
+        'fixed' => ['label' => 'A fixed amount each month', 'description' => 'Move the same amount every month, as far as the source has it.', 'amount' => 'required', 'keeps' => null],
+        'top_up' => ['label' => 'Top up the destination', 'description' => 'Whenever the destination falls below a balance, refill it from the source.', 'amount' => null, 'keeps' => 'to'],
     ],
 
     /*
@@ -230,6 +256,20 @@ return [
             'single' => 16100,
             'married_joint' => 32200,
             'head_of_household' => 24150,
+        ],
+
+        /*
+         * The additional standard deduction for the aged, from 65. $1,650 a
+         * spouse on a joint return (both counted, as though the same age),
+         * $2,050 for anyone unmarried. Not the temporary $6,000 senior
+         * deduction of 2025-2028, which phases out above $75,000 of income
+         * ($150,000 joint) and is not modelled.
+         */
+        'additional_deduction' => [
+            'age' => 65,
+            'single' => 2050,
+            'married_joint' => 3300,
+            'head_of_household' => 2050,
         ],
 
         'brackets' => [
@@ -391,7 +431,8 @@ return [
     | The kinds of strategy the Retirement Strategizer can run, in the order
     | the form lists them. `ages` says which of the two age fields a kind
     | reads: `at` is a single year, `window` a first and last age. `fills`
-    | marks the kinds that fill a tax bracket and so take a bracket to fill.
+    | marks the kinds that fill a tax bracket and so take a bracket to fill;
+    | `amount` the kind that converts a set amount a year, and so takes one.
     |
     | `conversion_fill_rates` are the federal brackets a bracket-filling
     | strategy may fill to the top of. The top bracket is not among them: it
@@ -403,24 +444,107 @@ return [
         'none' => ['label' => 'No conversion', 'description' => 'Leave traditional money where it is and take the RMDs as they come.', 'ages' => null],
         'lump' => ['label' => 'One large conversion', 'description' => 'Convert the whole traditional balance in a single year.', 'ages' => 'at'],
         'even' => ['label' => 'Even conversions before RMDs', 'description' => 'Empty the traditional balance in equal parts across a window of years, 65 through 72 unless you say otherwise.', 'ages' => 'window'],
+        'fixed' => ['label' => 'Fixed amount each year', 'description' => 'Convert the same amount every year across a window of years, 65 through 72 unless you say otherwise, and whatever is left once the balance runs lower than that.', 'ages' => 'window', 'amount' => true],
         'fill_bracket' => ['label' => 'Fill a tax bracket each year', 'description' => 'Each year, convert just enough to bring income to the top of a tax bracket.', 'ages' => 'window', 'fills' => true],
-        'fill_bracket_irmaa' => ['label' => 'Fill the tax or IRMAA bracket', 'description' => 'Each year, convert up to the top of the tax bracket or of the IRMAA tier you are already in, whichever comes first, so a conversion never raises your Medicare premiums.', 'ages' => 'window', 'fills' => true],
+        'fill_bracket_irmaa' => ['label' => 'Fill the tax or IRMAA bracket', 'description' => 'Each year, convert up to the top of the tax bracket or to $100 short of the top of the IRMAA tier you are already in, whichever comes first, so a conversion never raises your Medicare premiums.', 'ages' => 'window', 'fills' => true],
     ],
 
     'conversion_fill_rates' => [10, 12, 22, 24, 32, 35],
 
     /*
-     * Where the tax on a conversion is paid from. `outside` is other savings
-     * — the taxable bucket first — and leaves the whole conversion in the
-     * Roth. `conversion` takes the tax out of the converted money, so less
+     * Where the tax on a conversion is paid from. `outside` is the year's own
+     * surplus — income less expenses, other tax and IRMAA — and caps the
+     * conversion at what that surplus can pay the tax on; the whole of what
+     * is converted reaches the Roth. `conversion` takes the tax out of the converted money, so less
      * reaches the Roth. The two split modes say how much comes from outside
      * (`amount` is what that figure is) and take the rest from the conversion.
      */
     'conversion_tax_payments' => [
-        'outside' => ['label' => 'From savings outside the conversion', 'amount' => null],
+        'outside' => ['label' => 'From the year\'s spare income (caps the conversion)', 'amount' => null],
         'conversion' => ['label' => 'From the converted money itself', 'amount' => null],
         'percent' => ['label' => 'A percentage from outside, the rest from the conversion', 'amount' => 'percent'],
         'flat' => ['label' => 'A flat amount a year from outside, the rest from the conversion', 'amount' => 'dollars'],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Social Security
+    |--------------------------------------------------------------------------
+    |
+    | What the claiming tool needs from the Social Security Act, none of which
+    | is indexed to inflation.
+    |
+    | `full_retirement_age` is [the last birth year it applies to, years,
+    | months]; null is everyone born later. Someone born on 1 January counts
+    | with the year before, which is not modelled.
+    |
+    | A benefit claimed early loses 5/9 of 1% for each of the first 36 months
+    | and 5/12 of 1% for each month beyond; one delayed past full retirement
+    | age gains 2/3 of 1% a month, up to 70. A spouse's benefit on the other's
+    | record is half that person's full benefit, loses 25/36 of 1% for each of
+    | the first 36 months early and 5/12 of 1% beyond, and earns nothing for
+    | waiting.
+    |
+    | `taxation` is the provisional-income test: other income plus half the
+    | benefit, against two thresholds that have never been raised. Up to half
+    | the benefit is taxable above the first, up to 85% above the second.
+    |
+    */
+
+    'social_security' => [
+        'earliest_age' => 62,
+        'latest_age' => 70,
+
+        'full_retirement_age' => [
+            [1937, 65, 0], [1938, 65, 2], [1939, 65, 4], [1940, 65, 6], [1941, 65, 8], [1942, 65, 10],
+            [1954, 66, 0], [1955, 66, 2], [1956, 66, 4], [1957, 66, 6], [1958, 66, 8], [1959, 66, 10],
+            [null, 67, 0],
+        ],
+
+        'early_reduction' => ['first_months' => 36, 'first_rate' => 5 / 9, 'later_rate' => 5 / 12],
+        'spousal_reduction' => ['first_months' => 36, 'first_rate' => 25 / 36, 'later_rate' => 5 / 12],
+        'delayed_credit' => 2 / 3,
+        'spousal_share' => 0.5,
+
+        'taxation' => [
+            'single' => [25000, 34000],
+            'married_joint' => [32000, 44000],
+            'head_of_household' => [25000, 34000],
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Retirement withdrawals
+    |--------------------------------------------------------------------------
+    |
+    | The orders the withdrawal tool can draw the three buckets down in.
+    | `order` is which bucket is emptied first: `taxable` savings, `deferred`
+    | (traditional) and `free` (Roth, HSA). `proportional` takes from each in
+    | proportion to what it holds; `fills` draws traditional money up to the
+    | top of a tax bracket first and only then follows the order.
+    |
+    | `spending_rules` say how much a retired year takes from the accounts.
+    | `projection` takes whatever the year's expenses and tax leave uncovered,
+    | and saves a surplus; the other two take a set amount whatever the year
+    | needs, and what that leaves to spend is the answer. `reads` is which of
+    | the strategy's two figures the rule takes. A working year always runs
+    | on the projection.
+    |
+    */
+
+    'withdrawal_strategies' => [
+        'conventional' => ['label' => 'Taxable, then traditional, then Roth', 'description' => 'The conventional order: spend ordinary savings first, leave the Roth to grow longest.', 'order' => ['taxable', 'deferred', 'free']],
+        'traditional_first' => ['label' => 'Traditional first', 'description' => 'Draw traditional money down before anything else, to shrink the RMDs to come.', 'order' => ['deferred', 'taxable', 'free']],
+        'roth_first' => ['label' => 'Roth first', 'description' => 'Spend tax-free money first. Usually the dearest order; here for the comparison.', 'order' => ['free', 'taxable', 'deferred']],
+        'proportional' => ['label' => 'From each in proportion', 'description' => 'Take from every bucket in proportion to what it holds, so the mix stays the same.', 'order' => ['taxable', 'deferred', 'free'], 'proportional' => true],
+        'bracket_fill' => ['label' => 'Fill a tax bracket from traditional', 'description' => 'Each year take traditional money up to the top of a tax bracket, then savings, then Roth, so cheap room in the brackets is never wasted.', 'order' => ['taxable', 'free', 'deferred'], 'fills' => true],
+    ],
+
+    'spending_rules' => [
+        'projection' => ['label' => 'Whatever the projection needs', 'description' => 'Each year, take what its expenses and tax leave uncovered. Anything spare is saved.', 'reads' => null],
+        'fixed' => ['label' => 'A fixed amount, rising with inflation', 'description' => 'Take the same amount every retired year, in today\'s dollars. 4% of the starting balance is the classic rule.', 'reads' => 'amount'],
+        'percent' => ['label' => 'A percentage of what is left', 'description' => 'Take a share of the balance each year: the amount moves with the market, and the money never quite runs out.', 'reads' => 'percent'],
     ],
 
     /*
@@ -461,6 +585,11 @@ return [
         // What an heir is taken to earn, before the inheritance, until a
         // conversion strategy says otherwise.
         'heir_income' => 100000,
+        // What a fixed-amount strategy converts a year until it is told
+        // otherwise, in today's dollars.
+        'conversion_amount' => 100000,
+        // The classic "4% rule", for a percentage-of-balance spending rule.
+        'withdrawal_percent' => 4.0,
     ],
 
 ];

@@ -6,6 +6,8 @@ use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
 use App\Services\Finance\ConversionBoard;
 use App\Services\Finance\ConversionMonteCarlo;
+use App\Services\Finance\SocialSecurityBoard;
+use App\Services\Finance\WithdrawalBoard;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -15,11 +17,14 @@ use Inertia\Response;
  */
 class RetirementController extends Controller
 {
-    public function index(Request $request, ConversionBoard $conversions, ConversionMonteCarlo $monteCarlo, string $tab = 'conversions'): Response
+    public function index(Request $request, ConversionBoard $conversions, ConversionMonteCarlo $monteCarlo, SocialSecurityBoard $socialSecurity, WithdrawalBoard $withdrawals, string $tab = 'conversions'): Response
     {
-        // A placeholder until the next tool is decided on.
-        if ($tab === 'more') {
-            return Inertia::render('RetirementMore');
+        if ($tab === 'social-security') {
+            return Inertia::render('SocialSecurity', $socialSecurity->for($request->user()));
+        }
+
+        if ($tab === 'withdrawals') {
+            return Inertia::render('Withdrawals', $withdrawals->for($request->user()));
         }
 
         return Inertia::render('Retirement', [

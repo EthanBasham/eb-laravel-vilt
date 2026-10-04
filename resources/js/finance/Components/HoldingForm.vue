@@ -25,11 +25,14 @@ const props = defineProps({
     // that is already inside it. It narrows the type list to what the parent
     // can hold, and is sent back as `parent_id`.
     parent: { type: Object, default: null },
+    // The armada a new holding starts in — set when adding from an armada's page.
+    armadaId: { type: Number, default: null },
 });
 
 const emit = defineEmits(['close']);
 
 const lists = computed(() => usePage().props.lists);
+const armadas = computed(() => usePage().props.armadas ?? []);
 const types = computed(() => lists.value.holding_types);
 const dialog = ref(null);
 
@@ -38,6 +41,7 @@ const form = useForm({
     plan_type: null,
     tax_type: null,
     parent_id: null,
+    armada_id: null,
     name: '',
     institution: '',
     balance: 0,
@@ -85,6 +89,7 @@ watch(() => props.open, (open) => {
         form.plan_type = props.holding.plan_type;
         form.tax_type = props.holding.tax_type;
         form.parent_id = props.holding.parent_id;
+        form.armada_id = props.holding.armada_id;
         form.name = props.holding.name;
         form.institution = props.holding.institution ?? '';
         form.balance = props.holding.balance;
@@ -99,6 +104,7 @@ watch(() => props.open, (open) => {
     form.reset();
     form.type = firstTypeOn(props.side);
     form.parent_id = props.parent?.id ?? null;
+    form.armada_id = props.armadaId;
     form.annual_rate = types.value[form.type].rate;
     fillRetirementFacts();
 }, { immediate: true });
@@ -196,6 +202,14 @@ const save = () => {
                 <select v-model="form.secured_by_id">
                     <option :value="null">Nothing</option>
                     <option v-for="asset in assets" :key="asset.id" :value="asset.id">{{ asset.name }}</option>
+                </select>
+            </Field>
+
+            <!-- An account inside another sails with the outer one. -->
+            <Field v-if="armadas.length && !form.parent_id" label="Armada" hint="The part of the fleet it belongs with." :error="form.errors.armada_id">
+                <select v-model="form.armada_id">
+                    <option :value="null">Unassigned</option>
+                    <option v-for="armada in armadas" :key="armada.id" :value="armada.id">{{ armada.name }}</option>
                 </select>
             </Field>
 

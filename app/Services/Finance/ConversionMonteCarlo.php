@@ -33,9 +33,6 @@ use Random\Randomizer;
  */
 class ConversionMonteCarlo
 {
-    /** No year loses more than this, however unlucky the draw. */
-    private const WORST_RETURN = -95.0;
-
     /** Nor does deflation run deeper than this. */
     private const WORST_INFLATION = -5.0;
 
@@ -146,12 +143,12 @@ class ConversionMonteCarlo
         $outcomes = [];
 
         foreach ($strategies as $strategy) {
-            $growth = $this->board->growthRate($strategy, $world);
             $inflation = $this->board->inflationRate($strategy, $world);
 
             foreach ($draws as $run => [$returnScores, $inflationScores]) {
                 $path = [
-                    'returns' => array_map(fn (float $score): float => max(self::WORST_RETURN, $growth + $settings->return_volatility * $score), $returnScores),
+                    // Points either side of each bucket's average return.
+                    'shocks' => array_map(fn (float $score): float => $settings->return_volatility * $score, $returnScores),
                     'inflation' => array_map(fn (float $score): float => max(self::WORST_INFLATION, $inflation + $settings->inflation_volatility * $score), $inflationScores),
                 ];
 

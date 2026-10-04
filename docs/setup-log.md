@@ -4744,3 +4744,244 @@ it is too many for a request.
 - **Needs a queue worker** for the background path. `composer run dev` already runs
   `queue:listen` (`QUEUE_CONNECTION=database`); production will need one too.
 - Normal draws understate crashes and ignore bad years clustering; the page says so.
+
+## 2026-10-03 — Finance: bracket-filling leaves room for the withdrawal that pays for it
+
+Reported by the user on their own data: "Fill a tax bracket each year" pushed income into 37%
+when it should have stopped at the top of 35%, and the first year's income on the chart looked
+inflated against the table.
+
+- **The bug.** The conversion was sized against the year's income *before* any withdrawal from
+  traditional, and the withdrawal was worked out afterwards. With the conversion's tax paid from
+  outside and not enough taxable savings to cover it, the engine drew the tax from traditional —
+  more ordinary income, on top of a conversion that had already filled the bracket. On the user's
+  data: $360,872 converted to the top of 35% ($656,700), then $268,967 withdrawn, landing at
+  $925,667.
+- **The fix.** `ConversionBoard::simulate()` now settles the conversion, its tax, and the
+  withdrawal together (`$evaluate`/`$settle`): the conversion is worked out after the withdrawal
+  it causes, so bracket-filling and IRMAA-tier-filling stop the two *together* at the line. On the
+  same data: $209,847 converted plus $151,025 withdrawn = exactly $656,700. Lump and even
+  conversions also now leave the withdrawal's share of the balance where it is.
+- **The chart's dashed line** (`bracket_income_before`, `magi_before`) is now the year as it would
+  have been without converting, worked out by settling the year again with no conversion — not
+  "the same year minus the conversion", which still carried the withdrawal the conversion caused.
+- **`marginal_rate` on a row is the bracket the year's last dollar is in**, not the rate on the
+  next dollar: a year filled exactly to the top of 35% read as 37% before.
+- The year-by-year table gained **Withdrawn** and **Taxable income** columns. Its **Income** is
+  the projection's cash income; the chart plots taxable income, which is why they differed.
+
+## 2026-10-03 — Finance: a conversion paid "from outside" is capped by the year's spare income
+
+At the user's request. `tax_payment = 'outside'` (now labelled "From the year's spare income
+(caps the conversion)") no longer means "from savings": the conversion's tax is paid from the
+year's surplus — cash income + RMD − projected expenses − the year's other tax − IRMAA — and the
+conversion is cut to the amount whose tax that surplus covers. Savings and traditional are never
+drawn down to pay for a conversion, and a year with no surplus converts nothing.
+
+- The amount is found by `ConversionBoard::affordable()`: regula falsi with the Illinois
+  adjustment over the year's tax function, which is piecewise linear, so it lands within a dollar
+  in a few steps. Simulation cost was unchanged (~0.8 ms) on the user's data.
+- In a working year the surplus is not otherwise in the model (wages are assumed to cover their
+  own year), so the conversion tax it pays is taken off the shortfall explicitly; in a retired
+  year the surplus is already what the shortfall measures.
+- The cap applies to every kind of strategy, so "One large conversion" with this setting converts
+  only what one year's surplus can pay for (on the user's data, $227,563 of ~$1.9M), and "Even
+  conversions" may not empty the balance by 72. The three withholding options are uncapped.
+- Tests: the conversion-mechanics tests' retiree now has $1M a year of untaxed spare income, so
+  those tests keep testing the mechanics rather than the cap; the cap has its own tests.
+
+## 2026-10-03 — Finance: an audit of the Retirement Strategizer's arithmetic
+
+At the user's request ("approach it like a senior CPA"). What was wrong, and what changed:
+
+- **IRMAA tiers were read two years stale.** A premium for year Y is set by Y−2 income against
+  *year Y's* tiers, which are indexed to inflation. The engine deflated the Y−2 income by the Y−2
+  price index, i.e. compared it with tiers two years of inflation too low, overstating IRMAA at the
+  margins. MAGI is now kept nominal and deflated by the premium year's index. The IRMAA chart and
+  `magi_tier` show income in premium-year prices, and `fill_bracket_irmaa` stops at the premium
+  year's tier (the strategy's inflation rate projecting the index two years on).
+- **Medicare's first year was charged for twelve months.** It now starts in the birthday month.
+- **No additional standard deduction at 65.** Added (`finance.tax.additional_deduction`, 2026:
+  $2,050 unmarried, $1,650 a spouse, both spouses counted on a joint return) on top of whichever
+  deduction is in force. `TaxCalculator`'s `deduction()`, `tax()`, `marginalRate()`,
+  `grossCeiling()` and the `flowTaxFor()` closure take an optional `$age`. ScenarioBoard and the
+  cashflow run rate pass it too, so projections agree with the strategizer. The temporary $6,000
+  senior deduction (2025–2028, phased out above $75k/$150k) is deliberately not modelled.
+- **One blended growth rate for all three buckets.** Each bucket now grows at its own holdings'
+  weighted rate (an empty bucket takes the fleet blend); a strategy's own rate still overrides all
+  three. Monte Carlo paths now carry `shocks` (points either side of each bucket's average) instead
+  of absolute `returns`. The −95% floor moved into ConversionBoard.
+- **"Tax, yours and theirs" left out IRMAA.** The comparison's headline cost now includes it
+  (relabelled "Tax and IRMAA, yours and theirs", here and in the Monte Carlo card).
+- **The "Taxable income" column was gross income.** It showed ordinary income *before* the
+  deduction. Rows now carry `taxable_income` (after the age-aware deduction) and the bracket chart
+  plots it against the bracket tops as taxable income, so the lines don't move at 65.
+- **A working year's spare income ignored contributions.** Paying a conversion's tax "from spare
+  income" now first sets aside the year's contributions to the accounts.
+- **No early-withdrawal penalty.** Money taken from traditional before 59½ (a withdrawal, or
+  conversion tax withheld from the converted money) now owes 10%, counted until the year of turning
+  60; it is in the year's tax and in a `penalty` row field / `penalties` summary.
+- **Monte Carlo inflation didn't reach expenses.** Projected expenses rise at the average
+  inflation; in a random market they are now scaled by realized ÷ average price level, so a run of
+  high inflation costs something. Income is left as projected.
+
+Reviewed and found correct: the 2026 federal brackets, standard deductions and LTCG thresholds,
+the Uniform Lifetime Table and the SECURE 2.0 RMD start ages, RMDs worked on the opening balance
+and taken before converting, the 2026 IRMAA amounts, the heir's ten-year draw, withholding modes,
+the fixed-point withdrawal settlement and the Monte Carlo percentiles and Box–Muller draws.
+
+Still deliberately left out (the page footnote lists them): tax on growth and sales in the taxable
+bucket, NIIT, the Social Security provisional-income formula (the flow's own taxed portion is used),
+a survivor moving to single brackets, the SS wage base, and the Roth five-year rules.
+
+## 2026-10-03 — Finance: a "Fixed amount each year" conversion strategy
+
+At the user's request. New kind `fixed` (config `finance.conversion_strategies`, flagged
+`amount`) with a new nullable column `fin_conversion_strategies.conversion_amount`, required by
+validation for that kind only. Each year of its window (65–72 by default, like `even`) it converts
+the amount — in today's dollars, raised by the strategy's inflation, so the page's rows show the
+same figure each year — or the whole remaining traditional balance once that is less. It still
+stops at the window's end, and the "from spare income" cap still applies to it like every kind.
+"Start with one of each kind" creates one at `finance.defaults.conversion_amount` ($100,000).
+
+## 2026-10-03 — Finance: a working year's surplus is saved, and a shortfall drawn
+
+At the user's request, reversing the original "while working, income is assumed to cover the
+year" simplification in ConversionBoard. Working and retired years now settle the same way:
+`shortfall = expenses + tax + IRMAA + contributions − income − RMD − withheld`, met from taxable,
+then traditional, then Roth, with a surplus saved to taxable. The only difference left is that a
+working year's contributions are paid into their accounts. Previously a working year's surplus
+beyond contributions vanished from the model, and a working year that overspent was never drawn
+on. Consequence: the projection must list every expense, since anything it leaves out is saved.
+
+## 2026-10-03 — Finance: armadas, household expenses, money routing, and two more retirement tools
+
+Built in one unattended session at the user's request ("build to your heart's content"). Appended
+to as each part landed. Nothing is committed; the working tree already held the uncommitted
+fixed-amount conversion work, and this sits on top of it.
+
+**Schema** — one migration, `2026_10_03_103743_create_fin_armadas_routing_and_retirement_tools`,
+purely additive (new tables and nullable columns, no row rewritten): `fin_armadas`;
+`armada_id` on holdings and flows; `parent_id` and `account_id` on flows; `fin_transfers`;
+`fin_scenario_holdings`; four Social Security columns on `fin_profiles`;
+`fin_social_security_strategies`; `fin_withdrawal_strategies`.
+
+**Decisions, backend** (all in `app/Services/Finance` unless said):
+
+- **Armadas are a pointer, not a container.** `fin_armadas` holds a name; a holding or flow points
+  at one. Only top-level rows carry the pointer — an account inside another, an item inside a
+  household expense, and a flow hung off a holding all follow their owner (`armada_key` on both
+  models). Disbanding an armada nulls the pointers; nothing is deleted. Armada income and
+  expenses are shown before tax, because tax is worked out on the household's incomes together.
+- **Household expenses are a compound flow**, mirroring compound holdings: a flow in an
+  `itemized` category (config; only `household` today) may hold items via `fin_flows.parent_id`.
+  With items it comes to their sum everywhere (`Flow::amountInYear/plannedFor/annual_amount`);
+  with none its own amount is the estimate. So the user can keep one total or itemise, as asked.
+  Items are ordinary flows, so budget actuals and scenario settings work on them unchanged.
+  `Fleet::flows()` now returns the top-level listing (as `holdings()` does) and
+  `Fleet::flowLeaves()` the rows that carry an amount; `ScenarioBoard::rows()` flattens to leaves
+  itself, so ConversionBoard and friends needed no change.
+- **`account_id` vs `holding_id` on a flow.** `holding_id` is what a flow belongs to; the new
+  `account_id` is the asset it is paid into or out of. Must be a leaf asset.
+- **`FleetLedger`** is the new month-by-month walk that keeps what a holding *earned* apart from
+  what was *moved*: growth, then contributions/payments, then routed flows, then transfers in
+  `sort_order`. `FleetProjector` is untouched and still drives the overview, the projector and
+  the snapshots. Simplifications are listed in the class comment; the two worth knowing are that
+  a routed income is netted by the year's *average* tax rate, and that holdings' own monthly
+  contributions still arrive from outside the model (zero one and add a fixed transfer to have
+  it come out of an account). Contributions to assets stop at the retirement year.
+- **A scenario can now adjust holdings** (`fin_scenario_holdings`): rate, monthly contribution,
+  and pinned year-end values. Unlike a flow's pin, a holding's pin re-bases the years after it.
+- **Transfers** come in three kinds (config `finance.transfer_kinds`): `sweep`, `fixed`,
+  `top_up`. Money only leaves an asset; it may arrive at a debt, which it pays down.
+- **Social Security** (`SocialSecurityBoard`): claiming rules in config
+  `finance.social_security`. The benefit at full retirement age lives on the profile
+  (`ss_monthly_benefit`, plus three spouse columns) and is edited on the tab itself rather than
+  in Settings. Implements early reduction, delayed credits, the spousal top-up, the survivor
+  keeping the larger benefit, and the provisional-income taxation test (which the conversion
+  tab still deliberately leaves out). Someone already past a strategy's age claims *now*.
+  "Use this" (`SocialSecurityFlows`) writes the strategy into Income & expenses as flows named
+  "Social Security" / "Social Security (spouse)", replacing its own earlier ones by name.
+- **Withdrawals** (`WithdrawalBoard`): the conversion model minus conversions, reading the same
+  household through the newly extracted `ConversionBoard::world()`. Five orders and three
+  spending rules (config `finance.withdrawal_strategies`, `finance.spending_rules`).
+- **The "More to come" retirement tab is gone**, replaced by the two real ones; its test was
+  rewritten to assert the new tabs and `RetirementMore.vue` deleted.
+- **Sample fleet** now has four armadas, an itemised household expense (the nine day-to-day
+  lines, same amounts as before), salary/rent/bills routed through checking, two transfers, and
+  Social Security benefits for a couple.
+
+**Frontend** (`resources/js/finance`): new pages `Armadas`, `Armada`, `SocialSecurity`,
+`Withdrawals`; new components `ArmadaForm`, `TransferForm`, `ScenarioFlowGroup`,
+`ScenarioHoldingRow`, `SocialSecurityStrategyForm`, `WithdrawalStrategyForm`. Armadas has its own
+rail link. `HoldingForm` and `FlowForm` gained an armada select; `FlowForm` also "Paid into / Paid
+from" and an item mode (`parent` prop) used by the budget. The budget page is where household
+expenses are set up; income & expenses lists transfers; a scenario page now has a net-worth
+chart, a by-armada table that also filters the lists, grouped household rows, and an Assets and a
+Liabilities card. The user's armadas and accounts are shared with every page as lazy props
+(`armadas`, `accounts` in `HandleFinanceInertiaRequests`) so the forms work wherever they open.
+A new expense still defaults to the first *ordinary* category — "Household expenses" is listed
+first but is picked on purpose.
+
+**Verified.** All 852 tests in the suite pass; the new ones are in
+`ArmadaTest`, `HouseholdExpenseTest`, `FleetLedgerTest`, `TransferTest`, `SocialSecurityTest`,
+`WithdrawalStrategyTest`. `vite build` is clean. Every new and changed page was loaded in
+headless Chromium against a throwaway SQLite database with the sample fleet — rows expanded and
+each new dialog opened — with no console errors or failed requests. The headless shell needed
+`libnspr4`, `libnss3` and `libasound2`, which are not installed on this machine; they were
+unpacked from `.deb`s into the session scratchpad and put on `LD_LIBRARY_PATH`, nothing was
+installed system-wide. The migration was then run on the dev Postgres database (additive; row
+counts unchanged), because the dev server was already serving this working tree and would have
+errored on the missing columns.
+
+**Known gaps, for whoever picks this up:**
+
+- The ledger does not draw retirement accounts into checking. In the sample fleet checking runs
+  dry once the salary stops and the scenario page reports the bills it "could not pay" — true to
+  the model, but the answer today is a transfer or a re-routed income, not anything automatic.
+  Tying the withdrawal strategies into the ledger is the natural next step.
+- Holdings' own monthly contributions still appear from outside the model (see FleetLedger).
+- Social Security: someone *already* claiming should enter what they actually receive as an
+  ordinary income; the tool assumes nobody has claimed yet. No earnings test.
+- Applying a Social Security strategy does not write the survivor's step-up into the flows.
+- The withdrawal tab has no Monte Carlo and no heir tax; the conversion tab has both.
+- None of the new pages has been laid out for a phone, like the rest of the sub-project.
+- Two rules were recorded in `.ai/rules` (`finance.md`, `models-finance.md`).
+
+## 2026-10-03 — Finance: "Est. Leftover Taxes" and "Est. Inheritable Amount" on the conversion comparison
+
+At the user's request. The Side by side table on the Roth conversions tab drops "Tax left to
+heirs" and "Tax and IRMAA, yours and theirs", and replaces "Left after heirs' tax" with three
+rows: "All three together", "Est. Leftover Taxes" and "Est. Inheritable Amount".
+
+- `leftover_tax` = the existing heir tax on the traditional balance **plus** a new `gains_tax`:
+  long-term capital gains tax on the growth left in the taxable bucket. `inheritable` =
+  ending balance − `leftover_tax`.
+- The gain needs a basis, so `ConversionBoard::simulate()` now tracks one for the taxable bucket:
+  the opening balance is all basis (the fleet records no cost basis), a saved surplus and
+  contributions add to it, and a withdrawal takes its proportional share out.
+- The gain is realised the way the traditional balance is drawn — ten equal parts, single filer,
+  built-in LTCG brackets, stacked on the heir's income plus that year's tenth of traditional. A
+  charity pays nothing. The stepped-up basis an heir would get is ignored **on purpose**: the
+  user wants the figure to stand in for tax on dividends and sales the model never charges along
+  the way, and for the worst case of having to draw on that money in retirement. The page
+  footnote and the method's docblock both say so; don't "correct" it to zero.
+- The old summary keys (`heir_tax`, `tax_with_heirs`, `ending_after_heir_tax`) are still
+  returned: the Monte Carlo card and its stored runs read them, and were not asked to change.
+
+**Later the same day: the gains part is the owner's tax, not an heir's.** At the user's request,
+following from the rationale above. `gainsTax()` now uses the profile's own filing status,
+deduction (with the age-65 addition) and LTCG brackets, and stacks the gain — still in ten equal
+parts — on the owner's income in the plan's last year, conversions apart, plus any gains already
+in that year. The heir's income and `heir_is_charity` no longer touch it. Federal only, like the
+heir tax beside it; the profile's state brackets are not applied to it.
+
+## 2026-10-03 — Finance: the IRMAA-aware strategy stops $100 short of the cliff
+
+Reported by the user as a three-year IRMAA spike on "Fill the tax or IRMAA bracket". Cause: the
+strategy filled to the dollar, so a filled year's income, deflated two years later, sat *exactly*
+on the tier's ceiling ($500,000 on the user's data, ages 70–72), and floating-point rounding
+tipped it a hair over — into the top tier for 2034–2036. `ConversionBoard::IRMAA_MARGIN` (100,
+today's dollars) now keeps the conversion that far below the line, at the user's request; income
+already inside the margin converts nothing. In a Monte Carlo market realised inflation differs
+from the strategy's, so the margin narrows the risk there rather than removing it.

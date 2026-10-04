@@ -1,10 +1,12 @@
 <script setup>
 import { Link, router } from '@inertiajs/vue3';
-import { IconChevronLeft, IconChevronRight } from '@tabler/icons-vue';
+import { IconChevronLeft, IconChevronRight, IconPencil, IconPlus, IconTrash } from '@tabler/icons-vue';
+import { ref } from 'vue';
 import Card from '../Components/Card.vue';
 import DonutChart from '../Components/DonutChart.vue';
 import EmptyState from '../Components/EmptyState.vue';
 import FinShell from '../Components/FinShell.vue';
+import FlowForm from '../Components/FlowForm.vue';
 import StatTile from '../Components/StatTile.vue';
 import { money, moneyExact, moneySigned, percent } from '../lib/format';
 
@@ -15,6 +17,7 @@ const props = defineProps({
     next: String,
     income: Array,
     expenses: Array,
+    households: Array,
     categories: Array,
     totals: Object,
     split: Array,
@@ -34,6 +37,27 @@ const record = (row, event) => {
         preserveState: true,
     });
 };
+
+/*
+ * Household expenses are set up here. `parent` on the form makes a new flow
+ * an item of that household expense; with neither a flow nor a parent it
+ * adds the household expense itself.
+ */
+const form = ref({ open: false, flow: null, parent: null, category: null });
+
+const setUp = () => { form.value = { open: true, flow: null, parent: null, category: 'household' }; };
+const addItem = (household) => { form.value = { open: true, flow: null, parent: { id: household.id, name: household.name }, category: null }; };
+const edit = (flow) => { form.value = { open: true, flow, parent: null, category: null }; };
+
+const remove = (row) => {
+    const items = row.items?.length;
+
+    if (window.confirm(items ? `Remove ${row.name} and the ${items} items inside it?` : `Remove ${row.name}?`)) {
+        router.delete(`/finance/flows/${row.id}`, { preserveScroll: true });
+    }
+};
+
+const varianceClass = (variance) => (variance === null ? 'text-fin-grey-400' : (variance >= 0 ? 'text-fin-green-600' : 'text-fin-red-600'));
 
 const sections = [
     { key: 'income', title: 'Income', rows: () => props.income },
@@ -57,8 +81,9 @@ const splitTone = (part) => {
             <Link :href="`/finance/budget?month=${next}`" class="fin-btn fin-btn-quiet" aria-label="Next month"><IconChevronRight :size="16" /></Link>
         </template>
 
-        <EmptyState v-if="!income.length && !expenses.length" title="Nothing planned for this month" body="The budget is built from your income and expenses. Add some and they appear here.">
+        <EmptyState v-if="!income.length && !expenses.length && !households.length" title="Nothing planned for this month" body="The budget is built from your income and expenses. Add some and they appear here, or start with what the household spends.">
             <Link href="/finance/cashflow" class="fin-btn fin-btn-primary">Go to income &amp; expenses</Link>
+            <button type="button" class="fin-btn fin-btn-quiet" @click="setUp"><IconPlus :size="16" /> Set up household expenses</button>
         </EmptyState>
 
         <div v-else class="flex flex-col gap-5">
@@ -111,6 +136,78 @@ const splitTone = (part) => {
                             </table>
                         </div>
                     </Card>
+
+                    <Card
+                        v-for="household in households" :key="household.id" :title="household.name" flush
+                        :subtitle="household.is_itemised ? 'Itemised: it comes to what its items add up to, here and everywhere else.' : 'One estimate for now. Add items to itemise it — it then comes to their sum.'"
+                    >
+                        <template #actions>
+                            <button type="button" class="fin-icon-btn" :aria-label="`Edit ${household.name}`" @click="edit(household.flow)"><IconPencil :size="16" /></button>
+                            <button type="button" class="fin-icon-btn" :aria-label="`Remove ${household.name}`" @click="remove(household)"><IconTrash :size="16" /></button>
+                            <button type="button" class="fin-btn fin-btn-quiet" @click="addItem(household)"><IconPlus :size="16" /> Item</button>
+                        </template>
+
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead>
+                                    <tr class="border-y border-fin-grey-200 bg-fin-cream-50 text-left text-xs text-fin-grey-500">
+                                        <th class="px-5 py-2.5 font-medium">{{ household.is_itemised ? 'Item' : 'Line' }}</th>
+                                        <th class="px-3 py-2.5 text-right font-medium">Planned</th>
+                                        <th class="w-36 px-3 py-2.5 text-right font-medium">Actual</th>
+                                        <th class="px-3 py-2.5 text-right font-medium">Difference</th>
+                                        <th class="px-5 py-2.5"><span class="sr-only">Actions</span></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Not itemised: the one estimate, recorded against like any line. -->
+                                    <tr v-if="!household.is_itemised" class="border-b border-fin-grey-100">
+                                        <td class="px-5 py-2.5">
+                                            <span class="font-medium text-fin-black">Everything, estimated</span>
+                                            <span class="block text-xs text-fin-grey-500">Edit it to change the estimate</span>
+                                        </td>
+                                        <td class="px-3 py-2.5 text-right text-fin-charcoal">{{ moneyExact(household.planned) }}</td>
+                                        <td class="px-3 py-2.5">
+                                            <input type="number" min="0" step="0.01" class="text-right" :value="household.actual" :aria-label="`Actual for ${household.name}`" placeholder="—" @change="record(household, $event)">
+                                        </td>
+                                        <td class="px-3 py-2.5 text-right font-medium" :class="varianceClass(household.variance)">{{ household.variance === null ? '—' : moneySigned(household.variance) }}</td>
+                                        <td class="px-5 py-2.5" />
+                                    </tr>
+
+                                    <tr v-for="row in household.items" :key="row.id" class="border-b border-fin-grey-100" :class="{ 'opacity-55': row.planned === 0 && row.actual === null }">
+                                        <td class="px-5 py-2.5">
+                                            <span class="font-medium text-fin-black">{{ row.name }}</span>
+                                            <span class="block text-xs text-fin-grey-500">{{ row.category_label }}<template v-if="row.planned === 0"> · not this month</template></span>
+                                        </td>
+                                        <td class="px-3 py-2.5 text-right text-fin-charcoal">{{ moneyExact(row.planned) }}</td>
+                                        <td class="px-3 py-2.5">
+                                            <input type="number" min="0" step="0.01" class="text-right" :value="row.actual" :aria-label="`Actual for ${row.name}`" placeholder="—" @change="record(row, $event)">
+                                        </td>
+                                        <td class="px-3 py-2.5 text-right font-medium" :class="varianceClass(row.variance)">{{ row.variance === null ? '—' : moneySigned(row.variance) }}</td>
+                                        <td class="whitespace-nowrap px-5 py-2.5 text-right">
+                                            <button type="button" class="fin-icon-btn" :aria-label="`Edit ${row.name}`" @click="edit(row.flow)"><IconPencil :size="16" /></button>
+                                            <button type="button" class="fin-icon-btn" :aria-label="`Remove ${row.name}`" @click="remove(row)"><IconTrash :size="16" /></button>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                                <tfoot v-if="household.is_itemised">
+                                    <tr class="bg-fin-cream-50/60 font-semibold text-fin-black">
+                                        <td class="px-5 py-2.5">Total</td>
+                                        <td class="px-3 py-2.5 text-right">{{ moneyExact(household.planned) }}</td>
+                                        <td class="px-3 py-2.5 pr-6 text-right">{{ household.actual === null ? '—' : moneyExact(household.actual) }}</td>
+                                        <td colspan="2" />
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    </Card>
+
+                    <div v-if="!households.length" class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-dashed border-fin-grey-300 bg-fin-cream-100/60 px-5 py-4">
+                        <p class="max-w-xl text-sm text-fin-grey-600">
+                            <span class="font-semibold text-fin-black">Household expenses.</span>
+                            Rather than list every bill under Income &amp; expenses, keep them here as one line that is either a single estimate or the sum of the items you give it.
+                        </p>
+                        <button type="button" class="fin-btn fin-btn-primary" @click="setUp"><IconPlus :size="16" /> Set up household expenses</button>
+                    </div>
                 </div>
 
                 <div class="flex flex-col gap-5">
@@ -139,5 +236,7 @@ const splitTone = (part) => {
                 </div>
             </div>
         </div>
+
+        <FlowForm :open="form.open" :flow="form.flow" :parent="form.parent" :category="form.category" direction="expense" @close="form.open = false" />
     </FinShell>
 </template>

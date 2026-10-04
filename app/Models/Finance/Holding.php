@@ -34,9 +34,10 @@ use Database\Factories\Finance\HoldingFactory;
  * @property-read string $group
  * @property-read string $tax_treatment
  * @property-read bool $is_investable
+ * @property-read ?int $armada_key
  * @property-read array<string, mixed> $props
  */
-#[Fillable(['user_id', 'parent_id', 'side', 'type', 'plan_type', 'tax_type', 'name', 'institution', 'balance', 'annual_rate', 'monthly_contribution', 'secured_by_id', 'notes'])]
+#[Fillable(['user_id', 'armada_id', 'parent_id', 'side', 'type', 'plan_type', 'tax_type', 'name', 'institution', 'balance', 'annual_rate', 'monthly_contribution', 'secured_by_id', 'notes'])]
 class Holding extends OwnedModel
 {
     /** @use HasFactory<HoldingFactory> */
@@ -198,11 +199,21 @@ class Holding extends OwnedModel
         });
     }
 
+    /**
+     * The armada the holding sails in. An account inside another goes where
+     * the outer one goes, whatever its own column says.
+     */
+    protected function armadaKey(): Attribute
+    {
+        return Attribute::get(fn (): ?int => $this->parent ? $this->parent->armada_id : $this->armada_id);
+    }
+
     protected function props(): Attribute
     {
         return Attribute::get(fn (): array => [
             'id' => $this->id,
             'side' => $this->side,
+            'armada_id' => $this->armada_key,
             'parent_id' => $this->parent_id,
             'type' => $this->type,
             'plan_type' => $this->plan_type,
@@ -249,6 +260,12 @@ class Holding extends OwnedModel
     }
 
     // Relationships
+
+    /** @return BelongsTo<Armada, $this> */
+    public function armada(): BelongsTo
+    {
+        return $this->belongsTo(Armada::class);
+    }
 
     /** @return BelongsTo<Holding, $this> */
     public function parent(): BelongsTo

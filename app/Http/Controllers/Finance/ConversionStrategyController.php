@@ -32,6 +32,7 @@ class ConversionStrategyController extends Controller
             'user_id' => $request->user()->id,
             'name' => $kind['label'],
             'kind' => $key,
+            'conversion_amount' => ($kind['amount'] ?? false) ? config('finance.defaults.conversion_amount') : null,
             'heir_income' => config('finance.defaults.heir_income'),
         ])));
 

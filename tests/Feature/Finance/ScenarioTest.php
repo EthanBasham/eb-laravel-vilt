@@ -127,7 +127,8 @@ it('takes each year\'s tax off what is left, on tables that move with inflation'
 
 /**
  * The same flat pension as above. With the tables held still its tax is the
- * same $2,140 every year; left to the profile's 2.5% it falls; and a scenario
+ * same $2,140 every year until 65, when the additional deduction for the aged
+ * takes it to $1,894; left to the profile's 2.5% it falls; and a scenario
  * that raises the tables faster than that taxes it less again.
  */
 it('raises the tax tables at the scenario\'s own rate when it has one', function () {
@@ -143,7 +144,8 @@ it('raises the tax tables at the scenario\'s own rate when it has one', function
         ->assertInertia(fn ($page) => $page
             ->where('bracket_inflation', ['rate' => 0, 'is_own' => true, 'profile_rate' => 2.5])
             ->where('totals.10.taxes', 2140)
-            ->where('totals.40.taxes', 2140));
+            ->where('totals.14.taxes', 2140)
+            ->where('totals.15.taxes', 1894));
 
     $this->actingAs($user)->get(route('finance.scenarios.show', $profileRate))
         ->assertInertia(fn ($page) => $page->where('bracket_inflation', ['rate' => 2.5, 'is_own' => false, 'profile_rate' => 2.5]));

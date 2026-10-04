@@ -31,6 +31,7 @@ const props = defineProps({
     fill_rates: Array,
     tax_payments: Object,
     default_heir_income: Number,
+    default_conversion_amount: Number,
     defaults: Object,
     scenarios: Array,
     brackets: Array,
@@ -92,10 +93,18 @@ const lines = (field) => props.strategies.map((strategy, index) => ({
 
 const tierName = (tier) => (tier === 0 ? 'no surcharge' : `tier ${tier}`);
 
+/*
+ * Each line on the two charts is named for what begins above it — "35%
+ * starts", "Tier 4 starts" — not for what it is the top of. A year sitting
+ * just over a line named "32%" reads as being in the 32% bracket, when that
+ * line is where 32% ends.
+ */
+const startsAt = (lines) => lines.map((line) => ({ ...line, label: `${line.above} starts` }));
+
 const bracketPoints = computed(() => selected.value.rows.map((row) => ({
     x: row.age,
-    y: row.bracket_income,
-    before: row.bracket_income_before,
+    y: row.taxable_income,
+    before: row.taxable_income_before,
     note: `In the ${row.marginal_rate}% bracket.${row.conversion ? ` ${money(row.conversion)} converted.` : ''}`,
 })));
 
@@ -120,15 +129,18 @@ const balanceLines = computed(() => [
 const figures = [
     { key: 'converted', label: 'Converted to Roth' },
     { key: 'total_rmd', label: 'RMDs taken' },
-    { key: 'lifetime_tax', label: 'Tax you pay', best: 'low' },
+    { key: 'lifetime_tax', label: 'Tax you pay', best: 'low', note: (summary) => (summary.penalties ? `${moneyBrief(summary.penalties)} early-withdrawal penalty` : '') },
     { key: 'conversion_tax', label: 'of it, on the conversions', note: (summary) => (summary.conversion_tax_withheld ? `${moneyBrief(summary.conversion_tax_withheld)} from the converted money` : '') },
     { key: 'irmaa', label: 'IRMAA surcharges', best: 'low', note: (summary) => (summary.irmaa_years ? `${summary.irmaa_years} ${summary.irmaa_years === 1 ? 'year' : 'years'}` : '') },
-    { key: 'heir_tax', label: 'Tax left to heirs', note: (summary, strategy) => (strategy.heir_is_charity ? 'charity' : (summary.heir_tax ? `${summary.heir_tax_rate}% of it` : '')) },
-    { key: 'tax_with_heirs', label: 'Tax, yours and theirs', best: 'low', strong: true },
     { key: 'ending_traditional', label: 'Traditional at the end' },
     { key: 'ending_roth', label: 'Roth at the end' },
     { key: 'ending_taxable', label: 'Taxable savings at the end' },
-    { key: 'ending_after_heir_tax', label: 'Left after heirs\' tax', best: 'high', strong: true },
+    { key: 'ending_balance', label: 'All three together' },
+    {
+        key: 'leftover_tax', label: 'Est. Leftover Taxes', best: 'low',
+        note: (summary, strategy) => `${strategy.heir_is_charity ? 'charity' : moneyBrief(summary.heir_tax)} on traditional · ${moneyBrief(summary.gains_tax)} on savings' gains`,
+    },
+    { key: 'inheritable', label: 'Est. Inheritable Amount', best: 'high', strong: true },
 ];
 
 const bestOf = (figure) => {
@@ -165,10 +177,10 @@ const convertsWhen = (strategy) => {
 
         <div class="flex flex-col gap-5">
             <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <StatTile accent label="The plan" :value="`${profile.age} to ${profile.life_expectancy}`" :hint="`${profile.filing_status} · retiring at ${profile.retirement_age}`" />
                 <StatTile label="Traditional" :value="money(balances.deferred)" :hint="`RMDs begin at ${profile.rmd_start_age}`" />
                 <StatTile label="Roth & HSA" :value="money(balances.free)" hint="Never taxed again" />
-                <StatTile label="Taxable savings" :value="money(balances.taxable)" hint="Pays the tax on a conversion first" />
-                <StatTile feature label="The plan" :value="`${profile.age} to ${profile.life_expectancy}`" :hint="`${profile.filing_status} · retiring at ${profile.retirement_age}`" />
+                <StatTile label="Taxable savings" :value="money(balances.taxable)" hint="Spent first once retired" />
             </div>
 
             <p v-if="!profile.has_birth_date" class="rounded-xl border border-fin-gold-300 bg-fin-gold-100 px-4 py-3 text-sm text-fin-charcoal">
@@ -196,6 +208,7 @@ const convertsWhen = (strategy) => {
                                             {{ strategy.name }}
                                         </span>
                                         <span class="mt-0.5 block">{{ strategy.kind_label }} {{ convertsWhen(strategy) }}</span>
+                                        <span v-if="kinds[strategy.kind]?.amount" class="block">{{ moneyBrief(strategy.conversion_amount) }} a year</span>
                                         <span class="block">{{ assumptions(strategy) }}</span>
                                         <span class="mt-1 flex justify-end">
                                             <button type="button" class="fin-icon-btn" :aria-label="`Edit ${strategy.name}`" @click="edit(strategy)"><IconPencil :size="15" /></button>
@@ -274,16 +287,16 @@ const convertsWhen = (strategy) => {
                             <section>
                                 <h3 class="text-sm font-semibold text-fin-black">Income against the tax brackets</h3>
                                 <p class="mb-3 mt-0.5 text-xs text-fin-grey-500">
-                                    Each line is the top of a federal bracket, deduction included. The dashed line is the year without its conversion; the gold between is what the conversion added.
+                                    Taxable ordinary income — the projection's, plus RMDs, conversions and withdrawals, less the standard deduction — against the federal brackets; each line is where the bracket named on it begins. The dashed line is the year had it not converted; the gold between is what converting added.
                                 </p>
-                                <ThresholdChart :points="bracketPoints" :thresholds="brackets" :color="colorOf(selectedIndex)" :format-x="age" label="Ordinary income" />
+                                <ThresholdChart :points="bracketPoints" :thresholds="startsAt(brackets)" :color="colorOf(selectedIndex)" :format-x="age" label="Taxable income" />
                             </section>
                             <section>
                                 <h3 class="text-sm font-semibold text-fin-black">Income against the IRMAA tiers</h3>
                                 <p class="mb-3 mt-0.5 text-xs text-fin-grey-500">
-                                    Crossing a line raises Medicare premiums two years later, and by the whole step, not a slice. Only years from 63 on can cost anything.
+                                    Each line is where the tier named on it begins. Crossing one raises Medicare premiums two years later, and by the whole step, not a slice. Only years from 63 on can cost anything. Income is shown in the prices of the year it sets the premium for, so it reads against today's tiers.
                                 </p>
-                                <ThresholdChart :points="irmaaPoints" :thresholds="irmaa_tiers" :color="colorOf(selectedIndex)" :format-x="age" label="Income for IRMAA" />
+                                <ThresholdChart :points="irmaaPoints" :thresholds="startsAt(irmaa_tiers)" :color="colorOf(selectedIndex)" :format-x="age" label="Income for IRMAA" />
                             </section>
                         </div>
 
@@ -305,9 +318,11 @@ const convertsWhen = (strategy) => {
                                     <thead class="sticky top-0">
                                         <tr class="bg-fin-cream-50 text-left text-xs text-fin-grey-500">
                                             <th class="px-4 py-2.5 font-medium">Age</th>
-                                            <th class="px-3 py-2.5 text-right font-medium">Income</th>
+                                            <th class="px-3 py-2.5 text-right font-medium" title="What your projection brings in, before tax">Income</th>
                                             <th class="px-3 py-2.5 text-right font-medium">RMD</th>
                                             <th class="px-3 py-2.5 text-right font-medium">Converted</th>
+                                            <th class="px-3 py-2.5 text-right font-medium" title="Taken from traditional to pay for spending or tax">Withdrawn</th>
+                                            <th class="px-3 py-2.5 text-right font-medium" title="Ordinary income less the standard deduction: what the tax brackets are read against">Taxable income</th>
                                             <th class="px-3 py-2.5 text-right font-medium">Tax <span class="font-normal">(on the conversion)</span></th>
                                             <th class="px-3 py-2.5 text-right font-medium">Bracket</th>
                                             <th class="px-3 py-2.5 text-right font-medium">IRMAA</th>
@@ -321,9 +336,12 @@ const convertsWhen = (strategy) => {
                                             <td class="px-3 py-2 text-right text-fin-charcoal">{{ money(row.income) }}</td>
                                             <td class="px-3 py-2 text-right text-fin-charcoal">{{ row.rmd ? money(row.rmd) : '—' }}</td>
                                             <td class="px-3 py-2 text-right font-medium" :class="row.conversion ? 'text-fin-gold-600' : 'text-fin-grey-400'">{{ row.conversion ? money(row.conversion) : '—' }}</td>
+                                            <td class="px-3 py-2 text-right" :class="row.withdrawal ? 'text-fin-charcoal' : 'text-fin-grey-400'">{{ row.withdrawal ? money(row.withdrawal) : '—' }}</td>
+                                            <td class="px-3 py-2 text-right font-medium text-fin-black" :title="`${money(row.bracket_income)} before the deduction`">{{ money(row.taxable_income) }}</td>
                                             <td class="whitespace-nowrap px-3 py-2 text-right text-fin-charcoal">
                                                 {{ money(row.tax) }}
                                                 <span v-if="row.conversion" class="text-fin-gold-600" :title="row.conversion_tax_withheld ? `${money(row.conversion_tax_withheld)} of it taken from the converted money` : 'Paid from outside the conversion'">({{ money(row.conversion_tax) }})</span>
+                                                <span v-if="row.penalty" class="block text-[11px] text-fin-red-600">incl. {{ money(row.penalty) }} penalty</span>
                                             </td>
                                             <td class="px-3 py-2 text-right text-fin-charcoal">{{ row.marginal_rate }}%</td>
                                             <td class="px-3 py-2 text-right" :class="row.irmaa ? 'font-medium text-fin-red-600' : 'text-fin-grey-400'">{{ row.irmaa ? money(row.irmaa) : '—' }}</td>
@@ -338,16 +356,16 @@ const convertsWhen = (strategy) => {
                 </Card>
 
                 <p class="text-xs text-fin-grey-500">
-                    A planning model, not tax advice. It uses the {{ tax_year }} federal brackets, your standard deduction, your state and local brackets and the IRMAA tiers, all raised each year by the strategy's inflation rate, and the IRS Uniform Lifetime Table for RMDs.
-                    IRMAA is charged from 65 for {{ profile.persons === 1 ? 'one person' : 'two people' }}. Heirs are taken to draw an inherited traditional balance in ten equal parts as a single filer, with no state tax.
-                    It leaves out tax on growth in the taxable account, the Roth five-year rules and Social Security's real taxation formula. Those omissions bear on every strategy alike, so the comparison holds up better than any single figure does.
+                    A planning model, not tax advice. It uses the {{ tax_year }} federal brackets, your standard deduction (plus the additional deduction from 65), your state and local brackets and the IRMAA tiers, all raised each year by the strategy's inflation rate, and the IRS Uniform Lifetime Table for RMDs.
+                    IRMAA is charged from 65 for {{ profile.persons === 1 ? 'one person' : 'two people' }}. Money taken from traditional before 59½ pays the 10% penalty. Est. Leftover Taxes is what is still owed on what is left, in two parts. One is the income tax an heir pays drawing the traditional balance in ten equal parts as a single filer. The other is long-term capital gains tax on the growth in taxable savings, worked on your own filing status and brackets, realised in ten equal parts on top of the income you have in the plan's last year. That second part is yours rather than an heir's on purpose, and ignores the stepped-up basis an heir would get: it stands in for the tax on dividends and sales the plan never charges along the way, and for what you would pay if you had to draw on that money in an emergency. Neither part includes state tax.
+                    It leaves out tax on growth and sales in the taxable account along the way, the net investment income tax, the temporary senior deduction, a survivor moving to single brackets, the Roth five-year rules and Social Security's real taxation formula. Most of those bear on every strategy alike, so the comparison holds up better than any single figure does.
                 </p>
             </template>
         </div>
 
         <ConversionStrategyForm
             :open="form.open" :strategy="form.strategy" :kinds="kinds" :fill-rates="fill_rates" :tax-payments="tax_payments" :defaults="defaults"
-            :scenarios="scenarios" :profile="profile" :growth-rate="growth_rate" :heir-income="default_heir_income" @close="form.open = false"
+            :scenarios="scenarios" :profile="profile" :growth-rate="growth_rate" :heir-income="default_heir_income" :conversion-amount="default_conversion_amount" @close="form.open = false"
         />
     </FinShell>
 </template>
