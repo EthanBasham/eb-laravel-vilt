@@ -1,7 +1,7 @@
 <script setup>
 import { Deferred, router, usePage } from '@inertiajs/vue3';
-import { IconArchive, IconCopy, IconPencil, IconPlus, IconSparkles } from '@tabler/icons-vue';
-import { computed, ref, watch } from 'vue';
+import { IconArchive, IconCopy, IconFileTypePdf, IconPencil, IconPlus, IconSparkles } from '@tabler/icons-vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import Card from '../Components/Card.vue';
 import ConversionStrategyForm from '../Components/ConversionStrategyForm.vue';
 import EmptyState from '../Components/EmptyState.vue';
@@ -108,6 +108,35 @@ watch(() => props.strategies.map((strategy) => strategy.id), (ids) => {
 // One strategy in the report is reported on alone, with nothing to compare.
 const isSingle = computed(() => props.strategies.length === 1);
 
+/*
+ * The report as a PDF, by way of the browser's own print dialog. The page
+ * takes the paper's layout first (FinShell's `fin-printing` styles say why),
+ * waits a frame for the charts to redraw at that width, and then prints. The
+ * dialog names the file after the document's title, so that is lent to the
+ * report for as long as the dialog is open.
+ */
+const printedOn = new Date().toLocaleDateString(undefined, { dateStyle: 'long' });
+
+const printReport = async () => {
+    const root = document.documentElement;
+    const title = document.title;
+
+    const restore = () => {
+        root.classList.remove('fin-printing');
+        document.title = title;
+        window.removeEventListener('afterprint', restore);
+    };
+
+    root.classList.add('fin-printing');
+    document.title = `Roth conversion report · ${isSingle.value ? selected.value.label : `${props.strategies.length} strategies`}`;
+    window.addEventListener('afterprint', restore);
+
+    await new Promise((resolve) => { requestAnimationFrame(() => requestAnimationFrame(resolve)); });
+    await nextTick();
+
+    window.print();
+};
+
 const selectedIndex = computed(() => props.strategies.findIndex((strategy) => strategy.id === selectedId.value));
 const selected = computed(() => props.strategies[selectedIndex.value] ?? null);
 
@@ -213,10 +242,13 @@ const convertsWhen = (strategy) => {
             </form>
         </template>
 
-        <RetirementTabs current="conversions" />
+        <RetirementTabs class="printing:hidden" current="conversions" />
 
-        <div class="flex flex-col gap-5">
-            <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <!-- With `printing:`, the width of the paper: letter on its side, less the margins. -->
+        <div class="flex flex-col gap-5 printing:block printing:w-[976px] printing:space-y-5">
+            <p class="hidden text-sm text-fin-grey-600 printing:block">Roth conversion report · {{ printedOn }}</p>
+
+            <div class="fin-keep grid gap-4 sm:grid-cols-2 xl:grid-cols-4 printing:grid-cols-4">
                 <StatTile accent label="The plan" :value="`${profile.age} to ${profile.life_expectancy}`" :hint="`${profile.filing_status} · retiring at ${profile.retirement_age}`" />
                 <StatTile label="Traditional" :value="money(balances.deferred)" :hint="`RMDs begin at ${profile.rmd_start_age}`" />
                 <StatTile label="Roth & HSA" :value="money(balances.free)" hint="Never taxed again" />
@@ -236,7 +268,7 @@ const convertsWhen = (strategy) => {
             </EmptyState>
 
             <template v-else>
-                <StrategyHoldingArea :held="held" :kinds="kinds" :scenarios="scenarios" :comparison="comparison" @build="build" @edit="edit" />
+                <StrategyHoldingArea class="printing:hidden" :held="held" :kinds="kinds" :scenarios="scenarios" :comparison="comparison" @build="build" @edit="edit" />
 
                 <p v-if="!strategies.length" class="rounded-xl border border-fin-gold-300 bg-fin-gold-100 px-4 py-3 text-sm text-fin-charcoal">
                     Nothing is in the report. Add one strategy from the holding area above for a report on it alone, or several to compare them.
@@ -247,12 +279,13 @@ const convertsWhen = (strategy) => {
                 <!-- One strategy: its figures as tiles, with nothing to be best of. -->
                 <Card v-if="isSingle" :title="selected.label" :subtitle="`${[selected.kind_label, convertsWhen(selected)].filter(Boolean).join(' ')} · ${assumptions(selected)}. Over the whole plan, in today's dollars.`">
                     <template #actions>
+                        <button type="button" class="fin-btn fin-btn-quiet" @click="printReport"><IconFileTypePdf :size="16" /> Export PDF</button>
                         <button type="button" class="fin-btn fin-btn-quiet" @click="edit(selected)"><IconPencil :size="16" /> Edit</button>
                         <button type="button" class="fin-icon-btn" :aria-label="`Copy ${selected.label}`" title="Copy" @click="duplicate(selected)"><IconCopy :size="15" /></button>
                         <button type="button" class="fin-icon-btn" :aria-label="`Move ${selected.label} to the holding area`" title="Move to the holding area" @click="hold(selected)"><IconArchive :size="15" /></button>
                     </template>
 
-                    <dl class="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <dl class="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-4 printing:grid-cols-4">
                         <div v-for="figure in figures" :key="figure.key">
                             <dt class="text-xs text-fin-grey-500">{{ figure.alone ?? figure.label }}</dt>
                             <dd class="mt-0.5 text-fin-black" :class="figure.strong ? 'text-lg font-bold' : 'text-base font-semibold'" :title="money(selected.summary[figure.key])">
@@ -272,6 +305,7 @@ const convertsWhen = (strategy) => {
 
                 <Card v-else title="Side by side" :subtitle="`Over the whole plan, in today's dollars. A green figure is the best in its row. ${comparison.count} of at most ${comparison.max} in the report.`" flush>
                     <template #actions>
+                        <button type="button" class="fin-btn fin-btn-quiet" @click="printReport"><IconFileTypePdf :size="16" /> Export PDF</button>
                         <button type="button" class="fin-btn fin-btn-quiet" @click="clearComparison"><IconArchive :size="16" /> Clear Report</button>
                     </template>
 
@@ -324,7 +358,7 @@ const convertsWhen = (strategy) => {
 
                 <Deferred data="monte_carlo">
                     <template #fallback>
-                        <div class="rounded-2xl border border-fin-grey-200 bg-fin-white p-5">
+                        <div class="rounded-2xl border border-fin-grey-200 bg-fin-white p-5 printing:hidden">
                             <p class="text-sm font-semibold text-fin-black">Across many markets</p>
                             <p class="mt-0.5 text-xs text-fin-grey-500">Running the strategies through random markets…</p>
                             <div class="mt-4 flex flex-col gap-2">
@@ -336,7 +370,7 @@ const convertsWhen = (strategy) => {
                     <MonteCarloCard :monte-carlo="monte_carlo" :strategies="strategies" :color-of="colorOfStrategy" />
                 </Deferred>
 
-                <div v-if="strategies.length > 1" class="grid gap-5 xl:grid-cols-2">
+                <div v-if="strategies.length > 1" class="grid gap-5 xl:grid-cols-2 printing:grid-cols-2">
                     <Card title="Tax and IRMAA each year" subtitle="What each strategy costs, year by year.">
                         <LineChart :series="lines('tax_and_irmaa')" :height="240" :format-x="age" :x-ticks="6" />
                     </Card>
@@ -345,7 +379,7 @@ const convertsWhen = (strategy) => {
                     </Card>
                 </div>
 
-                <Card v-if="selected" :title="isSingle ? 'Year by year' : 'A closer look'" :subtitle="isSingle ? 'Against the lines that matter: the tops of the tax brackets, and the IRMAA tiers.' : 'One strategy against the lines that matter: the tops of the tax brackets, and the IRMAA tiers.'">
+                <Card v-if="selected" class="fin-card-splits" :title="isSingle ? 'Year by year' : 'A closer look'" :subtitle="isSingle ? 'Against the lines that matter: the tops of the tax brackets, and the IRMAA tiers.' : 'One strategy against the lines that matter: the tops of the tax brackets, and the IRMAA tiers.'">
                     <template v-if="strategies.length > 1" #actions>
                         <div class="flex flex-wrap gap-1.5" role="group" aria-label="Strategy to look at">
                             <button
@@ -360,8 +394,11 @@ const convertsWhen = (strategy) => {
                         </div>
                     </template>
 
-                    <div class="flex flex-col gap-7">
-                        <div class="grid gap-7 xl:grid-cols-2">
+                    <div class="flex flex-col gap-7 printing:block printing:space-y-7">
+                        <!-- The picker is not printed, so the paper names the strategy looked at. -->
+                        <p v-if="!isSingle" class="hidden text-sm font-semibold text-fin-black printing:block">{{ selected.label }}</p>
+
+                        <div class="fin-keep grid gap-7 xl:grid-cols-2 printing:grid-cols-2">
                             <section>
                                 <h3 class="text-sm font-semibold text-fin-black">Income against the tax brackets</h3>
                                 <p class="mb-3 mt-0.5 text-xs text-fin-grey-500">
@@ -378,20 +415,20 @@ const convertsWhen = (strategy) => {
                             </section>
                         </div>
 
-                        <section v-if="fan">
+                        <section v-if="fan" class="fin-keep">
                             <h3 class="text-sm font-semibold text-fin-black">Everything left, across {{ fan.runs }} markets</h3>
                             <p class="mb-3 mt-0.5 text-xs text-fin-grey-500">Traditional, Roth and taxable together, in today's dollars. The band is where the middle 80% of markets land.</p>
                             <FanChart :band="fan.band" :line="fan.line" :color="colorOf(selectedIndex)" :format-x="age" />
                         </section>
 
-                        <section>
+                        <section class="fin-keep">
                             <h3 class="mb-3 text-sm font-semibold text-fin-black">Balances</h3>
                             <LineChart :series="balanceLines" :height="230" :format-x="age" :x-ticks="8" />
                         </section>
 
                         <section>
                             <h3 class="mb-3 text-sm font-semibold text-fin-black">{{ isSingle ? 'Every year' : 'Year by year' }}</h3>
-                            <div class="max-h-[26rem] overflow-auto rounded-xl border border-fin-grey-200">
+                            <div class="max-h-[26rem] overflow-auto rounded-xl border border-fin-grey-200 printing:rounded-none printing:border-0">
                                 <table class="w-full text-sm">
                                     <thead class="sticky top-0">
                                         <tr class="bg-fin-cream-50 text-left text-xs text-fin-grey-500">
@@ -433,7 +470,7 @@ const convertsWhen = (strategy) => {
                     </div>
                 </Card>
 
-                <p class="text-xs text-fin-grey-500">
+                <p class="fin-keep text-xs text-fin-grey-500">
                     A planning model, not tax advice. It uses the {{ tax_year }} federal brackets, your standard deduction (plus the additional deduction from 65), your state and local brackets and the IRMAA tiers, all raised each year by the strategy's inflation rate, and the IRS Uniform Lifetime Table for RMDs.
                     IRMAA is charged from 65 for {{ profile.persons === 1 ? 'one person' : 'two people' }}. Money taken from traditional before 59½ pays the 10% penalty. Est. Leftover Taxes is what is still owed on what is left, in two parts. One is the income tax an heir pays drawing the traditional balance in ten equal parts as a single filer. The other is long-term capital gains tax on the growth in taxable savings, worked on your own filing status and brackets, realised in ten equal parts on top of the income you have in the plan's last year. That second part is yours rather than an heir's on purpose, and ignores the stepped-up basis an heir would get: it stands in for the tax on dividends and sales the plan never charges along the way, and for what you would pay if you had to draw on that money in an emergency. Neither part includes state tax.
                     It leaves out tax on growth and sales in the taxable account along the way, the net investment income tax, the temporary senior deduction, a survivor moving to single brackets, the Roth five-year rules and Social Security's real taxation formula. Most of those bear on every strategy alike, so the comparison holds up better than any single figure does.

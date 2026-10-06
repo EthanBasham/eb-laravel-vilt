@@ -63,8 +63,8 @@ const successTone = (rate) => {
 </script>
 
 <template>
-    <Card title="Across many markets" :subtitle="strategies.length === 1 ? 'Monte Carlo: the strategy run through a set of random markets, with returns and inflation varying year to year around its own rates.' : 'Monte Carlo: every strategy run through the same set of random markets, with returns and inflation varying year to year around each strategy\'s own rates.'" flush>
-        <form class="flex flex-wrap items-end gap-3 border-t border-fin-grey-100 px-5 py-4" @submit.prevent="save">
+    <Card title="Across many markets" :subtitle="strategies.length === 1 ? 'Monte Carlo: the strategy run through a set of random markets, with returns and inflation varying year to year around its own rates.' : 'Monte Carlo: every strategy run through the same set of random markets, with returns and inflation varying year to year around each strategy\'s own rates.'" :class="{ 'printing:hidden': !(results && covered.length) }" flush>
+        <form class="flex flex-wrap items-end gap-3 border-t border-fin-grey-100 px-5 py-4 printing:hidden" @submit.prevent="save">
             <div class="w-32">
                 <Field label="Markets" hint="0 turns it off." :error="form.errors.runs">
                     <input v-model.number="form.runs" type="number" min="0" max="10000" step="50" required>
@@ -89,7 +89,7 @@ const successTone = (rate) => {
         </form>
 
         <!-- Where things stand. -->
-        <div class="border-t border-fin-grey-100 px-5 py-3 text-xs text-fin-grey-600">
+        <div class="border-t border-fin-grey-100 px-5 py-3 text-xs text-fin-grey-600 printing:hidden">
             <template v-if="monteCarlo.status === 'off'">Off. Set a number of markets above to run the strategies through them.</template>
             <template v-else-if="!monteCarlo.in_background">
                 {{ number(monteCarlo.settings.runs) }} markets × {{ strategies.length }} {{ strategies.length === 1 ? 'strategy' : 'strategies' }} =
@@ -110,7 +110,7 @@ const successTone = (rate) => {
 
         <div
             v-if="monteCarlo.in_background && !isWorking && (!results || !monteCarlo.is_current)"
-            class="flex flex-wrap items-center justify-between gap-3 border-t border-fin-gold-300 bg-fin-gold-100 px-5 py-3 text-sm text-fin-charcoal"
+            class="flex flex-wrap items-center justify-between gap-3 border-t border-fin-gold-300 bg-fin-gold-100 px-5 py-3 text-sm text-fin-charcoal printing:hidden"
         >
             <span>{{ results ? 'These results are from before your last change to the strategies or settings.' : 'Nothing has been run with these settings yet.' }}</span>
             <button type="button" class="fin-btn fin-btn-quiet" @click="runNow"><IconPlayerPlay :size="16" /> Run in the background</button>
@@ -173,7 +173,7 @@ const successTone = (rate) => {
                     </tr>
                 </tbody>
             </table>
-            <p class="border-t border-fin-grey-100 px-5 py-3 text-xs text-fin-grey-500">
+            <p class="border-t border-fin-grey-100 px-5 py-3 text-xs text-fin-grey-500 printing:px-0">
                 Ranges run from a bad market (10th percentile) to a good one (90th). Returns and inflation are drawn from a bell curve around each strategy's own rates, so they understate how lopsided real crashes are. Today's dollars, as above.
             </p>
         </div>

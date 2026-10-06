@@ -55,8 +55,8 @@ const isCurrent = (item) => (item.exact ? path.value === item.href : path.value.
 <template>
     <Head :title="title" />
 
-    <div class="fin flex min-h-screen">
-        <nav class="fin-rail sticky top-0 flex h-screen w-[68px] shrink-0 flex-col items-center gap-1 bg-fin-charcoal py-4" aria-label="Financial Fleet">
+    <div class="fin flex min-h-screen printing:block printing:min-h-0">
+        <nav class="fin-rail sticky top-0 flex h-screen printing:hidden w-[68px] shrink-0 flex-col items-center gap-1 bg-fin-charcoal py-4" aria-label="Financial Fleet">
             <Link href="/finance" class="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-fin-green-500 text-fin-white" aria-label="Financial Fleet home">
                 <IconLeaf :size="22" stroke-width="2" />
             </Link>
@@ -97,23 +97,23 @@ const isCurrent = (item) => (item.exact ? path.value === item.href : path.value.
             </div>
         </nav>
 
-        <div class="flex min-w-0 flex-1 flex-col">
-            <header class="flex flex-wrap items-end justify-between gap-4 px-6 pb-2 pt-8 lg:px-10">
+        <div class="flex min-w-0 flex-1 flex-col printing:block">
+            <header class="flex flex-wrap items-end justify-between gap-4 px-6 pb-2 pt-8 lg:px-10 printing:px-0 printing:pt-0">
                 <div>
                     <h1 class="text-2xl font-semibold tracking-tight text-fin-black">{{ title }}</h1>
-                    <p v-if="subtitle" class="mt-1 max-w-2xl text-sm text-fin-grey-500">{{ subtitle }}</p>
+                    <p v-if="subtitle" class="mt-1 max-w-2xl text-sm text-fin-grey-500 printing:hidden">{{ subtitle }}</p>
                 </div>
 
-                <div class="flex flex-wrap items-center gap-2">
+                <div class="flex flex-wrap items-center gap-2 printing:hidden">
                     <slot name="actions" />
                 </div>
             </header>
 
-            <main class="flex-1 px-6 pb-16 pt-4 lg:px-10">
-                <p v-if="flash.success" class="mb-5 rounded-xl border border-fin-green-200 bg-fin-green-50 px-4 py-3 text-sm text-fin-green-800" role="status">
+            <main class="flex-1 px-6 pb-16 pt-4 lg:px-10 printing:p-0">
+                <p v-if="flash.success" class="mb-5 rounded-xl border border-fin-green-200 bg-fin-green-50 px-4 py-3 text-sm text-fin-green-800 printing:hidden" role="status">
                     {{ flash.success }}
                 </p>
-                <p v-if="flash.error" class="mb-5 rounded-xl border border-fin-red-600/30 bg-fin-red-100 px-4 py-3 text-sm text-fin-red-600" role="alert">
+                <p v-if="flash.error" class="mb-5 rounded-xl border border-fin-red-600/30 bg-fin-red-100 px-4 py-3 text-sm text-fin-red-600 printing:hidden" role="alert">
                     {{ flash.error }}
                 </p>
 
@@ -327,5 +327,112 @@ body:has(.fin) {
 .fin-dialog::backdrop {
     background-color: rgba(18, 21, 19, 0.45);
     backdrop-filter: blur(2px);
+}
+
+/*
+ * Printing a report to PDF (Retirement.vue's printReport).
+ *
+ * The layout is keyed on a class, `fin-printing` on <html>, rather than on
+ * @media print, and the page adds it a moment before the print dialog opens.
+ * The charts draw at their container's pixel width (see LineChart), and no
+ * script runs between a print layout being made and its snapshot being
+ * taken; so the screen takes the paper's width first, the charts redraw at
+ * it, and only then is the page printed. Tailwind's `printing:` variant (in
+ * app.css) reads the same class, for what a single element changes.
+ *
+ * Anything that sets a width has to be the same on screen with the class as
+ * it is on paper, or a chart is drawn for one and printed in the other. That
+ * is why the grids are given `printing:grid-cols-*` outright instead of
+ * being left to breakpoints, which the paper would answer differently.
+ *
+ * Unlayered, so these outrank the utilities on the elements they reach.
+ */
+.fin-printing body:has(.fin) {
+    background-color: #fff;
+}
+
+.fin-printing .fin {
+    page: fin-report;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+}
+
+/* A named page, so printing any other finance page is left as it was. */
+@page fin-report {
+    size: letter landscape;
+    margin: 0.4in;
+}
+
+.fin-printing .fin button {
+    display: none;
+}
+
+/*
+ * A card is a screen thing. On paper it is a heading and what is under it:
+ * no panel, no border, and no padding to hold its contents off one.
+ */
+.fin-printing .fin-card {
+    border: 0;
+    border-radius: 0;
+    background-color: transparent;
+    box-shadow: none;
+}
+
+.fin-printing .fin-card > header {
+    padding: 0 0 0.75rem;
+}
+
+.fin-printing .fin-card > div {
+    padding: 0;
+}
+
+/*
+ * A section stays on one page: one that would straddle a break starts the
+ * next page instead. A card too tall for any page is marked as splitting,
+ * and keeps its parts whole instead.
+ */
+.fin-printing .fin-card {
+    break-inside: avoid;
+}
+
+.fin-printing .fin-card.fin-card-splits {
+    break-inside: auto;
+}
+
+.fin-printing .fin-keep,
+.fin-printing .fin tr {
+    break-inside: avoid;
+}
+
+.fin-printing .fin-card > header,
+.fin-printing .fin h3 {
+    break-after: avoid;
+}
+
+/* Nothing scrolls on paper, and a table's head repeats without sticking. */
+.fin-printing .fin .overflow-auto,
+.fin-printing .fin .overflow-x-auto {
+    max-height: none;
+    overflow: visible;
+}
+
+.fin-printing .fin .sticky {
+    position: static;
+}
+
+/* Tables give up their screen widths to fit the page, up to twelve columns. */
+.fin-printing .fin table {
+    font-size: 0.75rem;
+}
+
+.fin-printing .fin th,
+.fin-printing .fin td {
+    min-width: 0;
+    padding-left: 0.375rem;
+    padding-right: 0.375rem;
+}
+
+.fin-printing .fin th[scope='row'] {
+    white-space: normal;
 }
 </style>

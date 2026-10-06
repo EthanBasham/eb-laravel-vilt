@@ -3,6 +3,12 @@
 @plugin '@tailwindcss/forms';
 
 /*
+ * `printing:` — while a Financial Fleet report is being printed. Keyed on a
+ * class the page puts on <html>, not on @media print; FinShell.vue says why.
+ */
+@custom-variant printing (.fin-printing &);
+
+/*
  * Tailwind v4 auto-detects template files by scanning the project root, but it
  * respects .gitignore — and vendor/ is gitignored. Laravel's own pagination
  * views therefore need an explicit @source or their classes get purged out of
