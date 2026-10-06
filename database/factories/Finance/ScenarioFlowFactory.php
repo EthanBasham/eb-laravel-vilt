@@ -26,6 +26,7 @@ class ScenarioFlowFactory extends Factory
             'flow_id' => Flow::factory(),
             'annual_growth_rate' => null,
             'overrides' => null,
+            'restarts' => null,
         ];
     }
 }

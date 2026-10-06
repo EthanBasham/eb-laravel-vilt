@@ -61,7 +61,7 @@ class ScenarioController extends Controller
             $copy = $scenario->replicate()->fill(['name' => str("{$scenario->name} copy")->limit(80, '')->toString()]);
             $copy->save();
 
-            $scenario->scenarioFlows->each(fn (ScenarioFlow $settings) => $copy->scenarioFlows()->create($settings->only(['flow_id', 'annual_growth_rate', 'overrides'])));
+            $scenario->scenarioFlows->each(fn (ScenarioFlow $settings) => $copy->scenarioFlows()->create($settings->only(['flow_id', 'annual_growth_rate', 'overrides', 'restarts'])));
             $scenario->scenarioHoldings->each(fn (ScenarioHolding $settings) => $copy->scenarioHoldings()->create($settings->only(['holding_id', 'annual_rate', 'monthly_contribution', 'overrides'])));
 
             return $copy;

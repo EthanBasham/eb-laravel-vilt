@@ -22,7 +22,9 @@ use App\Models\User;
  * when it does not — through Flow::amountInYear(), so start and end dates and
  * the stop at retirement all still apply. Then a year the scenario has pinned
  * takes the pinned amount instead, and only that year: a pin does not move the
- * years after it.
+ * years after it — unless the scenario also starts the rate again from it, in
+ * which case the years after compound from the pinned amount, up to the next
+ * year it starts again from.
  *
  * Everything is in nominal dollars — the amounts as they would be written on
  * the day, not deflated to today's.
@@ -374,21 +376,39 @@ class ScenarioBoard
     {
         $rate = $settings?->annual_growth_rate ?? $groupRate ?? $flow->annual_growth_rate;
         $pins = $settings?->overrides ?? [];
+        $restarts = $settings?->restarts ?? [];
 
-        $series = array_map(function (int $year) use ($flow, $profile, $rate, $pins): array {
+        // The latest pinned year the rate started again from, and its amount.
+        $restart = null;
+        $series = [];
+
+        foreach ($this->years($profile) as $year) {
             $base = round($flow->amountInYear($year, $profile->retirement_year, $rate), 2);
+            $unpinned = $restart === null ? $base : round($flow->amountInYear($year, $profile->retirement_year, $rate, $restart), 2);
             $isPinned = array_key_exists($year, $pins);
+            $isRestart = $isPinned && in_array($year, $restarts, true);
+            $amount = $isPinned ? round((float) $pins[$year], 2) : $unpinned;
 
-            return [
+            $series[] = [
                 'year' => $year,
                 'age' => $year - $profile->birth_year,
-                // What the rate alone makes of the year, kept beside the
-                // figure used so the page can draw both and undo a pin.
+                // What the rate alone makes of the year, from today and with
+                // nothing set by hand: the line the page draws beside the
+                // figure used.
                 'base' => $base,
-                'amount' => $isPinned ? round((float) $pins[$year], 2) : $base,
+                // What the year comes to with no pin of its own, which is
+                // what undoing its pin gives: the rate, from wherever it
+                // last started again.
+                'unpinned' => $unpinned,
+                'amount' => $amount,
                 'is_pinned' => $isPinned,
+                'is_restart' => $isRestart,
             ];
-        }, $this->years($profile));
+
+            if ($isRestart) {
+                $restart = ['year' => $year, 'amount' => $amount];
+            }
+        }
 
         return [
             'id' => $flow->id,

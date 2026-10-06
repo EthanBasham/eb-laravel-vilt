@@ -37,7 +37,7 @@ it('projects a flow at its own rate, to the end of the plan, when the scenario s
             ->has('expenses.0.series', 41)
             ->where('expenses.0.rate', 10)
             ->where('expenses.0.has_scenario_rate', false)
-            ->where('expenses.0.series.0', ['year' => 2026, 'age' => 50, 'base' => 12000, 'amount' => 12000, 'is_pinned' => false])
+            ->where('expenses.0.series.0', ['year' => 2026, 'age' => 50, 'base' => 12000, 'unpinned' => 12000, 'amount' => 12000, 'is_pinned' => false, 'is_restart' => false])
             ->where('expenses.0.series.2.amount', 14520)
             ->where('expenses.0.series.40.year', 2066));
 });
@@ -67,9 +67,39 @@ it('gives a pinned year its own amount and leaves the years around it to the rat
     $this->actingAs($user)->get(route('finance.scenarios.show', $scenario))
         ->assertInertia(fn ($page) => $page
             ->where('expenses.0.pinned_count', 1)
-            ->where('expenses.0.series.1', ['year' => 2027, 'age' => 51, 'base' => 12000, 'amount' => 20000, 'is_pinned' => true])
+            ->where('expenses.0.series.1', ['year' => 2027, 'age' => 51, 'base' => 12000, 'unpinned' => 12000, 'amount' => 20000, 'is_pinned' => true, 'is_restart' => false])
             ->where('expenses.0.series.2.amount', 12000)
             ->where('expenses.0.total', 12000 * 40 + 20000));
+});
+
+it('carries on from a pinned year at the rate when the rate is started again from it', function () {
+    $user = scenarioUser();
+    $scenario = Scenario::factory()->create(['user_id' => $user->id]);
+    $flow = Flow::factory()->create(['user_id' => $user->id, 'amount' => 1000, 'frequency' => 'monthly']);
+    // 2029 is pinned and nothing more, so it moves only itself.
+    ScenarioFlow::factory()->create(['scenario_id' => $scenario->id, 'flow_id' => $flow->id, 'annual_growth_rate' => 10, 'overrides' => [2027 => 20000, 2029 => 5000, 2031 => 10000], 'restarts' => [2027, 2031]]);
+
+    $this->actingAs($user)->get(route('finance.scenarios.show', $scenario))
+        ->assertInertia(fn ($page) => $page
+            ->where('expenses.0.series.0.amount', 12000)
+            ->where('expenses.0.series.1', ['year' => 2027, 'age' => 51, 'base' => 13200, 'unpinned' => 13200, 'amount' => 20000, 'is_pinned' => true, 'is_restart' => true])
+            ->where('expenses.0.series.2', ['year' => 2028, 'age' => 52, 'base' => 14520, 'unpinned' => 22000, 'amount' => 22000, 'is_pinned' => false, 'is_restart' => false])
+            ->where('expenses.0.series.3', ['year' => 2029, 'age' => 53, 'base' => 15972, 'unpinned' => 24200, 'amount' => 5000, 'is_pinned' => true, 'is_restart' => false])
+            ->where('expenses.0.series.4.amount', 26620)
+            ->where('expenses.0.series.5.amount', 10000)
+            ->where('expenses.0.series.6.amount', 11000));
+});
+
+it('still stops earned income at retirement after its rate is started again', function () {
+    $user = scenarioUser();
+    $scenario = Scenario::factory()->create(['user_id' => $user->id]);
+    $salary = Flow::factory()->income('salary')->create(['user_id' => $user->id, 'amount' => 5000, 'frequency' => 'monthly']);
+    ScenarioFlow::factory()->create(['scenario_id' => $scenario->id, 'flow_id' => $salary->id, 'overrides' => [2039 => 90000], 'restarts' => [2039]]);
+
+    $this->actingAs($user)->get(route('finance.scenarios.show', $scenario))
+        ->assertInertia(fn ($page) => $page
+            ->where('income.0.series.14.amount', 90000)
+            ->where('income.0.series.15.amount', 0));
 });
 
 /**
@@ -254,15 +284,15 @@ it('copies a scenario with its rates and pinned years', function () {
     $user = scenarioUser();
     $flow = Flow::factory()->create(['user_id' => $user->id]);
     $scenario = Scenario::factory()->create(['user_id' => $user->id, 'name' => 'Optimistic']);
-    ScenarioFlow::factory()->create(['scenario_id' => $scenario->id, 'flow_id' => $flow->id, 'annual_growth_rate' => 4, 'overrides' => [2030 => 500]]);
+    ScenarioFlow::factory()->create(['scenario_id' => $scenario->id, 'flow_id' => $flow->id, 'annual_growth_rate' => 4, 'overrides' => [2030 => 500], 'restarts' => [2030]]);
 
     $this->actingAs($user)->post(route('finance.scenarios.duplicate', $scenario));
 
     $copy = Scenario::query()->where('name', 'Optimistic copy')->sole();
 
     expect($copy->user_id)->toBe($user->id)
-        ->and($copy->scenarioFlows->sole()->only(['flow_id', 'annual_growth_rate', 'overrides']))
-        ->toBe(['flow_id' => $flow->id, 'annual_growth_rate' => 4.0, 'overrides' => [2030 => 500]]);
+        ->and($copy->scenarioFlows->sole()->only(['flow_id', 'annual_growth_rate', 'overrides', 'restarts']))
+        ->toBe(['flow_id' => $flow->id, 'annual_growth_rate' => 4.0, 'overrides' => [2030 => 500], 'restarts' => [2030]]);
 });
 
 it('hides another user\'s scenario behind a 404', function (string $method, string $route, array $payload) {
@@ -292,6 +322,22 @@ it('saves a rate and pinned years for one flow', function () {
 
     expect($scenario->scenarioFlows()->sole()->only(['flow_id', 'annual_growth_rate', 'overrides']))
         ->toBe(['flow_id' => $flow->id, 'annual_growth_rate' => 3.5, 'overrides' => [2028 => 400, 2031 => 900.5]]);
+});
+
+it('saves the pinned years the rate starts again from', function () {
+    $user = scenarioUser();
+    $scenario = Scenario::factory()->create(['user_id' => $user->id]);
+    $flow = Flow::factory()->create(['user_id' => $user->id]);
+
+    $this->actingAs($user)->put(route('finance.scenarios.flows.update', [$scenario, $flow]), ['annual_growth_rate' => null, 'overrides' => [2028 => 400, 2031 => 900], 'restarts' => [2031]])
+        ->assertSessionHasNoErrors();
+
+    expect($scenario->scenarioFlows()->sole()->restarts)->toBe([2031]);
+
+    // Written whole: leaving them out is saying there are none.
+    $this->actingAs($user)->put(route('finance.scenarios.flows.update', [$scenario, $flow]), ['annual_growth_rate' => null, 'overrides' => [2028 => 400, 2031 => 900]]);
+
+    expect($scenario->scenarioFlows()->sole()->restarts)->toBeNull();
 });
 
 it('replaces what was saved for the flow rather than adding to it', function () {
@@ -330,6 +376,7 @@ it('refuses settings that could not be projected', function (array $payload, str
     'a negative amount' => [['annual_growth_rate' => null, 'overrides' => [2030 => -1]], 'overrides.2030'],
     'a year already gone' => [['annual_growth_rate' => null, 'overrides' => [2025 => 100]], 'overrides'],
     'a key that is not a year' => [['annual_growth_rate' => null, 'overrides' => ['soon' => 100]], 'overrides'],
+    'the rate started again from a year not set by hand' => [['annual_growth_rate' => null, 'overrides' => [2030 => 100], 'restarts' => [2031]], 'restarts'],
 ]);
 
 it('will not adjust a flow or a scenario that belongs to someone else', function () {

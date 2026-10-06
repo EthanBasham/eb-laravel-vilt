@@ -88,8 +88,14 @@ class Flow extends OwnedModel
      *
      * `$growthRate` stands in for the flow's own rate when a scenario has
      * given it a different one.
+     *
+     * `$restart` is a year a scenario set by hand and started the rate again
+     * from: the years after it compound from that amount, taken as a whole
+     * year's, instead of from today's. Dates and retirement apply as ever.
+     *
+     * @param  array{year: int, amount: float}|null  $restart
      */
-    public function amountInYear(int $year, ?int $retirementYear = null, ?float $growthRate = null): float
+    public function amountInYear(int $year, ?int $retirementYear = null, ?float $growthRate = null, ?array $restart = null): float
     {
         if ($this->is_compound) {
             return (float) $this->children->sum(fn (self $item): float => $item->amountInYear($year, $retirementYear, $growthRate));
@@ -120,9 +126,15 @@ class Flow extends OwnedModel
         };
 
         $monthsActive = max(0, $lastMonth - $firstMonth + 1);
+        $growth = 1 + ($growthRate ?? $this->annual_growth_rate) / 100;
+
+        if ($restart !== null && $year > $restart['year']) {
+            return $restart['amount'] * $growth ** ($year - $restart['year']) * $monthsActive / 12;
+        }
+
         $yearsOut = max(0, $year - now()->year);
 
-        return $this->annual_amount * (1 + ($growthRate ?? $this->annual_growth_rate) / 100) ** $yearsOut * $monthsActive / 12;
+        return $this->annual_amount * $growth ** $yearsOut * $monthsActive / 12;
     }
 
     /**

@@ -16,7 +16,10 @@ import { money, moneyShort } from '../lib/format';
  * (the amount the year is pinned to), and it goes to the server as-is; the
  * rate-driven line and every total come back from PHP.
  *
- * Each point is `{ year, age, base, amount, is_pinned }`.
+ * Each point is `{ year, age, base, amount, is_pinned }`. Where the rate can
+ * be started again from a pinned year (`restartable`), a point also says
+ * whether it is one (`is_restart`) and what it comes to with no pin of its
+ * own (`unpinned`), which is then no longer `base`.
  */
 const props = defineProps({
     points: { type: Array, required: true },
@@ -26,9 +29,11 @@ const props = defineProps({
     height: { type: Number, default: 260 },
     // Names the chart for a screen reader: the flow it belongs to.
     label: { type: String, default: '' },
+    // Whether a pinned year can be made where the rate starts again from.
+    restartable: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['pin', 'unpin']);
+const emit = defineEmits(['pin', 'unpin', 'restart', 'unrestart']);
 
 const pad = { top: 22, right: 14, bottom: 30, left: 56 };
 
@@ -210,6 +215,10 @@ const typeAmount = (event) => {
                 <svg width="10" height="10" aria-hidden="true"><circle cx="5" cy="5" r="4" fill="var(--color-fin-gold-400)" /></svg>
                 Set by hand
             </li>
+            <li v-if="points.some((point) => point.is_restart)" class="flex items-center gap-1.5">
+                <svg width="10" height="10" aria-hidden="true"><circle cx="5" cy="5" r="4" fill="var(--color-fin-gold-600)" /></svg>
+                Rate restarts here
+            </li>
         </ul>
 
         <div class="overflow-x-auto">
@@ -249,7 +258,7 @@ const typeAmount = (event) => {
                         v-for="(point, index) in points" :key="`dot-${point.year}`"
                         :cx="px(index)" :cy="py(valueOf(point))"
                         :r="point.year === selected || point.is_pinned ? 4.5 : 3"
-                        :fill="point.is_pinned || live?.year === point.year ? 'var(--color-fin-gold-400)' : 'var(--color-fin-white)'"
+                        :fill="point.is_restart ? 'var(--color-fin-gold-600)' : (point.is_pinned || live?.year === point.year ? 'var(--color-fin-gold-400)' : 'var(--color-fin-white)')"
                         :stroke="point.is_pinned || live?.year === point.year ? 'var(--color-fin-gold-600)' : color"
                         stroke-width="1.5"
                     />
@@ -297,11 +306,25 @@ const typeAmount = (event) => {
                     </span>
                 </label>
 
-                <p class="text-xs text-fin-grey-500">The rate alone makes it {{ money(selectedPoint.base) }}.</p>
+                <p class="text-xs text-fin-grey-500">The rate alone makes it {{ money(selectedPoint.unpinned ?? selectedPoint.base) }}.</p>
 
-                <button v-if="selectedPoint.is_pinned" type="button" class="fin-btn fin-btn-quiet ml-auto" @click="emit('unpin', selectedPoint.year)">
-                    Back to the rate
-                </button>
+                <div v-if="selectedPoint.is_pinned" class="ml-auto flex flex-wrap items-center gap-2">
+                    <button type="button" class="fin-btn fin-btn-quiet" @click="emit('unpin', selectedPoint.year)">
+                        Back to the rate
+                    </button>
+                    <button
+                        v-if="restartable && !selectedPoint.is_restart" type="button" class="fin-btn fin-btn-quiet"
+                        title="The years after this one carry on from this amount at the rate" @click="emit('restart', selectedPoint.year)"
+                    >
+                        Restart rate from here
+                    </button>
+                    <button
+                        v-if="restartable && selectedPoint.is_restart" type="button" class="fin-btn fin-btn-quiet"
+                        title="Leave this as a year on its own: the years after go back to where they were" @click="emit('unrestart', selectedPoint.year)"
+                    >
+                        Stop restarting here
+                    </button>
+                </div>
             </template>
         </div>
     </div>

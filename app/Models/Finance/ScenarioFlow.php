@@ -9,13 +9,14 @@ use App\Models\Model;
 use Database\Factories\Finance\ScenarioFlowFactory;
 
 /**
- * What one scenario changes about one flow: the rate it grows at, and the
- * years pinned to an amount of their own.
+ * What one scenario changes about one flow: the rate it grows at, the years
+ * pinned to an amount of their own, and which of those the rate starts again
+ * from (`restarts`, a list of pinned years).
  *
  * Not an OwnedModel: it has no `user_id`, and belongs to whoever owns its
  * scenario. A flow with no row here is projected as it stands.
  */
-#[Fillable(['scenario_id', 'flow_id', 'annual_growth_rate', 'overrides'])]
+#[Fillable(['scenario_id', 'flow_id', 'annual_growth_rate', 'overrides', 'restarts'])]
 class ScenarioFlow extends Model
 {
     /** @use HasFactory<ScenarioFlowFactory> */
@@ -33,6 +34,7 @@ class ScenarioFlow extends Model
         return [
             'annual_growth_rate' => 'float',
             'overrides' => 'array',
+            'restarts' => 'array',
         ];
     }
 

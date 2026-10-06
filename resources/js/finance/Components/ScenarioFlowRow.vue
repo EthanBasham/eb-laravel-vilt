@@ -10,8 +10,8 @@ import { money, moneyShort, percent } from '../lib/format';
  * its year-by-year chart.
  *
  * `draft` is what this scenario says about the flow — the rate (null for the
- * flow's own) and the years pinned by hand — and it is what gets saved, whole,
- * on every change. It is kept here rather than read back off the props each
+ * flow's own), the years pinned by hand, and which of those the rate starts
+ * again from — and it is what gets saved, whole, on every change. It is kept here rather than read back off the props each
  * time because changes can outrun the server: drag two years in quick
  * succession and the second save has to carry the first, which the props do
  * not show yet.
@@ -30,6 +30,7 @@ const inFlight = ref(0);
 const saved = () => ({
     rate: props.flow.has_scenario_rate ? props.flow.rate : null,
     pins: Object.fromEntries(props.flow.series.filter((point) => point.is_pinned).map((point) => [point.year, point.amount])),
+    restarts: props.flow.series.filter((point) => point.is_restart).map((point) => point.year),
 });
 
 const draft = reactive(saved());
@@ -44,7 +45,7 @@ const save = () => {
     error.value = '';
     inFlight.value += 1;
 
-    router.put(`/finance/scenarios/${props.scenarioId}/flows/${props.flow.id}`, { annual_growth_rate: draft.rate, overrides: { ...draft.pins } }, {
+    router.put(`/finance/scenarios/${props.scenarioId}/flows/${props.flow.id}`, { annual_growth_rate: draft.rate, overrides: { ...draft.pins }, restarts: [...draft.restarts] }, {
         preserveScroll: true,
         preserveState: true,
         onError: (errors) => {
@@ -74,22 +75,38 @@ const pin = (year, amount) => {
     save();
 };
 
+// A year the rate started again from stops being one with its pin.
 const unpin = (year) => {
     draft.pins = Object.fromEntries(Object.entries(draft.pins).filter(([pinned]) => Number(pinned) !== year));
+    draft.restarts = draft.restarts.filter((restart) => restart !== year);
+    save();
+};
+
+// The years after a pinned one carry on from it at the rate, or go back to
+// leaving it as a year on its own.
+const restart = (year) => {
+    draft.restarts = [...draft.restarts, year];
+    save();
+};
+
+const unrestart = (year) => {
+    draft.restarts = draft.restarts.filter((restarted) => restarted !== year);
     save();
 };
 
 const clearPins = () => {
     draft.pins = {};
+    draft.restarts = [];
     save();
 };
 
 // The server's series with the draft's pins laid over it, so a year just
-// dragged shows where it was put before the server has answered.
+// dragged shows where it was put before the server has answered. The years
+// after a restart only move once it has: the server works those out.
 const points = computed(() => props.flow.series.map((point) => {
     const isPinned = point.year in draft.pins;
 
-    return { ...point, amount: isPinned ? draft.pins[point.year] : point.base, is_pinned: isPinned };
+    return { ...point, amount: isPinned ? draft.pins[point.year] : point.unpinned, is_pinned: isPinned, is_restart: isPinned && draft.restarts.includes(point.year) };
 }));
 
 const pinnedCount = computed(() => points.value.filter((point) => point.is_pinned).length);
@@ -142,7 +159,7 @@ const signedRate = (value) => `${value > 0 ? '+' : ''}${percent(value)}`;
 
             <p v-if="error" class="text-xs text-fin-red-600" role="alert">{{ error }}</p>
 
-            <YearSliderChart :points="points" :color="color" :retirement-year="retirementYear" :label="flow.name" @pin="pin" @unpin="unpin" />
+            <YearSliderChart :points="points" :color="color" :retirement-year="retirementYear" :label="flow.name" :restartable="!flow.is_one_time" @pin="pin" @unpin="unpin" @restart="restart" @unrestart="unrestart" />
         </div>
     </div>
 </template>
