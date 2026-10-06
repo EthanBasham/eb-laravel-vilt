@@ -23,7 +23,7 @@ class ConversionStrategyFactory extends Factory
         return [
             'user_id' => User::factory(),
             'scenario_id' => null,
-            'name' => fake()->words(2, true),
+            'name' => null,
             'kind' => 'none',
             'tax_payment' => 'outside',
             'tax_outside_amount' => null,

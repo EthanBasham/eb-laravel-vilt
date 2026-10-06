@@ -138,7 +138,7 @@ const save = () => {
                 <div class="grid gap-4 sm:grid-cols-3">
                     <Field label="Projection" hint="From Projections & scenarios." :error="form.errors.scenario_id">
                         <select v-model="form.scenario_id">
-                            <option :value="null">Income &amp; expenses as entered</option>
+                            <option :value="null">No projection</option>
                             <option v-for="scenario in scenarios" :key="scenario.id" :value="scenario.id">{{ scenario.name }}</option>
                         </select>
                     </Field>

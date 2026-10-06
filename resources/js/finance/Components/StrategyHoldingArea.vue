@@ -1,27 +1,29 @@
 <script setup>
 import { router } from '@inertiajs/vue3';
-import { IconColumns3, IconCopy, IconPencil, IconPlus, IconReplace, IconSparkles, IconTrash } from '@tabler/icons-vue';
+import { IconCopy, IconPencil, IconPlus, IconReplace, IconReportAnalytics, IconSparkles, IconTrash } from '@tabler/icons-vue';
 import { computed, ref, watch } from 'vue';
 import { chartColors, moneyBrief } from '../lib/format';
 
 /**
- * The holding area: conversion strategies that exist but are not being
- * compared. They arrive as settings alone — the server runs only what is in
- * the comparison — so there can be as many here as anyone cares to build.
+ * The holding area: conversion strategies that exist but are not in the
+ * report. They arrive as settings alone — the server runs only what is in
+ * the report — so there can be as many here as anyone cares to build.
  *
- * A card can be edited, copied, brought into the comparison, or removed. To
- * make a whole set at once, choose a projection beside "One of each type
- * for" and one strategy of every kind is made on it. To swap the comparison
- * wholesale, narrow the cards with the two filters, or
+ * A card can be edited, copied, brought into the report, or removed. Adding
+ * is the page header's job; the area offers it only while it is empty, when
+ * it has nothing else to show. To swap the report wholesale, narrow the cards with the two filters, or
  * pick some — tick them, or Ctrl-click (Cmd-click on a Mac) anywhere on a
- * card — and replace the comparison with what is filtered or what is picked.
+ * card — and replace the report with what is filtered or what is picked.
+ *
+ * "Report" is the page's word; the prop, the routes and the column still
+ * say comparison and compare.
  */
 const props = defineProps({
     held: { type: Array, required: true },
     // Config's kinds of strategy, for the labels and the filter.
     kinds: { type: Object, required: true },
     scenarios: { type: Array, required: true },
-    // { count, default, max }: how many are compared, and how many can be.
+    // { count, default, max }: how many are in the report, and how many can be.
     comparison: { type: Object, required: true },
 });
 
@@ -35,8 +37,15 @@ const emit = defineEmits(['build', 'edit']);
 const projection = ref('all');
 const kind = ref('all');
 
-const filtered = computed(() => props.held.filter((strategy) => (projection.value === 'all' || strategy.scenario_id === projection.value)
-    && (kind.value === 'all' || strategy.kind === kind.value)));
+// Where a projection comes in the pickers: none first, then as listed.
+const projectionOrder = (scenarioId) => props.scenarios.findIndex((scenario) => scenario.id === scenarioId);
+
+// Cards on the same projection sit together, by order alone; within one they
+// stay as they arrived, which is as added.
+const filtered = computed(() => props.held
+    .filter((strategy) => (projection.value === 'all' || strategy.scenario_id === projection.value)
+        && (kind.value === 'all' || strategy.kind === kind.value))
+    .sort((first, second) => projectionOrder(first.scenario_id) - projectionOrder(second.scenario_id)));
 
 const isFiltering = computed(() => projection.value !== 'all' || kind.value !== 'all');
 
@@ -80,7 +89,7 @@ const onCardClick = (event, strategy) => {
 /*
  * One of each kind of strategy, made in one go on the projection chosen.
  * `null` is the income and expenses as entered. They land like any new
- * strategy: in the comparison while it has room, in here once it has not.
+ * strategy: in the report while it has room, in here once it has not.
  */
 const setFor = ref(null);
 
@@ -92,7 +101,7 @@ const isFull = computed(() => props.comparison.count >= props.comparison.max);
 const replaceWith = (ids, what) => {
     if (!ids.length || tooMany(ids.length)) return;
 
-    if (!props.comparison.count || window.confirm(`Replace the comparison with ${what}? The ${props.comparison.count} being compared now move to the holding area.`)) {
+    if (!props.comparison.count || window.confirm(`Replace the report with ${what}? The ${props.comparison.count} in it now move to the holding area.`)) {
         router.put('/finance/retirement/strategies/comparison', { strategies: ids }, {
             preserveScroll: true,
             onSuccess: () => { picked.value = []; },
@@ -107,7 +116,7 @@ const compare = (strategy) => router.post(`/finance/retirement/strategies/${stra
 const duplicate = (strategy) => router.post(`/finance/retirement/strategies/${strategy.id}/duplicate`, {}, { preserveScroll: true });
 
 const remove = (strategy) => {
-    if (window.confirm(`Remove ${strategy.name}?`)) {
+    if (window.confirm(`Remove ${strategy.label}?`)) {
         router.delete(`/finance/retirement/strategies/${strategy.id}`, { preserveScroll: true });
     }
 };
@@ -116,23 +125,13 @@ const remove = (strategy) => {
  * A projection's colour: the one it has on the Projections & scenarios page,
  * where each takes the next chart colour in the order they are listed and
  * "nothing adjusted" is grey. `scenarios` arrives in that same order, so the
- * position is the colour.
+ * position is the colour. A dot of it sits before the card's name, so
+ * cards on the same projection read as a set.
  */
 const projectionColor = (scenarioId) => {
     const index = props.scenarios.findIndex((scenario) => scenario.id === scenarioId);
 
     return index === -1 ? 'var(--color-fin-grey-400)' : chartColors[index % chartColors.length];
-};
-
-// The pill is tinted with its colour and carries a dot of it, so cards on
-// the same projection read as a set; the text stays ink for contrast.
-const projectionStyle = (scenarioId) => {
-    const color = projectionColor(scenarioId);
-
-    return {
-        backgroundColor: `color-mix(in srgb, ${color} 14%, var(--color-fin-white))`,
-        borderColor: `color-mix(in srgb, ${color} 45%, var(--color-fin-white))`,
-    };
 };
 
 // The settings worth a line on the card, blanks left out.
@@ -154,16 +153,16 @@ const details = (strategy) => {
 
 <template>
     <section class="rounded-2xl border border-dashed border-fin-grey-300 bg-fin-cream-100/60" aria-label="Holding area">
-        <!-- Everything is being compared: the area is just somewhere to add another. -->
+        <!-- Everything is in the report: the area is just somewhere to add another. -->
         <div v-if="!held.length" class="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
             <p class="text-sm text-fin-grey-600">
                 <span class="font-semibold text-fin-black">Holding area.</span>
-                Every strategy is in the comparison below. Once {{ comparison.default }} are being compared, new ones wait here until you bring them in.
+                Every strategy is in the report below. Once {{ comparison.default }} are in it, new ones wait here until you bring them in.
             </p>
             <div class="flex flex-wrap items-center gap-2">
                 <form class="flex items-center gap-2" @submit.prevent="addSet">
                     <select v-model="setFor" class="!w-52" aria-label="Projection to make one of each strategy type for">
-                        <option :value="null">Income &amp; expenses as entered</option>
+                        <option :value="null">No projection</option>
                         <option v-for="scenario in scenarios" :key="scenario.id" :value="scenario.id">{{ scenario.name }}</option>
                     </select>
                     <button type="submit" class="fin-btn fin-btn-quiet"><IconSparkles :size="16" /> Add one of each type</button>
@@ -175,11 +174,26 @@ const details = (strategy) => {
         <template v-else>
             <header class="flex flex-wrap items-end justify-between gap-x-4 gap-y-3 px-5 pt-5">
                 <div>
-                    <h2 class="text-sm font-semibold text-fin-black">Holding area <span class="font-normal text-fin-grey-500">· {{ held.length }} not being compared</span></h2>
+                    <h2 class="text-sm font-semibold text-fin-black">Holding area <span class="font-normal text-fin-grey-500">· {{ held.length }} not in the report · {{ comparison.count }} / {{ comparison.max }} are in the report</span></h2>
                     <p class="mt-0.5 max-w-2xl text-xs text-fin-grey-500">
                         Strategies here are not run, so they cost the page nothing. Tick cards, or Ctrl-click them, to pick several.
-                        {{ comparison.count }} of at most {{ comparison.max }} are being compared.
                     </p>
+                    <div class="mt-3 flex flex-wrap items-center gap-2">
+                        <button
+                            type="button" class="fin-btn fin-btn-quiet" :disabled="!filtered.length || tooMany(filtered.length)"
+                            :title="tooMany(filtered.length) ? `At most ${comparison.max} can be in the report. Narrow the filters first.` : ''" @click="replaceWithFiltered"
+                        >
+                            <IconReplace :size="16" /> Replace report with {{ isFiltering ? 'the filtered' : 'all' }} {{ filtered.length }}
+                        </button>
+                        <button
+                            type="button" class="fin-btn fin-btn-quiet" :disabled="!picked.length || tooMany(picked.length)"
+                            :title="tooMany(picked.length) ? `At most ${comparison.max} can be in the report.` : ''" @click="replaceWithPicked"
+                        >
+                            <IconReplace :size="16" /> Replace report with the picked {{ picked.length }}
+                        </button>
+                        <button v-if="picked.length" type="button" class="text-xs text-fin-grey-600 underline hover:text-fin-black" @click="picked = []">Clear picks</button>
+                        <p v-if="tooMany(filtered.length) && !picked.length" class="text-xs text-fin-grey-500">More than {{ comparison.max }} shown: narrow the filters, or pick some.</p>
+                    </div>
                 </div>
 
                 <div class="flex flex-wrap items-end gap-2">
@@ -187,7 +201,7 @@ const details = (strategy) => {
                         <span class="mb-1 block text-xs font-medium text-fin-grey-600">Projection</span>
                         <select v-model="projection" class="!w-48">
                             <option value="all">Any projection</option>
-                            <option v-if="projectionsInUse.asEntered" :value="null">Income &amp; expenses as entered</option>
+                            <option v-if="projectionsInUse.asEntered" :value="null">No projection</option>
                             <option v-for="scenario in projectionsInUse.scenarios" :key="scenario.id" :value="scenario.id">{{ scenario.name }}</option>
                         </select>
                     </label>
@@ -198,35 +212,8 @@ const details = (strategy) => {
                             <option v-for="[key, option] in kindsInUse" :key="key" :value="key">{{ option.label }}</option>
                         </select>
                     </label>
-                    <button type="button" class="fin-btn fin-btn-primary" @click="emit('build')"><IconPlus :size="16" /> Add strategy</button>
                 </div>
             </header>
-
-            <div class="flex flex-wrap items-center gap-2 px-5 pt-3">
-                <form class="mr-auto flex flex-wrap items-center gap-2" @submit.prevent="addSet">
-                    <span class="text-xs font-medium text-fin-grey-600">One of each type for</span>
-                    <select v-model="setFor" class="!w-52" aria-label="Projection to make one of each strategy type for">
-                        <option :value="null">Income &amp; expenses as entered</option>
-                        <option v-for="scenario in scenarios" :key="scenario.id" :value="scenario.id">{{ scenario.name }}</option>
-                    </select>
-                    <button type="submit" class="fin-btn fin-btn-quiet"><IconSparkles :size="16" /> Add</button>
-                </form>
-
-                <button
-                    type="button" class="fin-btn fin-btn-quiet" :disabled="!filtered.length || tooMany(filtered.length)"
-                    :title="tooMany(filtered.length) ? `At most ${comparison.max} can be compared. Narrow the filters first.` : ''" @click="replaceWithFiltered"
-                >
-                    <IconReplace :size="16" /> Replace comparison with {{ isFiltering ? 'the filtered' : 'all' }} {{ filtered.length }}
-                </button>
-                <button
-                    type="button" class="fin-btn fin-btn-quiet" :disabled="!picked.length || tooMany(picked.length)"
-                    :title="tooMany(picked.length) ? `At most ${comparison.max} can be compared.` : ''" @click="replaceWithPicked"
-                >
-                    <IconReplace :size="16" /> Replace comparison with the picked {{ picked.length }}
-                </button>
-                <button v-if="picked.length" type="button" class="text-xs text-fin-grey-600 underline hover:text-fin-black" @click="picked = []">Clear picks</button>
-                <p v-if="tooMany(filtered.length) && !picked.length" class="text-xs text-fin-grey-500">More than {{ comparison.max }} shown: narrow the filters, or pick some.</p>
-            </div>
 
             <p v-if="!filtered.length" class="px-5 py-6 text-sm text-fin-grey-500">Nothing in the holding area matches those filters.</p>
 
@@ -238,32 +225,27 @@ const details = (strategy) => {
                     @click="onCardClick($event, strategy)"
                 >
                     <div class="flex items-start gap-2.5">
-                        <input type="checkbox" class="mt-0.5 shrink-0" :checked="picked.includes(strategy.id)" :aria-label="`Pick ${strategy.name}`" @change="toggle(strategy)" @click.stop>
+                        <input type="checkbox" class="mt-0.5 shrink-0" :checked="picked.includes(strategy.id)" :aria-label="`Pick ${strategy.label}`" @change="toggle(strategy)" @click.stop>
                         <div class="min-w-0">
-                            <p class="truncate text-sm font-semibold text-fin-black" :title="strategy.name">{{ strategy.name }}</p>
-                            <p class="text-xs text-fin-grey-600">{{ strategy.kind_label }}</p>
+                            <p class="truncate text-sm font-semibold text-fin-black" :title="strategy.label">
+                                <span class="mr-1 inline-block h-2 w-2 rounded-full" :style="{ backgroundColor: projectionColor(strategy.scenario_id) }" aria-hidden="true" />
+                                {{ strategy.label }}
+                            </p>
+                            <p v-if="details(strategy)" class="text-xs text-fin-grey-600">Specs: {{ details(strategy) }}</p>
                         </div>
                     </div>
-
-                    <p class="text-xs text-fin-grey-500">
-                        <span class="inline-flex max-w-full items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium text-fin-charcoal" :style="projectionStyle(strategy.scenario_id)">
-                            <span class="h-2 w-2 shrink-0 rounded-full" :style="{ backgroundColor: projectionColor(strategy.scenario_id) }" aria-hidden="true" />
-                            <span class="truncate">{{ strategy.scenario_name ?? 'As entered' }}</span>
-                        </span>
-                        <span v-if="details(strategy)" class="mt-1.5 block">{{ details(strategy) }}</span>
-                    </p>
 
                     <div class="mt-auto flex items-center justify-between gap-2 pt-1">
                         <button
                             type="button" class="fin-btn fin-btn-quiet !px-2.5 !py-1 text-xs" :disabled="isFull"
-                            :title="isFull ? `The comparison is full at ${comparison.max}. Move one out first.` : ''" @click.stop="compare(strategy)"
+                            :title="isFull ? `The report is full at ${comparison.max}. Move one out first.` : ''" @click.stop="compare(strategy)"
                         >
-                            <IconColumns3 :size="14" /> Add to comparison
+                            <IconReportAnalytics :size="14" /> Add to report
                         </button>
                         <span class="flex" @click.stop>
-                            <button type="button" class="fin-icon-btn" :aria-label="`Edit ${strategy.name}`" @click="emit('edit', strategy)"><IconPencil :size="15" /></button>
-                            <button type="button" class="fin-icon-btn" :aria-label="`Copy ${strategy.name}`" @click="duplicate(strategy)"><IconCopy :size="15" /></button>
-                            <button type="button" class="fin-icon-btn" :aria-label="`Remove ${strategy.name}`" @click="remove(strategy)"><IconTrash :size="15" /></button>
+                            <button type="button" class="fin-icon-btn" :aria-label="`Edit ${strategy.label}`" @click="emit('edit', strategy)"><IconPencil :size="15" /></button>
+                            <button type="button" class="fin-icon-btn" :aria-label="`Copy ${strategy.label}`" @click="duplicate(strategy)"><IconCopy :size="15" /></button>
+                            <button type="button" class="fin-icon-btn" :aria-label="`Remove ${strategy.label}`" @click="remove(strategy)"><IconTrash :size="15" /></button>
                         </span>
                     </div>
                 </li>

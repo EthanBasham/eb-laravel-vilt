@@ -63,7 +63,7 @@ const successTone = (rate) => {
 </script>
 
 <template>
-    <Card title="Across many markets" subtitle="Monte Carlo: every strategy run through the same set of random markets, with returns and inflation varying year to year around each strategy's own rates." flush>
+    <Card title="Across many markets" :subtitle="strategies.length === 1 ? 'Monte Carlo: the strategy run through a set of random markets, with returns and inflation varying year to year around its own rates.' : 'Monte Carlo: every strategy run through the same set of random markets, with returns and inflation varying year to year around each strategy\'s own rates.'" flush>
         <form class="flex flex-wrap items-end gap-3 border-t border-fin-grey-100 px-5 py-4" @submit.prevent="save">
             <div class="w-32">
                 <Field label="Markets" hint="0 turns it off." :error="form.errors.runs">
@@ -124,7 +124,7 @@ const successTone = (rate) => {
                         <th v-for="strategy in covered" :key="strategy.id" class="min-w-40 px-3 py-2.5 text-right font-semibold text-fin-black">
                             <span class="flex items-center justify-end gap-1.5">
                                 <span class="h-2.5 w-2.5 shrink-0 rounded-full" :style="{ backgroundColor: colorOf(strategy) }" aria-hidden="true" />
-                                {{ strategy.name }}
+                                {{ strategy.label }}
                             </span>
                         </th>
                     </tr>

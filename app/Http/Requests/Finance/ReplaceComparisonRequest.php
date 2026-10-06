@@ -34,8 +34,8 @@ class ReplaceComparisonRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'strategies.required' => 'Pick at least one strategy to compare.',
-            'strategies.max' => 'No more than :max strategies can be compared at once.',
+            'strategies.required' => 'Pick at least one strategy for the report.',
+            'strategies.max' => 'No more than :max strategies can be in the report at once.',
         ];
     }
 }

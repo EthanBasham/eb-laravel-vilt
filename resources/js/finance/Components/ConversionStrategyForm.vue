@@ -65,21 +65,13 @@ watch(() => props.open, (open) => {
         form[key] = props.strategy ? props.strategy[key] : blank[key];
     });
 
-    if (!props.strategy) {
-        form.name = props.kinds[form.kind].label;
-    }
 }, { immediate: true });
 
 const kind = computed(() => props.kinds[form.kind]);
 const payment = computed(() => props.taxPayments[form.tax_payment]);
 const ages = computed(() => props.defaults[form.kind] ?? []);
 
-// A new strategy is named after its kind until it is given a name of its own.
 const onKindChange = () => {
-    if (!props.strategy && Object.values(props.kinds).some((candidate) => candidate.label === form.name)) {
-        form.name = kind.value.label;
-    }
-
     // Staying inside the tier you are in pairs with staying inside the
     // bracket you are in, so that is where the IRMAA-aware kind starts.
     if (!props.strategy && form.kind === 'fill_bracket_irmaa') {
@@ -93,6 +85,9 @@ const onKindChange = () => {
 
 const projectionRate = computed(() => props.scenarios.find((scenario) => scenario.id === form.scenario_id)?.bracket_inflation_rate ?? props.profile.inflation_rate);
 
+// What an unnamed strategy is shown as: its projection and its kind.
+const unnamed = computed(() => `${props.scenarios.find((scenario) => scenario.id === form.scenario_id)?.name ?? 'As entered'} · ${kind.value.label}`);
+
 const save = () => {
     const options = { preserveScroll: true, onSuccess: () => dialog.value?.close() };
 
@@ -105,26 +100,15 @@ const save = () => {
 </script>
 
 <template>
-    <FinDialog ref="dialog" :open="open" :title="strategy ? `Edit ${strategy.name}` : 'Build a strategy'" wide @close="emit('close')">
+    <FinDialog ref="dialog" :open="open" :title="strategy ? `Edit ${strategy.label}` : 'Build a strategy'" wide @close="emit('close')">
         <form class="flex flex-col gap-5" @submit.prevent="save">
-            <div class="grid gap-4 sm:grid-cols-2">
+            <div class="grid items-start gap-4 sm:grid-cols-[3fr_2fr]">
                 <Field label="Strategy" :hint="kind.description" :error="form.errors.kind">
                     <select v-model="form.kind" @change="onKindChange">
                         <option v-for="(option, key) in kinds" :key="key" :value="key">{{ option.label }}</option>
                     </select>
                 </Field>
-                <Field label="Name" :error="form.errors.name">
-                    <input v-model="form.name" type="text" required maxlength="80">
-                </Field>
-            </div>
-
-            <div v-if="kind.ages" class="grid gap-4 sm:grid-cols-3">
-                <Field :label="kind.ages === 'at' ? 'Convert at age' : 'From age'" :hint="`Blank is ${ages[0]}.`" :error="form.errors.convert_from_age">
-                    <input v-model.number="form.convert_from_age" type="number" min="18" max="110" step="1" :placeholder="String(ages[0])">
-                </Field>
-                <Field v-if="kind.ages === 'window'" label="Through age" :hint="`Blank is ${ages[1]}. RMDs begin at ${profile.rmd_start_age}.`" :error="form.errors.convert_until_age">
-                    <input v-model.number="form.convert_until_age" type="number" min="18" max="110" step="1" :placeholder="String(ages[1])">
-                </Field>
+                <!-- What only this kind of strategy asks for. -->
                 <Field v-if="kind.amount" label="Convert each year" prefix="$" hint="In today's dollars. Once less than this is left, the rest is converted." :error="form.errors.conversion_amount">
                     <input v-model.number="form.conversion_amount" type="number" min="1" step="1" required>
                 </Field>
@@ -136,9 +120,30 @@ const save = () => {
                 </Field>
             </div>
 
+            <!-- The ages take 70% of the strategy's column above; the name has the rest. -->
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-start">
+                <Field v-if="kind.ages === 'at'" class="sm:w-[42%] sm:shrink-0" label="Convert at age" :hint="`Blank is ${ages[0]}.`" :error="form.errors.convert_from_age">
+                    <input v-model.number="form.convert_from_age" type="number" min="18" max="110" step="1" :placeholder="String(ages[0])">
+                </Field>
+                <!-- Two inputs under one label, so a group rather than a Field. -->
+                <div v-if="kind.ages === 'window'" class="sm:w-[42%] sm:shrink-0" role="group" aria-label="Age range">
+                    <span class="mb-1 block text-xs font-medium text-fin-grey-600">Age range</span>
+                    <div class="flex items-center gap-2">
+                        <input v-model.number="form.convert_from_age" type="number" min="18" max="110" step="1" class="min-w-0 flex-1" aria-label="From age" :placeholder="String(ages[0])">
+                        <span class="text-sm text-fin-grey-500">to</span>
+                        <input v-model.number="form.convert_until_age" type="number" min="18" max="110" step="1" class="min-w-0 flex-1" aria-label="Through age" :placeholder="String(ages[1])">
+                    </div>
+                    <span v-if="form.errors.convert_from_age || form.errors.convert_until_age" class="mt-1 block text-xs text-fin-red-600">{{ form.errors.convert_from_age || form.errors.convert_until_age }}</span>
+                    <span v-else class="mt-1 block text-xs text-fin-grey-500">Blank is {{ ages[0] }} to {{ ages[1] }}. RMDs begin at {{ profile.rmd_start_age }}.</span>
+                </div>
+                <Field class="min-w-0 sm:flex-1" label="Name" :error="form.errors.name">
+                    <input v-model="form.name" type="text" maxlength="80" :placeholder="unnamed">
+                </Field>
+            </div>
+
             <div v-if="kind.ages" class="grid items-start gap-4 sm:grid-cols-3">
                 <div class="sm:col-span-2">
-                    <Field label="Pay the conversion's tax" hint="From spare income, a year converts only what its income left after expenses and tax can pay the tax on, and savings are never touched. Taken from the converted money, there is no cap but less reaches the Roth." :error="form.errors.tax_payment">
+                    <Field label="Pay the conversion's tax" hint="Spare income caps each conversion at what it can pay the tax on. Converted money has no cap, but less reaches the Roth." :error="form.errors.tax_payment">
                         <select v-model="form.tax_payment">
                             <option v-for="(payment, key) in taxPayments" :key="key" :value="key">{{ payment.label }}</option>
                         </select>
@@ -157,16 +162,16 @@ const save = () => {
             <fieldset>
                 <legend class="mb-3 text-[11px] font-semibold uppercase tracking-wider text-fin-grey-400">Run it on</legend>
                 <div class="grid gap-4 sm:grid-cols-3">
-                    <Field label="Projection" hint="From Projections & scenarios." :error="form.errors.scenario_id">
+                    <Field label="Projection" :error="form.errors.scenario_id">
                         <select v-model="form.scenario_id">
-                            <option :value="null">Income &amp; expenses as entered</option>
+                            <option :value="null">No projection</option>
                             <option v-for="scenario in scenarios" :key="scenario.id" :value="scenario.id">{{ scenario.name }}</option>
                         </select>
                     </Field>
-                    <Field label="Inflation" suffix="% / yr" :hint="`Prices, tax brackets and IRMAA tiers. Blank follows the projection (${projectionRate}%).`" :error="form.errors.inflation_rate">
+                    <Field label="Inflation" suffix="% / yr" hint="Adjusts brackets and IRMAA tiers" :error="form.errors.inflation_rate">
                         <input v-model.number="form.inflation_rate" type="number" min="-5" max="15" step="0.1" :placeholder="String(projectionRate)">
                     </Field>
-                    <Field label="Growth" suffix="% / yr" :hint="`Every account, before inflation. Blank lets each grow at its own holdings' rate (${growthRate}% overall).`" :error="form.errors.growth_rate">
+                    <Field label="Growth" suffix="% / yr" hint="Override projected rates" :error="form.errors.growth_rate">
                         <input v-model.number="form.growth_rate" type="number" min="-10" max="20" step="0.1" :placeholder="String(growthRate)">
                     </Field>
                 </div>

@@ -67,6 +67,8 @@ class HandleFinanceInertiaRequests extends Middleware
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'error' => fn () => $request->session()->get('error'),
+                // The id of a strategy just copied, for its page to open.
+                'copied' => fn () => $request->session()->get('copied'),
             ],
         ];
     }

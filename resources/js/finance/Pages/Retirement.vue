@@ -1,5 +1,5 @@
 <script setup>
-import { Deferred, router } from '@inertiajs/vue3';
+import { Deferred, router, usePage } from '@inertiajs/vue3';
 import { IconArchive, IconCopy, IconPencil, IconPlus, IconSparkles } from '@tabler/icons-vue';
 import { computed, ref, watch } from 'vue';
 import Card from '../Components/Card.vue';
@@ -16,8 +16,9 @@ import ThresholdChart from '../Components/ThresholdChart.vue';
 import { chartColors, money, moneyBrief } from '../lib/format';
 
 /**
- * The Roth conversion tab: strategies built by the user, run by the server
- * over the same lifetime, and set side by side.
+ * The Roth conversion tab: strategies built by the user and run by the
+ * server over the same lifetime. Those in the report are shown: one alone as
+ * a report on that strategy, several set side by side.
  *
  * Nothing here calculates. Each strategy arrives with its year-by-year rows
  * and its summary already worked out (ConversionBoard); the page chooses what
@@ -38,9 +39,9 @@ const props = defineProps({
     brackets: Array,
     irmaa_tiers: Array,
     strategies: Array,
-    // The holding area: strategies not being compared, as settings alone.
+    // The holding area: strategies not in the report, as settings alone.
     held: Array,
-    // { count, default, max }: how many are compared, and how many can be.
+    // { count, default, max }: how many are in the report, and how many can be.
     comparison: Object,
     // Deferred: undefined until the follow-up request brings it.
     monte_carlo: Object,
@@ -53,15 +54,31 @@ const edit = (strategy) => { form.value = { open: true, strategy }; };
 // One of each kind for every saved projection — or, with none saved, one set
 // on the income and expenses as entered.
 const addStarters = () => router.post('/finance/retirement/strategies/starters', { every_projection: true }, { preserveScroll: true });
+
+// One of each kind on the projection chosen; `null` is the income and
+// expenses as entered.
+const setFor = ref(null);
+const addSet = () => router.post('/finance/retirement/strategies/starters', { scenario_id: setFor.value }, { preserveScroll: true });
+
 const hold = (strategy) => router.delete(`/finance/retirement/strategies/${strategy.id}/compare`, { preserveScroll: true });
-// Sends everything being compared to the holding area. Nothing is removed.
+// Sends everything in the report to the holding area. Nothing is removed.
 const clearComparison = () => {
-    if (window.confirm(`Clear the comparison? The ${props.strategies.length} being compared move to the holding area; none is removed.`)) {
+    if (window.confirm(`Clear the report? The ${props.strategies.length} in it move to the holding area; none is removed.`)) {
         router.delete('/finance/retirement/strategies/comparison', { preserveScroll: true });
     }
 };
 
 const duplicate = (strategy) => router.post(`/finance/retirement/strategies/${strategy.id}/duplicate`, {}, { preserveScroll: true });
+
+// A copy is made to be changed, so it opens for editing as soon as it lands,
+// wherever it was copied from. The server flashes its id.
+const page = usePage();
+
+watch(() => page.props.flash?.copied, (id) => {
+    const copy = [...props.strategies, ...props.held].find((strategy) => strategy.id === id);
+
+    if (copy) edit(copy);
+});
 
 const colorOf = (index) => chartColors[index % chartColors.length];
 const colorOfStrategy = (strategy) => colorOf(props.strategies.findIndex((candidate) => candidate.id === strategy.id));
@@ -88,6 +105,9 @@ watch(() => props.strategies.map((strategy) => strategy.id), (ids) => {
     if (!ids.includes(selectedId.value)) selectedId.value = ids[0] ?? null;
 });
 
+// One strategy in the report is reported on alone, with nothing to compare.
+const isSingle = computed(() => props.strategies.length === 1);
+
 const selectedIndex = computed(() => props.strategies.findIndex((strategy) => strategy.id === selectedId.value));
 const selected = computed(() => props.strategies[selectedIndex.value] ?? null);
 
@@ -95,7 +115,7 @@ const age = (value) => `Age ${value}`;
 
 // One line per strategy, of whichever figure in its rows.
 const lines = (field) => props.strategies.map((strategy, index) => ({
-    label: strategy.name,
+    label: strategy.label,
     color: colorOf(index),
     points: strategy.rows.map((row) => ({ x: row.age, y: row[field] })),
 }));
@@ -131,15 +151,17 @@ const balanceLines = computed(() => [
 ]);
 
 /*
- * The comparison, a row to a figure. `best` names which end of the row is
- * the one to want, and marks whichever strategies reach it — only where the
- * figure is one a person would actually choose a strategy by.
+ * The report's figures: a row each when strategies are compared, a tile each
+ * for one alone. `best` names which end of the row is the one to want, and
+ * marks whichever strategies reach it — only where the figure is one a
+ * person would actually choose a strategy by. `alone` is the label for a
+ * figure whose own only reads beneath the row above it.
  */
 const figures = [
     { key: 'converted', label: 'Converted to Roth' },
     { key: 'total_rmd', label: 'RMDs taken' },
     { key: 'lifetime_tax', label: 'Tax you pay', best: 'low', note: (summary) => (summary.penalties ? `${moneyBrief(summary.penalties)} early-withdrawal penalty` : '') },
-    { key: 'conversion_tax', label: 'of it, on the conversions', note: (summary) => (summary.conversion_tax_withheld ? `${moneyBrief(summary.conversion_tax_withheld)} from the converted money` : '') },
+    { key: 'conversion_tax', label: 'of it, on the conversions', alone: 'Tax on the conversions', note: (summary) => (summary.conversion_tax_withheld ? `${moneyBrief(summary.conversion_tax_withheld)} from the converted money` : '') },
     { key: 'irmaa', label: 'IRMAA surcharges', best: 'low', note: (summary) => (summary.irmaa_years ? `${summary.irmaa_years} ${summary.irmaa_years === 1 ? 'year' : 'years'}` : '') },
     { key: 'ending_traditional', label: 'Traditional at the end' },
     { key: 'ending_roth', label: 'Roth at the end' },
@@ -177,9 +199,18 @@ const convertsWhen = (strategy) => {
 </script>
 
 <template>
-    <FinShell title="Retirement strategizer" subtitle="Build strategies for moving traditional money to Roth, then compare what each does to your tax, your Medicare premiums and what is left.">
+    <FinShell title="Retirement strategizer" subtitle="Build strategies for moving traditional money to Roth, then report on one, or compare several, by what each does to your tax, your Medicare premiums and what is left.">
         <template #actions>
             <button type="button" class="fin-btn fin-btn-primary" @click="build"><IconPlus :size="16" /> Strategy</button>
+            <span class="h-6 w-px bg-fin-grey-300" aria-hidden="true" />
+            <form class="flex flex-wrap items-center gap-2" @submit.prevent="addSet">
+                <span class="text-xs font-medium text-fin-grey-600">One of each type for</span>
+                <select v-model="setFor" class="!w-52" aria-label="Projection to make one of each strategy type for">
+                    <option :value="null">No projection</option>
+                    <option v-for="scenario in scenarios" :key="scenario.id" :value="scenario.id">{{ scenario.name }}</option>
+                </select>
+                <button type="submit" class="fin-btn fin-btn-quiet"><IconSparkles :size="16" /> Add</button>
+            </form>
         </template>
 
         <RetirementTabs current="conversions" />
@@ -199,7 +230,7 @@ const convertsWhen = (strategy) => {
                 There is no traditional balance in your fleet, so there is nothing to convert and every strategy will come out the same.
             </p>
 
-            <EmptyState v-if="!strategies.length && !held.length" title="No strategies yet" :body="`A strategy is a way of converting, the projection it runs on, an inflation rate, and who inherits. Build a few and they are set side by side.${scenarios.length > 1 ? ' Starting with a set for each projection compares the first six and puts the rest in the holding area.' : ''}`">
+            <EmptyState v-if="!strategies.length && !held.length" title="No strategies yet" :body="`A strategy is a way of converting, the projection it runs on, an inflation rate, and who inherits. Put one in the report to look at it alone, or several to set them side by side.${scenarios.length > 1 ? ' Starting with a set for each projection puts the first six in the report and the rest in the holding area.' : ''}`">
                 <button type="button" class="fin-btn fin-btn-primary" @click="addStarters"><IconSparkles :size="16" /> {{ scenarios.length ? `Start with one of each kind for each projection (${scenarios.length})` : 'Start with one of each kind' }}</button>
                 <button type="button" class="fin-btn fin-btn-quiet" @click="build"><IconPlus :size="16" /> Build one</button>
             </EmptyState>
@@ -208,14 +239,40 @@ const convertsWhen = (strategy) => {
                 <StrategyHoldingArea :held="held" :kinds="kinds" :scenarios="scenarios" :comparison="comparison" @build="build" @edit="edit" />
 
                 <p v-if="!strategies.length" class="rounded-xl border border-fin-gold-300 bg-fin-gold-100 px-4 py-3 text-sm text-fin-charcoal">
-                    Nothing is being compared. Add a strategy to the comparison from the holding area above.
+                    Nothing is in the report. Add one strategy from the holding area above for a report on it alone, or several to compare them.
                 </p>
             </template>
 
             <template v-if="strategies.length">
-                <Card title="Side by side" :subtitle="`Over the whole plan, in today's dollars. A green figure is the best in its row. ${comparison.count} of at most ${comparison.max} being compared.`" flush>
+                <!-- One strategy: its figures as tiles, with nothing to be best of. -->
+                <Card v-if="isSingle" :title="selected.label" :subtitle="`${[selected.kind_label, convertsWhen(selected)].filter(Boolean).join(' ')} · ${assumptions(selected)}. Over the whole plan, in today's dollars.`">
                     <template #actions>
-                        <button type="button" class="fin-btn fin-btn-quiet" @click="clearComparison"><IconArchive :size="16" /> Clear Comparison</button>
+                        <button type="button" class="fin-btn fin-btn-quiet" @click="edit(selected)"><IconPencil :size="16" /> Edit</button>
+                        <button type="button" class="fin-icon-btn" :aria-label="`Copy ${selected.label}`" title="Copy" @click="duplicate(selected)"><IconCopy :size="15" /></button>
+                        <button type="button" class="fin-icon-btn" :aria-label="`Move ${selected.label} to the holding area`" title="Move to the holding area" @click="hold(selected)"><IconArchive :size="15" /></button>
+                    </template>
+
+                    <dl class="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
+                        <div v-for="figure in figures" :key="figure.key">
+                            <dt class="text-xs text-fin-grey-500">{{ figure.alone ?? figure.label }}</dt>
+                            <dd class="mt-0.5 text-fin-black" :class="figure.strong ? 'text-lg font-bold' : 'text-base font-semibold'" :title="money(selected.summary[figure.key])">
+                                {{ moneyBrief(selected.summary[figure.key]) }}
+                                <span v-if="figure.note?.(selected.summary, selected)" class="block text-[11px] font-normal text-fin-grey-500">{{ figure.note(selected.summary, selected) }}</span>
+                            </dd>
+                        </div>
+                        <div>
+                            <dt class="text-xs text-fin-grey-500">Highest bracket reached</dt>
+                            <dd class="mt-0.5 text-base font-semibold text-fin-black">
+                                {{ selected.summary.peak_marginal_rate }}%
+                                <span v-if="selected.summary.short_at_age" class="block text-[11px] font-semibold text-fin-red-600">Money runs out at {{ selected.summary.short_at_age }}</span>
+                            </dd>
+                        </div>
+                    </dl>
+                </Card>
+
+                <Card v-else title="Side by side" :subtitle="`Over the whole plan, in today's dollars. A green figure is the best in its row. ${comparison.count} of at most ${comparison.max} in the report.`" flush>
+                    <template #actions>
+                        <button type="button" class="fin-btn fin-btn-quiet" @click="clearComparison"><IconArchive :size="16" /> Clear Report</button>
                     </template>
 
                     <div class="overflow-x-auto">
@@ -226,15 +283,15 @@ const convertsWhen = (strategy) => {
                                     <th v-for="(strategy, index) in strategies" :key="strategy.id" class="min-w-44 px-3 py-2.5 text-right font-normal">
                                         <span class="flex items-center justify-end gap-1.5 text-sm font-semibold text-fin-black">
                                             <span class="h-2.5 w-2.5 shrink-0 rounded-full" :style="{ backgroundColor: colorOf(index) }" aria-hidden="true" />
-                                            {{ strategy.name }}
+                                            {{ strategy.label }}
                                         </span>
                                         <span class="mt-0.5 block">{{ strategy.kind_label }} {{ convertsWhen(strategy) }}</span>
                                         <span v-if="kinds[strategy.kind]?.amount" class="block">{{ moneyBrief(strategy.conversion_amount) }} a year</span>
                                         <span class="block">{{ assumptions(strategy) }}</span>
                                         <span class="mt-1 flex justify-end">
-                                            <button type="button" class="fin-icon-btn" :aria-label="`Edit ${strategy.name}`" @click="edit(strategy)"><IconPencil :size="15" /></button>
-                                            <button type="button" class="fin-icon-btn" :aria-label="`Copy ${strategy.name}`" @click="duplicate(strategy)"><IconCopy :size="15" /></button>
-                                            <button type="button" class="fin-icon-btn" :aria-label="`Move ${strategy.name} to the holding area`" title="Move to the holding area" @click="hold(strategy)"><IconArchive :size="15" /></button>
+                                            <button type="button" class="fin-icon-btn" :aria-label="`Edit ${strategy.label}`" @click="edit(strategy)"><IconPencil :size="15" /></button>
+                                            <button type="button" class="fin-icon-btn" :aria-label="`Copy ${strategy.label}`" @click="duplicate(strategy)"><IconCopy :size="15" /></button>
+                                            <button type="button" class="fin-icon-btn" :aria-label="`Move ${strategy.label} to the holding area`" title="Move to the holding area" @click="hold(strategy)"><IconArchive :size="15" /></button>
                                         </span>
                                     </th>
                                 </tr>
@@ -288,7 +345,7 @@ const convertsWhen = (strategy) => {
                     </Card>
                 </div>
 
-                <Card v-if="selected" title="A closer look" subtitle="One strategy against the lines that matter: the tops of the tax brackets, and the IRMAA tiers.">
+                <Card v-if="selected" :title="isSingle ? 'Year by year' : 'A closer look'" :subtitle="isSingle ? 'Against the lines that matter: the tops of the tax brackets, and the IRMAA tiers.' : 'One strategy against the lines that matter: the tops of the tax brackets, and the IRMAA tiers.'">
                     <template v-if="strategies.length > 1" #actions>
                         <div class="flex flex-wrap gap-1.5" role="group" aria-label="Strategy to look at">
                             <button
@@ -298,7 +355,7 @@ const convertsWhen = (strategy) => {
                                 :aria-pressed="strategy.id === selectedId" @click="selectedId = strategy.id"
                             >
                                 <span class="h-2 w-2 rounded-full" :style="{ backgroundColor: colorOf(index) }" aria-hidden="true" />
-                                {{ strategy.name }}
+                                {{ strategy.label }}
                             </button>
                         </div>
                     </template>
@@ -333,7 +390,7 @@ const convertsWhen = (strategy) => {
                         </section>
 
                         <section>
-                            <h3 class="mb-3 text-sm font-semibold text-fin-black">Year by year</h3>
+                            <h3 class="mb-3 text-sm font-semibold text-fin-black">{{ isSingle ? 'Every year' : 'Year by year' }}</h3>
                             <div class="max-h-[26rem] overflow-auto rounded-xl border border-fin-grey-200">
                                 <table class="w-full text-sm">
                                     <thead class="sticky top-0">

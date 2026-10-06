@@ -441,12 +441,12 @@ return [
     */
 
     'conversion_strategies' => [
-        'none' => ['label' => 'No conversion', 'description' => 'Leave traditional money where it is and take the RMDs as they come.', 'ages' => null],
+        'none' => ['label' => 'No conversion', 'description' => 'Leave traditional accounts alone and take the RMDs in full.', 'ages' => null],
         'lump' => ['label' => 'One large conversion', 'description' => 'Convert the whole traditional balance in a single year.', 'ages' => 'at'],
-        'even' => ['label' => 'Even conversions before RMDs', 'description' => 'Empty the traditional balance in equal parts across a window of years, 65 through 72 unless you say otherwise.', 'ages' => 'window'],
-        'fixed' => ['label' => 'Fixed amount each year', 'description' => 'Convert the same amount every year across a window of years, 65 through 72 unless you say otherwise, and whatever is left once the balance runs lower than that.', 'ages' => 'window', 'amount' => true],
+        'even' => ['label' => 'Even conversions before RMDs', 'description' => 'Empty the traditional balance in equal parts across the age range.', 'ages' => 'window'],
+        'fixed' => ['label' => 'Fixed amount each year', 'description' => 'Convert the same amount every year across the age range.', 'ages' => 'window', 'amount' => true],
         'fill_bracket' => ['label' => 'Fill a tax bracket each year', 'description' => 'Each year, convert just enough to bring income to the top of a tax bracket.', 'ages' => 'window', 'fills' => true],
-        'fill_bracket_irmaa' => ['label' => 'Fill the tax or IRMAA bracket', 'description' => 'Each year, convert up to the top of the tax bracket or to $100 short of the top of the IRMAA tier you are already in, whichever comes first, so a conversion never raises your Medicare premiums.', 'ages' => 'window', 'fills' => true],
+        'fill_bracket_irmaa' => ['label' => 'Fill the tax or IRMAA bracket', 'description' => 'Each year, convert up to the top of the tax bracket or to the top of the IRMAA tier you are already in.', 'ages' => 'window', 'fills' => true],
     ],
 
     'conversion_fill_rates' => [10, 12, 22, 24, 32, 35],

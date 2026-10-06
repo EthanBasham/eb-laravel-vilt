@@ -13,12 +13,15 @@ use App\Models\Finance\ConversionStrategy;
 use App\Models\Finance\Scenario;
 
 /**
- * The strategies the Retirement Strategizer compares. Ordinary CRUD: the
+ * The strategies the Retirement Strategizer reports on. Ordinary CRUD: the
  * figures are worked out when the page is rendered, by ConversionBoard.
  *
- * A strategy is either in the comparison or in the holding area. A newly
- * made one — built, copied or a starter — joins the comparison while it has
- * room and goes to the holding area once it has not.
+ * A strategy is either in the report or in the holding area. The page calls
+ * it the report — one strategy in it is reported on alone, several are
+ * compared — while the code still says `compare` and `is_compared`. A newly
+ * made one — built or a starter — joins the report while it has room and
+ * goes to the holding area once it has not. A copy lands beside the one it
+ * was made from.
  */
 class ConversionStrategyController extends Controller
 {
@@ -31,10 +34,10 @@ class ConversionStrategyController extends Controller
         ]);
 
         if ($strategy->is_compared) {
-            return back(fallback: route('finance.retirement'))->with('success', "{$strategy->name} added.");
+            return back(fallback: route('finance.retirement'))->with('success', "{$strategy->label} added.");
         }
 
-        return back(fallback: route('finance.retirement'))->with('success', "{$strategy->name} added to the holding area. The comparison is full; bring it in from there.");
+        return back(fallback: route('finance.retirement'))->with('success', "{$strategy->label} added to the holding area. The report is full; bring it in from there.");
     }
 
     /**
@@ -59,8 +62,6 @@ class ConversionStrategyController extends Controller
         $made = DB::transaction(fn () => $projections->flatMap(fn (?Scenario $scenario) => collect(config('finance.conversion_strategies'))->map(fn (array $kind, string $key) => ConversionStrategy::query()->create([
             'user_id' => $user->id,
             'scenario_id' => $scenario?->id,
-            // Named for its projection too, so the sets can be told apart.
-            'name' => str($scenario ? "{$kind['label']} · {$scenario->name}" : $kind['label'])->limit(80, '')->toString(),
             'kind' => $key,
             'is_compared' => ConversionStrategy::hasRoomToCompare($user),
             'conversion_amount' => ($kind['amount'] ?? false) ? config('finance.defaults.conversion_amount') : null,
@@ -68,7 +69,7 @@ class ConversionStrategyController extends Controller
         ]))->values()));
 
         $held = $made->where('is_compared', false)->count();
-        $where = $held > 0 ? " {$held} of them are in the holding area, as the comparison is full." : '';
+        $where = $held > 0 ? " {$held} of them are in the holding area, as the report is full." : '';
 
         if ($projections->count() > 1) {
             return back(fallback: route('finance.retirement'))->with('success', "{$made->count()} strategies added: one of each kind for each of your {$projections->count()} projections.{$where}");
@@ -85,20 +86,35 @@ class ConversionStrategyController extends Controller
 
         $strategy->update($request->validated());
 
-        return back(fallback: route('finance.retirement'))->with('success', "{$strategy->name} updated.");
+        return back(fallback: route('finance.retirement'))->with('success', "{$strategy->label} updated.");
     }
 
+    /**
+     * Copies a strategy to where it was copied from: the report for one in
+     * the report, the holding area for one held. Only a report already at
+     * its most sends a copy made there to the holding area instead.
+     *
+     * The copy's id is flashed as `copied`, which the page opens for editing:
+     * a copy is made to be changed.
+     */
     public function duplicate(Request $request, ConversionStrategy $strategy): RedirectResponse
     {
         abort_unless($strategy->isOwnedBy($request->user()), 404);
 
+        $isFull = ConversionStrategy::query()->onlyOwnedBy($request->user())->onlyCompared()->count() >= (int) config('finance.conversion_comparison.max');
+
         $copy = $strategy->replicate()->fill([
-            'name' => str("{$strategy->name} copy")->limit(80, '')->toString(),
-            'is_compared' => ConversionStrategy::hasRoomToCompare($request->user()),
+            // An unnamed strategy's copy is unnamed too.
+            'name' => $strategy->name === null ? null : str("{$strategy->name} copy")->limit(80, '')->toString(),
+            'is_compared' => $strategy->is_compared && ! $isFull,
         ]);
         $copy->save();
 
-        return back(fallback: route('finance.retirement'))->with('success', "{$copy->name} made from {$strategy->name}.");
+        $where = $strategy->is_compared && ! $copy->is_compared ? ' The report is full, so the copy is in the holding area.' : '';
+
+        return back(fallback: route('finance.retirement'))
+            ->with('success', "{$copy->label} made from {$strategy->label}.{$where}")
+            ->with('copied', $copy->id);
     }
 
     /**
@@ -111,7 +127,7 @@ class ConversionStrategyController extends Controller
         $most = (int) config('finance.conversion_comparison.max');
 
         if (! $strategy->is_compared && ConversionStrategy::query()->onlyOwnedBy($request->user())->onlyCompared()->count() >= $most) {
-            return back(fallback: route('finance.retirement'))->with('error', "No more than {$most} strategies can be compared at once. Move one to the holding area first.");
+            return back(fallback: route('finance.retirement'))->with('error', "No more than {$most} strategies can be in the report at once. Move one to the holding area first.");
         }
 
         $strategy->update(['is_compared' => true]);
@@ -164,6 +180,6 @@ class ConversionStrategyController extends Controller
 
         $strategy->delete();
 
-        return back(fallback: route('finance.retirement'))->with('success', "{$strategy->name} removed.");
+        return back(fallback: route('finance.retirement'))->with('success', "{$strategy->label} removed.");
     }
 }

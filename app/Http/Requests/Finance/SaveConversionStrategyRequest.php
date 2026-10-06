@@ -19,7 +19,8 @@ class SaveConversionStrategyRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => ['required', 'string', 'max:80'],
+            // Blank is shown as its projection and its kind.
+            'name' => ['nullable', 'string', 'max:80'],
             'kind' => ['required', 'string', Rule::in(array_keys(config('finance.conversion_strategies')))],
             // Only one of the user's own projections can be built on.
             'scenario_id' => ['nullable', 'integer', Rule::exists('fin_scenarios', 'id')->where('user_id', $this->user()->id)],

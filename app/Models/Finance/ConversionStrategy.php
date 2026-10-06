@@ -19,6 +19,7 @@ use Database\Factories\Finance\ConversionStrategyFactory;
  * in the holding area, costing the page nothing.
  *
  * @property-read string $kind_label
+ * @property-read string $label
  * @property-read array<string, mixed> $props
  */
 #[Fillable(['user_id', 'scenario_id', 'name', 'kind', 'is_compared', 'convert_from_age', 'convert_until_age', 'fill_rate', 'conversion_amount', 'tax_payment', 'tax_outside_amount', 'inflation_rate', 'growth_rate', 'heir_is_charity', 'heir_income'])]
@@ -74,12 +75,22 @@ class ConversionStrategy extends OwnedModel
         return Attribute::get(fn (): string => config("finance.conversion_strategies.{$this->kind}.label", $this->kind));
     }
 
+    /**
+     * What it is called: its own name, or — as a name is optional — the
+     * projection it runs on and its kind.
+     */
+    protected function label(): Attribute
+    {
+        return Attribute::get(fn (): string => $this->name ?? ($this->scenario?->name ?? 'As entered').' · '.$this->kind_label);
+    }
+
     /** The settings as saved, nulls and all: what the edit form is filled from. */
     protected function props(): Attribute
     {
         return Attribute::get(fn (): array => [
             'id' => $this->id,
             'name' => $this->name,
+            'label' => $this->label,
             'kind' => $this->kind,
             'kind_label' => $this->kind_label,
             'is_compared' => $this->is_compared,

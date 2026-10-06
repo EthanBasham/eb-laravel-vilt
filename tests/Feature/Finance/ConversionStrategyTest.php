@@ -727,6 +727,32 @@ it('adds, edits, copies and removes a strategy', function () {
     expect($strategy->fresh())->toBeNull();
 });
 
+it('saves a strategy without a name, and copies it without one', function () {
+    $user = conversionRetiree();
+
+    $this->actingAs($user)->post(route('finance.retirement.strategies.store'), strategyPayload(['name' => '']))->assertSessionHasNoErrors();
+    $strategy = ConversionStrategy::query()->onlyOwnedBy($user)->sole();
+
+    $this->actingAs($user)->post(route('finance.retirement.strategies.duplicate', $strategy));
+
+    expect(ConversionStrategy::query()->onlyOwnedBy($user)->pluck('name')->all())->toBe([null, null]);
+});
+
+it('calls a strategy by its name, or by its projection and its kind when it has none', function () {
+    $user = conversionRetiree();
+    $scenario = Scenario::factory()->create(['user_id' => $user->id, 'name' => 'Lean years']);
+    ConversionStrategy::factory()->ofKind('even')->create(['user_id' => $user->id]);
+    ConversionStrategy::factory()->ofKind('even')->held()->create(['user_id' => $user->id, 'scenario_id' => $scenario->id]);
+    ConversionStrategy::factory()->ofKind('even')->held()->create(['user_id' => $user->id, 'scenario_id' => $scenario->id, 'name' => 'My pick']);
+
+    $this->actingAs($user)->get(route('finance.retirement'))
+        ->assertInertia(fn ($page) => $page
+            ->where('strategies.0.name', null)
+            ->where('strategies.0.label', 'As entered · Even conversions before RMDs')
+            ->where('held.0.label', 'Lean years · Even conversions before RMDs')
+            ->where('held.1.label', 'My pick'));
+});
+
 it('adds one strategy of each kind to start from', function () {
     $user = conversionRetiree();
 
@@ -744,7 +770,6 @@ it('refuses a strategy it could not run', function (array $overrides, string $fi
 
     expect(ConversionStrategy::query()->count())->toBe(0);
 })->with([
-    'no name' => [['name' => ''], 'name'],
     'a kind it does not know' => [['kind' => 'backdoor'], 'kind'],
     'a bracket that is not on the table' => [['fill_rate' => 15], 'fill_rate'],
     'a window entered back to front' => [['convert_from_age' => 72, 'convert_until_age' => 65], 'convert_until_age'],
@@ -821,14 +846,21 @@ it('compares a new strategy while there is room, and holds it once there are six
     'six compared' => [6, false],
 ]);
 
-it('holds a copy when the comparison is full', function () {
+it('puts a copy where it was copied from, and flashes it to be opened', function (int $compared, bool $fromReport, bool $joins) {
     $user = User::factory()->create();
-    $strategies = ConversionStrategy::factory()->count(6)->create(['user_id' => $user->id]);
+    ConversionStrategy::factory()->count($compared)->create(['user_id' => $user->id]);
+    $strategy = ConversionStrategy::factory()->create(['user_id' => $user->id, 'is_compared' => $fromReport]);
 
-    $this->actingAs($user)->post(route('finance.retirement.strategies.duplicate', $strategies->first()))->assertRedirect();
+    $response = $this->actingAs($user)->post(route('finance.retirement.strategies.duplicate', $strategy));
 
-    expect(ConversionStrategy::query()->latest('id')->first()->is_compared)->toBeFalse();
-});
+    $copy = ConversionStrategy::query()->latest('id')->first();
+    $response->assertSessionHas('copied', $copy->id);
+    expect($copy->is_compared)->toBe($joins);
+})->with([
+    'from the holding area, with room in the report' => [0, false, false],
+    'from the report, past the six a new strategy stops at' => [6, true, true],
+    'from a report already at its twelve' => [11, true, false],
+]);
 
 it('keeps a strategy where it is when it is edited', function () {
     $user = User::factory()->create();
@@ -858,7 +890,7 @@ it('will not bring a thirteenth strategy into the comparison', function () {
     $strategy = ConversionStrategy::factory()->held()->create(['user_id' => $user->id]);
 
     $this->actingAs($user)->post(route('finance.retirement.strategies.compare', $strategy))
-        ->assertSessionHas('error', 'No more than 12 strategies can be compared at once. Move one to the holding area first.');
+        ->assertSessionHas('error', 'No more than 12 strategies can be in the report at once. Move one to the holding area first.');
 
     expect($strategy->fresh()->is_compared)->toBeFalse();
 });
@@ -900,8 +932,8 @@ it('refuses a comparison it cannot make', function (Closure $strategies, string 
 
     expect($compared->fresh()->is_compared)->toBeTrue();
 })->with([
-    'of nothing' => [fn () => [], 'strategies', 'Pick at least one strategy to compare.'],
-    'of more than twelve' => [fn (User $user) => ConversionStrategy::factory()->held()->count(13)->create(['user_id' => $user->id])->modelKeys(), 'strategies', 'No more than 12 strategies can be compared at once.'],
+    'of nothing' => [fn () => [], 'strategies', 'Pick at least one strategy for the report.'],
+    'of more than twelve' => [fn (User $user) => ConversionStrategy::factory()->held()->count(13)->create(['user_id' => $user->id])->modelKeys(), 'strategies', 'No more than 12 strategies can be in the report at once.'],
     'of another user\'s strategy' => [fn () => [ConversionStrategy::factory()->create()->id], 'strategies.0', 'The selected strategies.0 is invalid.'],
 ]);
 
@@ -918,7 +950,7 @@ it('will not move another user\'s strategy in or out of the comparison', functio
 
 // Starting with one of each kind
 
-it('makes one of each kind for the projection named, each called after it', function () {
+it('makes one of each kind for the projection named, each unnamed and so called after it', function () {
     $user = User::factory()->create();
     $scenario = Scenario::factory()->create(['user_id' => $user->id, 'name' => 'Lean years']);
 
@@ -928,7 +960,8 @@ it('makes one of each kind for the projection named, each called after it', func
     $made = ConversionStrategy::query()->onlyOwnedBy($user)->orderBy('id')->get();
     expect($made->pluck('kind')->all())->toBe(['none', 'lump', 'even', 'fixed', 'fill_bracket', 'fill_bracket_irmaa'])
         ->and($made->pluck('scenario_id')->unique()->all())->toBe([$scenario->id])
-        ->and($made->first()->name)->toBe('No conversion · Lean years')
+        ->and($made->pluck('name')->unique()->all())->toBe([null])
+        ->and($made->first()->label)->toBe('Lean years · No conversion')
         ->and($made->where('is_compared', true))->toHaveCount(6);
 });
 
@@ -939,13 +972,13 @@ it('makes a set for every saved projection, comparing the first six and holding 
     Scenario::factory()->create(['name' => 'Somebody else\'s']);
 
     $this->actingAs($user)->post(route('finance.retirement.strategies.starters'), ['every_projection' => true])
-        ->assertSessionHas('success', '12 strategies added: one of each kind for each of your 2 projections. 6 of them are in the holding area, as the comparison is full.');
+        ->assertSessionHas('success', '12 strategies added: one of each kind for each of your 2 projections. 6 of them are in the holding area, as the report is full.');
 
     $made = ConversionStrategy::query()->onlyOwnedBy($user)->orderBy('id')->get();
     expect($made)->toHaveCount(12)
         ->and($made->where('scenario_id', $first->id)->pluck('is_compared')->unique()->all())->toBe([true])
         ->and($made->where('scenario_id', $second->id)->pluck('is_compared')->unique()->values()->all())->toBe([false])
-        ->and($made->last()->name)->toBe('Fill the tax or IRMAA bracket · B hopeful');
+        ->and($made->last()->label)->toBe('B hopeful · Fill the tax or IRMAA bracket');
 });
 
 it('makes one set on the income and expenses as entered when no projection is saved', function () {
@@ -956,7 +989,7 @@ it('makes one set on the income and expenses as entered when no projection is sa
     $made = ConversionStrategy::query()->onlyOwnedBy($user)->get();
     expect($made)->toHaveCount(6)
         ->and($made->pluck('scenario_id')->unique()->all())->toBe([null])
-        ->and($made->first()->name)->toBe('No conversion');
+        ->and($made->first()->label)->toBe('As entered · No conversion');
 });
 
 it('will not make a set on another user\'s projection', function () {
