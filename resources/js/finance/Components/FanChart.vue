@@ -1,7 +1,8 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { niceScale } from '../composables/useNiceScale';
+import { computed, ref } from 'vue';
+import { useChartWidth } from '../composables/useChartWidth';
 import { money, moneyShort } from '../lib/format';
+import { niceScale } from '../lib/scale';
 
 /**
  * A spread of outcomes over time: a shaded band from a bad outcome to a good
@@ -23,18 +24,7 @@ const props = defineProps({
 
 const pad = { top: 12, right: 16, bottom: 28, left: 56 };
 
-const frame = ref(null);
-const width = ref(640);
-let observer = null;
-
-onMounted(() => {
-    observer = new ResizeObserver(([entry]) => {
-        width.value = Math.max(280, entry.contentRect.width);
-    });
-    observer.observe(frame.value);
-});
-
-onBeforeUnmount(() => observer?.disconnect());
+const { frame, width } = useChartWidth();
 
 const scale = computed(() => niceScale(0, Math.max(1000, ...props.band.map((point) => point.p90), ...props.line.map((point) => point.y))));
 const plotWidth = computed(() => width.value - pad.left - pad.right);

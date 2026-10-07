@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Finance;
 
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Finance\SaveSocialSecurityBenefitsRequest;
 use App\Http\Requests\Finance\SaveSocialSecurityStrategyRequest;
@@ -26,7 +25,7 @@ class SocialSecurityController extends Controller
      */
     public function updateBenefits(SaveSocialSecurityBenefitsRequest $request): RedirectResponse
     {
-        Profile::query()->updateOrCreate(['user_id' => $request->user()->id], $request->validated());
+        Profile::saveFor($request->user(), $request->validated());
 
         return back(fallback: route('finance.retirement', 'social-security'))->with('success', 'Benefits saved.');
     }
@@ -44,31 +43,7 @@ class SocialSecurityController extends Controller
      */
     public function storeStarters(Request $request, SocialSecurityBoard $board): RedirectResponse
     {
-        $people = $board->people(Profile::for($request->user()));
-        $earliest = (int) config('finance.social_security.earliest_age');
-        $latest = (int) config('finance.social_security.latest_age');
-
-        $starters = [
-            ["Claim at {$earliest}", fn (array $person): array => [$earliest, 0]],
-            ['Claim at full retirement age', fn (array $person): array => [intdiv($person['fra'], 12), $person['fra'] % 12]],
-            ["Wait until {$latest}", fn (array $person): array => [$latest, 0]],
-        ];
-
-        DB::transaction(function () use ($request, $people, $starters): void {
-            foreach ($starters as [$name, $ageOf]) {
-                [$age, $months] = $ageOf($people['self']);
-                [$spouseAge, $spouseMonths] = isset($people['spouse']) ? $ageOf($people['spouse']) : [null, 0];
-
-                SocialSecurityStrategy::query()->create([
-                    'user_id' => $request->user()->id,
-                    'name' => $name,
-                    'claim_age' => $age,
-                    'claim_months' => $months,
-                    'spouse_claim_age' => $spouseAge,
-                    'spouse_claim_months' => $spouseMonths,
-                ]);
-            }
-        });
+        SocialSecurityStrategy::createStarters($request->user(), $board->people(Profile::for($request->user())));
 
         return back(fallback: route('finance.retirement', 'social-security'))->with('success', 'Three claiming ages added. Edit any of them, or build one of your own.');
     }

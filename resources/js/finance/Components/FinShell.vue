@@ -280,6 +280,34 @@ body:has(.fin) {
     background-color: var(--color-fin-cream-100);
 }
 
+/*
+ * A small rounded toggle: one of a row of choices, or a filter. Which one is
+ * on is said once, with aria-pressed, and the look follows from it.
+ */
+.fin-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border: 1px solid var(--color-fin-grey-300);
+    border-radius: 9999px;
+    background-color: var(--color-fin-white);
+    padding: 0.25rem 0.75rem;
+    color: var(--color-fin-charcoal);
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1rem;
+}
+
+.fin-pill:hover {
+    background-color: var(--color-fin-cream-100);
+}
+
+.fin-pill[aria-pressed='true'] {
+    border-color: var(--color-fin-charcoal);
+    background-color: var(--color-fin-charcoal);
+    color: var(--color-fin-white);
+}
+
 .fin-btn-danger {
     border-color: color-mix(in srgb, var(--color-fin-red-600) 35%, transparent);
     background-color: var(--color-fin-white);

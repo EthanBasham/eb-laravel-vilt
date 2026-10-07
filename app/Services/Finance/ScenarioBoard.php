@@ -65,20 +65,27 @@ class ScenarioBoard
         $flows = $this->fleet->flows($user);
         $baseline = $this->totals($this->rows($flows, collect(), $profile), $profile);
 
+        $baselineNet = $this->summary($baseline)['net'];
+        // A setting counts wherever it is: on a flow, on a group, or on an
+        // item inside one.
+        $flowIds = $flows->modelKeys();
+        $itemIds = $this->fleet->flowLeaves($flows)->pluck('id')->all();
+
         $scenarios = Scenario::query()->onlyOwnedBy($user)->inDefaultOrder()->with('scenarioFlows')->get();
 
         return [
             'horizon' => $this->horizon($profile),
             'has_flows' => $flows->isNotEmpty(),
             'baseline' => ['summary' => $this->summary($baseline), 'totals' => $baseline],
-            'scenarios' => $scenarios->map(function (Scenario $scenario) use ($flows, $profile, $baseline): array {
+            'scenarios' => $scenarios->map(function (Scenario $scenario) use ($flows, $profile, $baselineNet, $flowIds, $itemIds): array {
                 $totals = $this->totals($this->rows($flows, $scenario->scenarioFlows, $profile), $profile, $scenario->bracket_inflation_rate);
+                $summary = $this->summary($totals);
 
                 return [
                     ...$scenario->props,
-                    'adjusted_count' => $scenario->scenarioFlows->whereIn('flow_id', $flows->modelKeys())->count(),
-                    'summary' => $this->summary($totals),
-                    'net_vs_baseline' => round($this->summary($totals)['net'] - $this->summary($baseline)['net'], 2),
+                    'adjusted_count' => $scenario->scenarioFlows->whereIn('flow_id', [...$flowIds, ...$itemIds])->unique('flow_id')->count(),
+                    'summary' => $summary,
+                    'net_vs_baseline' => round($summary['net'] - $baselineNet, 2),
                     'left_over' => $this->leftOver($totals),
                     'totals' => $totals,
                 ];
@@ -154,7 +161,10 @@ class ScenarioBoard
             'amounts' => array_column($row['series'], 'amount', 'year'),
         ])->values()->all();
 
-        $run = fn (array $settings): array => $this->ledger->run($leaves, $years, $routed, $transfers, $settings, $this->taxRates($rows, $totals), $profile->retirement_year);
+        $taxRates = $this->taxRates($rows, $totals);
+        $retirementYear = $profile->retirement_year;
+
+        $run = fn (array $settings): array => $this->ledger->run($leaves, $years, $routed, $transfers, $settings, $taxRates, $retirementYear);
 
         $ledger = $run($settings);
 
@@ -183,15 +193,14 @@ class ScenarioBoard
                     'withdrawals' => round($year['withdrawals'], 2),
                     'transfers_in' => round($year['transfers_in'], 2),
                     'transfers_out' => round($year['transfers_out'], 2),
+                    // Money moved in the year, less money moved out. For a
+                    // debt both payments and transfers in bring the balance
+                    // down.
+                    'moved' => round($holding->is_asset
+                        ? $year['contributions'] + $year['deposits'] + $year['transfers_in'] - $year['withdrawals'] - $year['transfers_out']
+                        : $year['contributions'] + $year['transfers_in'], 2),
                     'unfunded' => round($year['unfunded'], 2),
                 ], $years, $unpinned['holdings'][$holding->id]);
-
-                // Money moved in, less money moved out. For a debt both
-                // payments and transfers in bring the balance down.
-                $moved = $holding->is_asset
-                    ? array_sum(array_column($series, 'contributions')) + array_sum(array_column($series, 'deposits')) + array_sum(array_column($series, 'transfers_in'))
-                        - array_sum(array_column($series, 'withdrawals')) - array_sum(array_column($series, 'transfers_out'))
-                    : array_sum(array_column($series, 'contributions')) + array_sum(array_column($series, 'transfers_in'));
 
                 return [
                     'id' => $holding->id,
@@ -210,7 +219,7 @@ class ScenarioBoard
                     'end' => $series === [] ? round($holding->value, 2) : $series[array_key_last($series)]['amount'],
                     // The two halves of how it got there, over the whole plan.
                     'growth' => round(array_sum(array_column($series, 'growth')), 2),
-                    'moved' => round($moved, 2),
+                    'moved' => round(array_sum(array_column($series, 'moved')), 2),
                     'unfunded' => round(array_sum(array_column($series, 'unfunded')), 2),
                     'series' => $series,
                 ];
@@ -309,8 +318,12 @@ class ScenarioBoard
     {
         $settings = $settings->keyBy('flow_id');
 
+        // Worked out once for every row: each reads the profile's birth
+        // date, which is parsed afresh on every read.
+        $plan = ['years' => $this->years($profile), 'retirement_year' => $profile->retirement_year, 'birth_year' => $profile->birth_year];
+
         return $this->fleet->flowLeaves($flows)
-            ->map(fn (Flow $flow): array => $this->row($flow, $settings->get($flow->id), $profile, $settings->get($flow->parent_id)?->annual_growth_rate))
+            ->map(fn (Flow $flow): array => $this->row($flow, $settings->get($flow->id), $plan, $settings->get($flow->parent_id)?->annual_growth_rate))
             ->values();
     }
 
@@ -369,10 +382,11 @@ class ScenarioBoard
     }
 
     /**
+     * @param  array{years: list<int>, retirement_year: int, birth_year: int}  $plan
      * @param  float|null  $groupRate  The rate the scenario gave the flow this one sits inside.
      * @return array<string, mixed>
      */
-    private function row(Flow $flow, ?ScenarioFlow $settings, Profile $profile, ?float $groupRate = null): array
+    private function row(Flow $flow, ?ScenarioFlow $settings, array $plan, ?float $groupRate = null): array
     {
         $rate = $settings?->annual_growth_rate ?? $groupRate ?? $flow->annual_growth_rate;
         $pins = $settings?->overrides ?? [];
@@ -382,16 +396,16 @@ class ScenarioBoard
         $restart = null;
         $series = [];
 
-        foreach ($this->years($profile) as $year) {
-            $base = round($flow->amountInYear($year, $profile->retirement_year, $rate), 2);
-            $unpinned = $restart === null ? $base : round($flow->amountInYear($year, $profile->retirement_year, $rate, $restart), 2);
+        foreach ($plan['years'] as $year) {
+            $base = round($flow->amountInYear($year, $plan['retirement_year'], $rate), 2);
+            $unpinned = $restart === null ? $base : round($flow->amountInYear($year, $plan['retirement_year'], $rate, $restart), 2);
             $isPinned = array_key_exists($year, $pins);
             $isRestart = $isPinned && in_array($year, $restarts, true);
             $amount = $isPinned ? round((float) $pins[$year], 2) : $unpinned;
 
             $series[] = [
                 'year' => $year,
-                'age' => $year - $profile->birth_year,
+                'age' => $year - $plan['birth_year'],
                 // What the rate alone makes of the year, from today and with
                 // nothing set by hand: the line the page draws beside the
                 // figure used.

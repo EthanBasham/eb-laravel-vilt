@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Finance;
 
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Finance\SaveWithdrawalStrategyRequest;
 use App\Models\Finance\WithdrawalStrategy;
@@ -28,11 +27,7 @@ class WithdrawalStrategyController extends Controller
      */
     public function storeStarters(Request $request): RedirectResponse
     {
-        DB::transaction(fn () => collect(config('finance.withdrawal_strategies'))->each(fn (array $kind, string $key) => WithdrawalStrategy::query()->create([
-            'user_id' => $request->user()->id,
-            'name' => $kind['label'],
-            'kind' => $key,
-        ])));
+        WithdrawalStrategy::createStarters($request->user());
 
         return back(fallback: route('finance.retirement', 'withdrawals'))->with('success', 'One strategy for each order added. Edit any of them, or copy one to try a variation.');
     }
@@ -50,8 +45,7 @@ class WithdrawalStrategyController extends Controller
     {
         abort_unless($strategy->isOwnedBy($request->user()), 404);
 
-        $copy = $strategy->replicate()->fill(['name' => str("{$strategy->name} copy")->limit(80, '')->toString()]);
-        $copy->save();
+        $copy = $strategy->duplicate();
 
         return back(fallback: route('finance.retirement', 'withdrawals'))->with('success', "{$copy->name} made from {$strategy->name}.");
     }

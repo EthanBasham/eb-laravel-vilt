@@ -2,16 +2,16 @@
 
 namespace App\Http\Requests\Finance;
 
-use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
+use App\Models\Finance\Armada;
 use App\Models\Finance\Flow;
 use App\Models\Finance\Holding;
 
 /**
  * An income stream or an expense, created or edited.
  */
-class SaveFlowRequest extends FormRequest
+class SaveFlowRequest extends FinanceRequest
 {
     /**
      * Get the validation rules that apply to the request.
@@ -40,10 +40,10 @@ class SaveFlowRequest extends FormRequest
             'is_essential' => ['required', 'boolean'],
             'starts_on' => ['nullable', 'date'],
             'ends_on' => ['nullable', 'date', 'after_or_equal:starts_on'],
-            'holding_id' => ['nullable', 'integer', Rule::exists('fin_holdings', 'id')->where('user_id', $this->user()->id)],
-            'armada_id' => ['nullable', 'integer', Rule::exists('fin_armadas', 'id')->where('user_id', $this->user()->id)],
+            'holding_id' => ['nullable', 'integer', $this->owned(Holding::class)],
+            'armada_id' => ['nullable', 'integer', $this->owned(Armada::class)],
             // The asset an income is paid into, or an expense out of.
-            'account_id' => ['nullable', 'integer', Rule::exists('fin_holdings', 'id')->where('user_id', $this->user()->id)->where('side', 'asset')],
+            'account_id' => ['nullable', 'integer', $this->owned(Holding::class)->where('side', 'asset')],
             /*
              * The flow this one is an item of. It has to be the user's own
              * and stand at the top level itself — whereNull is what keeps
@@ -53,7 +53,7 @@ class SaveFlowRequest extends FormRequest
             'parent_id' => [
                 'nullable',
                 'integer',
-                Rule::exists('fin_flows', 'id')->where('user_id', $this->user()->id)->whereNull('parent_id'),
+                $this->owned(Flow::class)->whereNull('parent_id'),
                 Rule::notIn([$this->route('flow')?->id]),
             ],
         ];
@@ -112,7 +112,9 @@ class SaveFlowRequest extends FormRequest
      * The validated input as the columns to write. An item inside another
      * flow belongs to no holding and no armada of its own — it follows the
      * flow it sits in — and a flow hung off a holding follows the holding's
-     * armada, so neither keeps one that would be ignored.
+     * armada, so neither keeps one that would be ignored. A one-time flow
+     * given no date is dated today: left undated it would land in whatever
+     * year and month it is looked at in, every time.
      *
      * @return array<string, mixed>
      */
@@ -128,6 +130,7 @@ class SaveFlowRequest extends FormRequest
             'holding_id' => $holdingId,
             'armada_id' => $parentId || $holdingId ? null : ($validated['armada_id'] ?? null),
             'account_id' => $validated['account_id'] ?? null,
+            'starts_on' => $validated['starts_on'] ?? ($validated['frequency'] === 'once' ? now()->toDateString() : null),
         ];
     }
 

@@ -2,14 +2,13 @@
 
 namespace App\Http\Requests\Finance;
 
-use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Validator;
 
 /**
  * What a scenario changes about one flow, written whole: its rate, every
  * year it pins, and which of those the rate starts again from.
  */
-class SaveScenarioFlowRequest extends FormRequest
+class SaveScenarioFlowRequest extends FinanceRequest
 {
     /**
      * Get the validation rules that apply to the request.
@@ -41,20 +40,11 @@ class SaveScenarioFlowRequest extends FormRequest
     {
         return [
             function (Validator $validator): void {
-                $overrides = $this->input('overrides');
-
-                if (! is_array($overrides)) {
+                if (! $this->validatePinnedYears($validator, 'an amount')) {
                     return;
                 }
 
-                foreach (array_keys($overrides) as $year) {
-                    if (! ctype_digit((string) $year) || (int) $year < now()->year || (int) $year > now()->year + 150) {
-                        $validator->errors()->add('overrides', 'Only a year from this one on can be given an amount of its own.');
-
-                        return;
-                    }
-                }
-
+                $overrides = $this->input('overrides');
                 $restarts = $this->input('restarts');
 
                 if (is_array($restarts) && array_diff(array_map(strval(...), $restarts), array_map(strval(...), array_keys($overrides))) !== []) {

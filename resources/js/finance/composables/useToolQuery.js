@@ -1,5 +1,5 @@
 import { router } from '@inertiajs/vue3';
-import { reactive, watch } from 'vue';
+import { onBeforeUnmount, reactive, watch } from 'vue';
 
 /**
  * The form behind a tool page.
@@ -21,10 +21,13 @@ import { reactive, watch } from 'vue';
 export function useToolQuery(initial, { delay = 350 } = {}) {
     const params = reactive(JSON.parse(JSON.stringify(initial)));
 
+    // The page as it was when the tool opened: by the time the pause is
+    // over, the address bar may be somewhere else.
+    const path = window.location.pathname;
     let timer = null;
 
     const submit = () => {
-        router.get(window.location.pathname, JSON.parse(JSON.stringify(params)), {
+        router.get(path, JSON.parse(JSON.stringify(params)), {
             preserveState: true,
             preserveScroll: true,
             replace: true,
@@ -35,6 +38,10 @@ export function useToolQuery(initial, { delay = 350 } = {}) {
         clearTimeout(timer);
         timer = setTimeout(submit, delay);
     }, { deep: true });
+
+    // Leaving within the pause would otherwise send the tool's inputs after
+    // the visit away, to whatever page that turned out to be.
+    onBeforeUnmount(() => clearTimeout(timer));
 
     return params;
 }

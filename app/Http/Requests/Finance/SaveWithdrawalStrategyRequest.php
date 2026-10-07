@@ -2,14 +2,14 @@
 
 namespace App\Http\Requests\Finance;
 
-use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use App\Models\Finance\Scenario;
 
 /**
  * A withdrawal strategy, created or edited. The blanks fall back as a
  * conversion strategy's do: the projection's inflation, the fleet's growth.
  */
-class SaveWithdrawalStrategyRequest extends FormRequest
+class SaveWithdrawalStrategyRequest extends FinanceRequest
 {
     /**
      * Get the validation rules that apply to the request.
@@ -22,7 +22,7 @@ class SaveWithdrawalStrategyRequest extends FormRequest
             'name' => ['required', 'string', 'max:80'],
             'kind' => ['required', 'string', Rule::in(array_keys(config('finance.withdrawal_strategies')))],
             // Only one of the user's own projections can be built on.
-            'scenario_id' => ['nullable', 'integer', Rule::exists('fin_scenarios', 'id')->where('user_id', $this->user()->id)],
+            'scenario_id' => ['nullable', 'integer', $this->owned(Scenario::class)],
             // Null fills whichever bracket the year's income is already in.
             'fill_rate' => ['nullable', 'numeric', Rule::in(config('finance.conversion_fill_rates'))],
             'spending_rule' => ['required', 'string', Rule::in(array_keys(config('finance.spending_rules')))],

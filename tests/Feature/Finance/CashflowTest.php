@@ -278,3 +278,30 @@ it('leaves income that has not started out of the monthly run rate', function ()
             ->where('income.1.is_running', false)
             ->where('income.2.is_running', true));
 });
+
+/**
+ * Somebody else's flow is not found before the payload is read, so a form's
+ * complaints never describe a record that is not the user's.
+ */
+it('hides another user\'s flow before it reads what was sent', function () {
+    $flow = Flow::factory()->create(['name' => 'Theirs']);
+
+    $this->actingAs(User::factory()->create())->patch(route('finance.flows.update', $flow), flowPayload(['name' => '', 'amount' => -1]))
+        ->assertNotFound();
+});
+
+it('dates a one-time flow today when it is given no date', function () {
+    $user = User::factory()->create();
+
+    $this->actingAs($user)->post(route('finance.flows.store'), flowPayload(['name' => 'New roof', 'frequency' => 'once', 'amount' => 18000]))
+        ->assertSessionHasNoErrors();
+
+    expect(Flow::query()->sole()->starts_on->toDateString())->toBe('2026-10-01');
+});
+
+it('plans a month in a later year at the amount the flow has grown to', function () {
+    $flow = Flow::factory()->create(['amount' => 1000, 'frequency' => 'monthly', 'annual_growth_rate' => 5]);
+
+    expect($flow->plannedFor(now()))->toEqualWithDelta(1000, 0.01)
+        ->and($flow->plannedFor(now()->addYears(2)))->toEqualWithDelta(1102.50, 0.01);
+});

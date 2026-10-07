@@ -190,3 +190,19 @@ it('will not add a position to another user\'s account', function () {
 
     expect($holding->positions()->count())->toBe(0);
 });
+
+/**
+ * An account that holds others has no balance of its own, so ordering by the
+ * balance column alone would put the largest thing in the fleet last.
+ */
+it('lists holdings largest first by what they are worth, not by their own balance', function () {
+    $user = User::factory()->create();
+    Holding::factory()->create(['user_id' => $user->id, 'name' => 'Savings', 'balance' => 9000]);
+    $plan = Holding::factory()->create(['user_id' => $user->id, 'name' => 'Work plan', 'balance' => 0]);
+    Holding::factory()->inside($plan)->create(['user_id' => $user->id, 'balance' => 50000]);
+
+    $this->actingAs($user)->get(route('finance.fleet'))
+        ->assertInertia(fn ($page) => $page
+            ->where('assets.0.name', 'Work plan')
+            ->where('assets.1.name', 'Savings'));
+});

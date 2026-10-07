@@ -24,8 +24,10 @@ const parts = computed(() => {
 
     if (sorted.length <= MAX_PARTS) return sorted;
 
-    const kept = sorted.slice(0, MAX_PARTS - 1);
-    const rest = sorted.slice(MAX_PARTS - 1);
+    // Everything past the last colour is folded into one part. A part that
+    // is itself called "Other" joins it, or there would be two.
+    const kept = sorted.slice(0, MAX_PARTS - 1).filter((item) => item.label !== 'Other');
+    const rest = sorted.filter((item) => !kept.includes(item));
 
     return [...kept, { label: 'Other', value: rest.reduce((sum, item) => sum + item.value, 0) }];
 });
@@ -69,7 +71,7 @@ const active = ref(null);
             <svg viewBox="0 0 100 100" class="h-full w-full -rotate-90" role="img" :aria-label="arcs.map((arc) => `${arc.label} ${arc.share}%`).join(', ')">
                 <circle cx="50" cy="50" :r="RADIUS" fill="none" stroke="var(--color-fin-grey-100)" stroke-width="11" />
                 <circle
-                    v-for="(arc, index) in arcs" :key="arc.label"
+                    v-for="(arc, index) in arcs" :key="index"
                     cx="50" cy="50" :r="RADIUS" fill="none"
                     :stroke="arc.color" :stroke-width="active === index ? 13 : 11"
                     :stroke-dasharray="arc.dash" :stroke-dashoffset="arc.offset"
@@ -88,7 +90,7 @@ const active = ref(null);
              drops under the ring instead of squeezing beside it. -->
         <ul class="flex min-w-56 flex-1 flex-col gap-2 text-sm">
             <li
-                v-for="(arc, index) in arcs" :key="arc.label"
+                v-for="(arc, index) in arcs" :key="index"
                 class="flex items-center justify-between gap-3 rounded-md px-1"
                 :class="active === index ? 'bg-fin-cream-100' : ''"
                 @mouseenter="active = index" @mouseleave="active = null"

@@ -21,6 +21,8 @@ const props = defineProps({
     growthRate: { type: Number, required: true },
     // What the three buckets hold today, for the "4% of it" suggestion.
     balance: { type: Number, required: true },
+    // The classic figure on today's balance, to the nearest $100.
+    defaultAmount: { type: Number, required: true },
     defaultPercent: { type: Number, required: true },
 });
 
@@ -72,7 +74,7 @@ const onKindChange = () => {
 // Each rule starts on the classic figure: 4% of today's balance.
 const onRuleChange = () => {
     if (rule.value.reads === 'amount' && !form.spending_amount) {
-        form.spending_amount = Math.round(props.balance * props.defaultPercent / 100 / 100) * 100;
+        form.spending_amount = props.defaultAmount;
     }
 
     if (rule.value.reads === 'percent' && !form.spending_percent) {
@@ -124,7 +126,7 @@ const save = () => {
                             </select>
                         </Field>
                     </div>
-                    <Field v-if="rule.reads === 'amount'" label="A year" prefix="$" :hint="`In today's dollars. ${defaultPercent}% of today's ${money(balance)} is ${money(balance * defaultPercent / 100)}.`" :error="form.errors.spending_amount">
+                    <Field v-if="rule.reads === 'amount'" label="A year" prefix="$" :hint="`In today's dollars. ${defaultPercent}% of today's ${money(balance)} is about ${money(defaultAmount)}.`" :error="form.errors.spending_amount">
                         <input v-model.number="form.spending_amount" type="number" min="0" step="100" required>
                     </Field>
                     <Field v-if="rule.reads === 'percent'" label="Of the balance" suffix="% / yr" hint="Of everything in the three buckets as the year opens." :error="form.errors.spending_percent">

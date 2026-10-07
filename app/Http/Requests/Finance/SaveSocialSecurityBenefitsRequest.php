@@ -2,15 +2,13 @@
 
 namespace App\Http\Requests\Finance;
 
-use Illuminate\Foundation\Http\FormRequest;
-
 /**
  * What the Social Security tool needs to know about the household: each
  * person's monthly benefit at full retirement age, and the spouse's dates.
  * Saved on the profile, since they are facts about the people, not about any
  * one strategy.
  */
-class SaveSocialSecurityBenefitsRequest extends FormRequest
+class SaveSocialSecurityBenefitsRequest extends FinanceRequest
 {
     /**
      * Get the validation rules that apply to the request.

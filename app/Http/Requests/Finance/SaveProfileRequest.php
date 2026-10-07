@@ -2,11 +2,10 @@
 
 namespace App\Http\Requests\Finance;
 
-use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
-class SaveProfileRequest extends FormRequest
+class SaveProfileRequest extends FinanceRequest
 {
     /** Longer than any real schedule; New York's, the longest preset, has nine. */
     private const MAX_BRACKETS = 15;

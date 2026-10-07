@@ -188,3 +188,58 @@ it('grows every item at the rate the scenario gives the group, except one with a
             ->where('expenses.0.items.1.series.1.amount', 18000)
             ->where('expenses.0.series.1.amount', 31200));
 });
+
+// Counted once, wherever it is read
+
+/**
+ * A figure recorded on the household expense before it was broken into items
+ * would otherwise be counted beside the items' own.
+ */
+it('leaves a figure recorded on the group out of the budget history once it has items', function () {
+    $user = User::factory()->create();
+    $household = household($user, ['Groceries' => 800]);
+    Actual::query()->create(['user_id' => $user->id, 'flow_id' => $household->id, 'month' => '2026-10-01', 'amount' => 2400]);
+    Actual::query()->create(['user_id' => $user->id, 'flow_id' => $household->children->first()->id, 'month' => '2026-10-01', 'amount' => 700]);
+
+    $this->actingAs($user)->get(route('finance.reality'))
+        ->assertInertia(fn ($page) => $page->where('budget', fn ($months) => collect($months)->last() == ['month' => '2026-10', 'label' => 'Oct', 'planned' => -800, 'actual' => -700, 'tracked' => 1]));
+});
+
+it('counts a change made to an item as a change to the scenario', function () {
+    $user = User::factory()->create();
+    Profile::query()->create(['user_id' => $user->id, 'birth_date' => '1976-03-01', 'retirement_age' => 65, 'life_expectancy' => 90]);
+    $scenario = Scenario::factory()->create(['user_id' => $user->id]);
+    $household = household($user, ['Groceries' => 1000]);
+    ScenarioFlow::factory()->create(['scenario_id' => $scenario->id, 'flow_id' => $household->children->first()->id, 'overrides' => [2030 => 500]]);
+
+    $this->actingAs($user)->get(route('finance.scenarios'))
+        ->assertInertia(fn ($page) => $page->where('scenarios.0.adjusted_count', 1));
+});
+
+/**
+ * One rate for every expense goes on the group, not on each item, so a rate
+ * given to the group afterwards still reaches the items.
+ */
+it('hands the items back to their group when one rate is set across every expense', function () {
+    $user = User::factory()->create();
+    Profile::query()->create(['user_id' => $user->id, 'birth_date' => '1976-03-01', 'retirement_age' => 65, 'life_expectancy' => 90]);
+    $scenario = Scenario::factory()->create(['user_id' => $user->id]);
+    $household = household($user, ['Groceries' => 1000, 'Utilities' => 1000]);
+    [$groceries, $utilities] = $household->children->all();
+    ScenarioFlow::factory()->create(['scenario_id' => $scenario->id, 'flow_id' => $groceries->id, 'annual_growth_rate' => 50]);
+    ScenarioFlow::factory()->create(['scenario_id' => $scenario->id, 'flow_id' => $utilities->id, 'annual_growth_rate' => 50, 'overrides' => [2030 => 500]]);
+
+    $this->actingAs($user)->put(route('finance.scenarios.rates.update', $scenario), ['direction' => 'expense', 'annual_growth_rate' => 3])
+        ->assertSessionHasNoErrors();
+
+    expect($scenario->scenarioFlows()->orderBy('flow_id')->get()->map->only(['flow_id', 'annual_growth_rate', 'overrides'])->all())->toBe([
+        ['flow_id' => $household->id, 'annual_growth_rate' => 3.0, 'overrides' => null],
+        // Kept for the year it pins, with the rate handed back.
+        ['flow_id' => $utilities->id, 'annual_growth_rate' => null, 'overrides' => [2030 => 500]],
+    ]);
+
+    $this->actingAs($user)->get(route('finance.scenarios.show', $scenario))
+        ->assertInertia(fn ($page) => $page
+            ->where('expenses.0.items.0.rate', 3)
+            ->where('expenses.0.items.0.has_scenario_rate', false));
+});

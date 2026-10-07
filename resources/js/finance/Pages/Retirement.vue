@@ -12,8 +12,10 @@ import MonteCarloCard from '../Components/MonteCarloCard.vue';
 import RetirementTabs from '../Components/RetirementTabs.vue';
 import StatTile from '../Components/StatTile.vue';
 import StrategyHoldingArea from '../Components/StrategyHoldingArea.vue';
+import StrategyPicker from '../Components/StrategyPicker.vue';
 import ThresholdChart from '../Components/ThresholdChart.vue';
-import { chartColors, money, moneyBrief } from '../lib/format';
+import { age, bucketLines, useStrategyBoard } from '../composables/useStrategyBoard';
+import { colorOf, money, moneyBrief } from '../lib/format';
 
 /**
  * The Roth conversion tab: strategies built by the user and run by the
@@ -47,9 +49,6 @@ const props = defineProps({
     monte_carlo: Object,
 });
 
-const form = ref({ open: false, strategy: null });
-const build = () => { form.value = { open: true, strategy: null }; };
-const edit = (strategy) => { form.value = { open: true, strategy }; };
 
 // One of each kind for every saved projection — or, with none saved, one set
 // on the income and expenses as entered.
@@ -80,7 +79,6 @@ watch(() => page.props.flash?.copied, (id) => {
     if (copy) edit(copy);
 });
 
-const colorOf = (index) => chartColors[index % chartColors.length];
 const colorOfStrategy = (strategy) => colorOf(props.strategies.findIndex((candidate) => candidate.id === strategy.id));
 
 // The selected strategy's spread across the Monte Carlo markets, beside its
@@ -96,14 +94,6 @@ const fan = computed(() => {
         line: selected.value.rows.map((row) => ({ x: row.age, y: row.total_balance_today })),
         runs: props.monte_carlo.results.runs,
     };
-});
-
-// The strategy under the closer look. It follows the list: the first one to
-// begin with, and the first again if the one being looked at is removed.
-const selectedId = ref(props.strategies[0]?.id ?? null);
-
-watch(() => props.strategies.map((strategy) => strategy.id), (ids) => {
-    if (!ids.includes(selectedId.value)) selectedId.value = ids[0] ?? null;
 });
 
 // One strategy in the report is reported on alone, with nothing to compare.
@@ -138,7 +128,6 @@ const printReport = async () => {
     window.print();
 };
 
-const selectedIndex = computed(() => props.strategies.findIndex((strategy) => strategy.id === selectedId.value));
 
 /*
  * Which dollars the report is in: each year's own, or all of them brought
@@ -170,16 +159,8 @@ const dollars = computed(() => (inTodaysDollars.value ? 'in today\'s dollars' : 
 
 // The strategies with the figures of whichever dollars are being shown.
 const reported = computed(() => props.strategies.map((strategy) => (inTodaysDollars.value ? { ...strategy, ...strategy.today } : strategy)));
-const selected = computed(() => reported.value[selectedIndex.value] ?? null);
 
-const age = (value) => `Age ${value}`;
-
-// One line per strategy, of whichever figure in its rows.
-const lines = (field) => reported.value.map((strategy, index) => ({
-    label: strategy.label,
-    color: colorOf(index),
-    points: strategy.rows.map((row) => ({ x: row.age, y: row[field] })),
-}));
+const { form, build, edit, selectedId, selectedIndex, selected, lines } = useStrategyBoard(() => reported.value, { label: (strategy) => strategy.label });
 
 const tierName = (tier) => (tier === 0 ? 'no surcharge' : `tier ${tier}`);
 
@@ -209,12 +190,6 @@ const irmaaPoints = computed(() => selected.value.rows.map((row) => ({
     before: row.magi_before,
     note: `Sets the premium at ${row.age + 2}: ${tierName(row.magi_tier)}.`,
 })));
-
-const balanceLines = computed(() => [
-    { label: 'Traditional', color: chartColors[1], points: selected.value.rows.map((row) => ({ x: row.age, y: row.traditional })) },
-    { label: 'Roth', color: chartColors[0], points: selected.value.rows.map((row) => ({ x: row.age, y: row.roth })) },
-    { label: 'Taxable savings', color: chartColors[2], dashed: true, points: selected.value.rows.map((row) => ({ x: row.age, y: row.taxable })) },
-]);
 
 /*
  * The report's figures: a row each when strategies are compared, a tile each
@@ -270,9 +245,7 @@ const convertsWhen = (strategy) => {
             <div v-if="strategies.length" class="flex gap-1.5" role="group" aria-label="Dollars the report is in">
                 <button
                     v-for="choice in [{ today: true, label: 'Today\'s dollars' }, { today: false, label: 'Each year\'s dollars' }]" :key="choice.label" type="button"
-                    class="rounded-full border px-3 py-1 text-xs font-medium"
-                    :class="choice.today === inTodaysDollars ? 'border-fin-charcoal bg-fin-charcoal text-fin-white' : 'border-fin-grey-300 bg-fin-white text-fin-charcoal hover:bg-fin-cream-100'"
-                    :aria-pressed="choice.today === inTodaysDollars" @click="showDollars(choice.today)"
+                    class="fin-pill" :aria-pressed="choice.today === inTodaysDollars" @click="showDollars(choice.today)"
                 >
                     {{ choice.label }}
                 </button>
@@ -429,17 +402,7 @@ const convertsWhen = (strategy) => {
 
                 <Card v-if="selected" class="fin-card-splits" :title="isSingle ? 'Year by year' : 'A closer look'" :subtitle="isSingle ? 'Against the lines that matter: the tops of the tax brackets, and the IRMAA tiers.' : 'One strategy against the lines that matter: the tops of the tax brackets, and the IRMAA tiers.'">
                     <template v-if="strategies.length > 1" #actions>
-                        <div class="flex flex-wrap gap-1.5" role="group" aria-label="Strategy to look at">
-                            <button
-                                v-for="(strategy, index) in strategies" :key="strategy.id" type="button"
-                                class="flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium"
-                                :class="strategy.id === selectedId ? 'border-fin-charcoal bg-fin-charcoal text-fin-white' : 'border-fin-grey-300 bg-fin-white text-fin-charcoal hover:bg-fin-cream-100'"
-                                :aria-pressed="strategy.id === selectedId" @click="selectedId = strategy.id"
-                            >
-                                <span class="h-2 w-2 rounded-full" :style="{ backgroundColor: colorOf(index) }" aria-hidden="true" />
-                                {{ strategy.label }}
-                            </button>
-                        </div>
+                        <StrategyPicker v-model="selectedId" :strategies="strategies" :color-of="colorOf" :label="(strategy) => strategy.label" />
                     </template>
 
                     <div class="flex flex-col gap-7 printing:block printing:space-y-7">
@@ -473,7 +436,7 @@ const convertsWhen = (strategy) => {
 
                         <section class="fin-keep">
                             <h3 class="mb-3 text-sm font-semibold text-fin-black">Balances</h3>
-                            <LineChart :series="balanceLines" :height="230" :format-x="age" :x-ticks="8" />
+                            <LineChart :series="bucketLines(selected)" :height="230" :format-x="age" :x-ticks="8" />
                         </section>
 
                         <section>

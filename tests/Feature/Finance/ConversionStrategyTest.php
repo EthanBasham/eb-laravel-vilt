@@ -402,6 +402,23 @@ it('charges IRMAA two years after the income that earned it', function () {
         ->and($plan['summary'])->toMatchArray(['irmaa' => 6936.0, 'irmaa_years' => 1]);
 });
 
+/**
+ * The plan has no years behind it to look back on, so its first two take the
+ * income it opens with — the RMD included. $3,000,000 at 76 is an RMD of
+ * $126,582, over the first line by itself.
+ */
+it('counts the RMD in the income the plan\'s first premiums are set by', function () {
+    $user = User::factory()->create();
+    Profile::query()->create(['user_id' => $user->id, 'birth_date' => '1950-03-01', 'retirement_age' => 65, 'life_expectancy' => 80, 'inflation_rate' => 0]);
+    Holding::factory()->retirement('traditional')->create(['user_id' => $user->id, 'balance' => 3_000_000, 'annual_rate' => 0]);
+
+    $plan = runStrategy($user, 'none');
+
+    expect(atAge($plan, 76)['rmd'])->toEqual(126_582)
+        ->and(atAge($plan, 76)['irmaa_tier'])->toBe(1)
+        ->and(atAge($plan, 77)['irmaa_tier'])->toBe(1);
+});
+
 it('charges IRMAA for each of two people on a joint return', function () {
     $user = conversionRetiree();
     Profile::query()->onlyOwnedBy($user)->update(['filing_status' => 'married_joint']);

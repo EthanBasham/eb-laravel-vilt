@@ -2,14 +2,13 @@
 
 namespace App\Http\Requests\Finance;
 
-use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
+use App\Models\Finance\ConversionStrategy;
 
 /**
  * The whole comparison, replaced: the strategies named are compared and
  * every other one the user has goes to the holding area.
  */
-class ReplaceComparisonRequest extends FormRequest
+class ReplaceComparisonRequest extends FinanceRequest
 {
     /**
      * Get the validation rules that apply to the request.
@@ -22,7 +21,7 @@ class ReplaceComparisonRequest extends FormRequest
 
         return [
             'strategies' => ['required', 'array', 'min:1', "max:{$most}"],
-            'strategies.*' => ['integer', 'distinct', Rule::exists('fin_conversion_strategies', 'id')->where('user_id', $this->user()->id)],
+            'strategies.*' => ['integer', 'distinct', $this->owned(ConversionStrategy::class)],
         ];
     }
 

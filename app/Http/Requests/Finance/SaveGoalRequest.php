@@ -2,9 +2,7 @@
 
 namespace App\Http\Requests\Finance;
 
-use Illuminate\Foundation\Http\FormRequest;
-
-class SaveGoalRequest extends FormRequest
+class SaveGoalRequest extends FinanceRequest
 {
     /**
      * Get the validation rules that apply to the request.

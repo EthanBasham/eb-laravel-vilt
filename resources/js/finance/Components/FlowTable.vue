@@ -40,7 +40,7 @@ const remove = (flow) => {
                     <td class="px-5 py-3">
                         <span class="font-medium text-fin-black">{{ flow.name }}</span>
                         <span v-if="!flow.is_running" class="ml-2 whitespace-nowrap rounded-full bg-fin-gold-100 px-2 py-0.5 text-[11px] text-fin-gold-600">
-                            {{ flow.starts_on && flow.starts_on > new Date().toISOString().slice(0, 10) ? `Starts ${asMonth(flow.starts_on)}` : 'Ended' }}
+                            {{ flow.starts_later ? `Starts ${asMonth(flow.starts_on)}` : 'Ended' }}
                         </span>
                         <span v-if="showHolding && flow.holding_name" class="ml-2 whitespace-nowrap rounded-full bg-fin-navy-100 px-2 py-0.5 text-[11px] text-fin-navy-700">{{ flow.holding_name }}</span>
                         <span v-if="flow.account_name" class="block text-xs text-fin-grey-500">{{ flow.direction === 'income' ? 'Paid into' : 'Paid from' }} {{ flow.account_name }}</span>

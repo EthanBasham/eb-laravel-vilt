@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use App\Models\User;
 use Database\Factories\Finance\ConversionStrategyFactory;
 
@@ -68,6 +70,77 @@ class ConversionStrategy extends OwnedModel
     public static function hasRoomToCompare(User $user): bool
     {
         return static::query()->onlyOwnedBy($user)->onlyCompared()->count() < (int) config('finance.conversion_comparison.default');
+    }
+
+    /**
+     * Whether a user's report holds as many strategies as it ever can, so
+     * that not even one brought in by hand fits.
+     */
+    public static function comparisonIsFull(User $user): bool
+    {
+        return static::query()->onlyOwnedBy($user)->onlyCompared()->count() >= (int) config('finance.conversion_comparison.max');
+    }
+
+    /**
+     * One strategy of each kind, on every default, for each projection
+     * given — null standing for the income and expenses as entered. Each
+     * joins the comparison while it has room and is held after, like any new
+     * strategy.
+     *
+     * @param  Collection<int, Scenario|null>  $projections
+     * @return Collection<int, static>
+     */
+    public static function createStarters(User $user, Collection $projections): Collection
+    {
+        return DB::transaction(function () use ($user, $projections): Collection {
+            $room = (int) config('finance.conversion_comparison.default') - static::query()->onlyOwnedBy($user)->onlyCompared()->count();
+            $made = collect();
+
+            foreach ($projections as $scenario) {
+                foreach (config('finance.conversion_strategies') as $key => $kind) {
+                    $made->push(static::query()->create([
+                        'user_id' => $user->id,
+                        'scenario_id' => $scenario?->id,
+                        'kind' => $key,
+                        'is_compared' => $room-- > 0,
+                        'conversion_amount' => ($kind['amount'] ?? false) ? config('finance.defaults.conversion_amount') : null,
+                        'heir_income' => config('finance.defaults.heir_income'),
+                    ]));
+                }
+            }
+
+            return $made;
+        });
+    }
+
+    /**
+     * Makes the strategies named the whole comparison: every other one of
+     * the user's goes to the holding area.
+     *
+     * @param  list<int>  $ids
+     */
+    public static function replaceComparison(User $user, array $ids): void
+    {
+        DB::transaction(function () use ($user, $ids): void {
+            static::query()->onlyOwnedBy($user)->whereKeyNot($ids)->update(['is_compared' => false]);
+            static::query()->onlyOwnedBy($user)->whereKey($ids)->update(['is_compared' => true]);
+        });
+    }
+
+    /**
+     * A saved copy, beside the one it was made from: in the report for one
+     * in the report, held for one held. Only a report already at its most
+     * sends a copy made there to the holding area instead.
+     */
+    public function duplicate(): static
+    {
+        $copy = $this->replicate()->fill([
+            'name' => static::copyName($this->name),
+            'is_compared' => $this->is_compared && ! static::comparisonIsFull($this->user),
+        ]);
+        $copy->save();
+
+        return $copy;
     }
 
     protected function kindLabel(): Attribute

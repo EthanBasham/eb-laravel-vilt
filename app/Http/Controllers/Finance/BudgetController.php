@@ -31,30 +31,9 @@ class BudgetController extends Controller
     {
         abort_unless($flow->isOwnedBy($request->user()), 404);
 
-        $month = Carbon::createFromFormat('!Y-m', $request->validated('month'));
         $amount = $request->validated('amount');
 
-        /*
-         * Found with whereDate rather than through updateOrCreate's attribute
-         * match: a `date` column is not stored the same way by every driver
-         * (SQLite keeps a time on it), so an equality match on the string
-         * misses the existing row and the insert then trips the unique index.
-         */
-        $actual = Actual::query()->where('flow_id', $flow->id)->whereDate('month', $month)->first();
-
-        if ($amount === null) {
-            $actual?->delete();
-
-            return back(fallback: route('finance.budget'));
-        }
-
-        if ($actual) {
-            $actual->update(['amount' => $amount]);
-
-            return back(fallback: route('finance.budget'));
-        }
-
-        Actual::query()->create(['user_id' => $request->user()->id, 'flow_id' => $flow->id, 'month' => $month, 'amount' => $amount]);
+        Actual::record($flow, $request->month(), $amount === null ? null : (float) $amount);
 
         return back(fallback: route('finance.budget'));
     }

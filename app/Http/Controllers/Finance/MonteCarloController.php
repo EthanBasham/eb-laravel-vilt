@@ -21,9 +21,7 @@ class MonteCarloController extends Controller
         $settings = MonteCarloRun::for($request->user())->fill($request->validated());
         $settings->save();
 
-        if ($monteCarlo->needsBackground($request->user(), $settings)) {
-            $monteCarlo->queue($settings);
-
+        if ($monteCarlo->queueIfNeeded($request->user(), $settings)) {
             return back(fallback: route('finance.retirement'))->with('success', 'Saved. That is too many to work out as the page loads, so it is running in the background.');
         }
 
@@ -33,10 +31,8 @@ class MonteCarloController extends Controller
     /** Runs the current settings in the background, for results that are missing or out of date. */
     public function run(Request $request, ConversionMonteCarlo $monteCarlo): RedirectResponse
     {
-        $settings = MonteCarloRun::for($request->user());
-        $settings->save();
-
-        $monteCarlo->queue($settings);
+        // queue() saves the settings, with the run marked as waiting.
+        $monteCarlo->queue(MonteCarloRun::for($request->user()));
 
         return back(fallback: route('finance.retirement'));
     }
@@ -48,9 +44,7 @@ class MonteCarloController extends Controller
         $settings->seed += 1;
         $settings->save();
 
-        if ($monteCarlo->needsBackground($request->user(), $settings)) {
-            $monteCarlo->queue($settings);
-        }
+        $monteCarlo->queueIfNeeded($request->user(), $settings);
 
         return back(fallback: route('finance.retirement'));
     }

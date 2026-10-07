@@ -192,7 +192,7 @@ class RealEstateAnalyzer
     private function starters(User $user): Collection
     {
         $owned = Holding::query()->onlyOwnedBy($user)->where('type', 'real_estate')
-            ->with(['positions', 'flows.children', 'securedDebts.positions'])
+            ->with(['positions', 'children.positions', 'flows.children', 'securedDebts.positions', 'securedDebts.children.positions'])
             ->whereHas('flows', fn ($flows) => $flows->where('direction', 'income'))
             ->inDefaultOrder()->limit(self::MAX_PROPERTIES)->get()
             ->map(function (Holding $holding): array {

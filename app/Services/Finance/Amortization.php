@@ -124,6 +124,22 @@ class Amortization
     }
 
     /**
+     * What a run of end-of-month deposits comes to in today's dollars: each
+     * one divided by the price level of the month it is made in. With no
+     * inflation that is the deposits added up.
+     */
+    public static function depositsInTodaysDollars(float $monthlyDeposit, float $annualInflation, int $months): float
+    {
+        $monthlyInflation = static::monthlyGrowth($annualInflation);
+
+        if ($monthlyInflation == 0.0) {
+            return $monthlyDeposit * $months;
+        }
+
+        return $monthlyDeposit * (1 - (1 + $monthlyInflation) ** -$months) / $monthlyInflation;
+    }
+
+    /**
      * The monthly deposit that grows $present into $target over $months.
      * Zero when the money already there gets there by itself.
      */

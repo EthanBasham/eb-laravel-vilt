@@ -10,6 +10,7 @@ use App\Services\Finance\SocialSecurityBoard;
 use App\Services\Finance\WithdrawalBoard;
 use Inertia\Inertia;
 use Inertia\Response;
+use Inertia\Support\Header;
 
 /**
  * The Retirement Strategizer: a set of tabs, one tool to a tab. The route
@@ -27,8 +28,13 @@ class RetirementController extends Controller
             return Inertia::render('Withdrawals', $withdrawals->for($request->user()));
         }
 
+        // The follow-up request for the deferred runs, and each poll for
+        // them after, asks for `monte_carlo` alone: the board is not worked
+        // out again just to be left out of the response.
+        $onlyMonteCarlo = $request->header(Header::PARTIAL_COMPONENT) === 'Retirement' && $request->header(Header::PARTIAL_ONLY) === 'monte_carlo';
+
         return Inertia::render('Retirement', [
-            ...$conversions->for($request->user()),
+            ...($onlyMonteCarlo ? [] : $conversions->for($request->user())),
             // After the page: even a run small enough for a page load takes
             // a moment, and the strategies are worth seeing first.
             'monte_carlo' => Inertia::defer(fn (): array => $monteCarlo->for($request->user())),

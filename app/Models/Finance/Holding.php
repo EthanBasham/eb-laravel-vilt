@@ -253,7 +253,11 @@ class Holding extends OwnedModel
         return $query->whereNull($query->qualifyColumn('parent_id'));
     }
 
-    /** Assets before liabilities, then largest first. */
+    /**
+     * Assets before liabilities, then largest balance first. The balance
+     * column only: Fleet::holdings() re-sorts by `value`, which also counts
+     * what is inside a holding.
+     */
     public function scopeInDefaultOrder(Builder $query): Builder
     {
         return $query->orderBy('side')->orderByDesc('balance')->orderBy('id');

@@ -83,7 +83,10 @@ class Calculators
         for ($year = 0; $year <= (int) $in['years']; $year++) {
             $deflator = (1 + $in['inflation'] / 100) ** $year;
             $balance = Amortization::futureValue($in['principal'], $in['monthly'], $in['rate'], $year * 12);
-            $contributed = $in['principal'] + $in['monthly'] * 12 * $year;
+            // In the same dollars as the balance: with inflation set, each
+            // deposit is counted at what it is worth today, or the growth
+            // would be a real balance less nominal deposits.
+            $contributed = $in['principal'] + Amortization::depositsInTodaysDollars($in['monthly'], $in['inflation'], $year * 12);
 
             $years[] = [
                 'year' => $year,
@@ -165,7 +168,9 @@ class Calculators
             'inputs' => $in,
             'monthly' => round($monthly, 2),
             'contributed' => round($in['present'] + $monthly * $months),
-            'growth' => round(max($in['target'], $in['present']) - $in['present'] - $monthly * $months),
+            // What the balance actually reaches, which is past the target
+            // when the money already there outgrows it with nothing added.
+            'growth' => round(Amortization::futureValue($in['present'], $monthly, $in['rate'], $months) - $in['present'] - $monthly * $months),
             'years' => $years,
         ];
     }

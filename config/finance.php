@@ -378,7 +378,8 @@ return [
     | a tier is a cliff: the whole premium steps up once income crosses it.
     | Head of household files on the single thresholds.
     |
-    | Shown on the settings page only — no tool charges it yet.
+    | Shown on the settings page, and charged by the Roth conversion and
+    | withdrawal tools.
     |
     | The standard premium, the first and last thresholds and the range of
     | both columns were checked against published 2026 tables when this was
@@ -563,8 +564,9 @@ return [
     |
     | `page_limit` is how many simulations — runs times strategies — are
     | worked out while the page loads; more than that goes to a queued job.
-    | One simulation of a forty-year plan measured 0.5–1 ms, so the limit is
-    | about a second and a half of work at the slow end.
+    | One simulation of a forty-year plan measured 1–6 ms on 2026-10-06,
+    | depending on the kind of strategy, so the limit is a few seconds of work
+    | at the slow end.
     |
     */
 

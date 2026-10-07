@@ -2,12 +2,10 @@
 
 namespace App\Http\Requests\Finance;
 
-use Illuminate\Foundation\Http\FormRequest;
-
 /**
  * A Social Security claiming strategy, created or edited.
  */
-class SaveSocialSecurityStrategyRequest extends FormRequest
+class SaveSocialSecurityStrategyRequest extends FinanceRequest
 {
     /**
      * Get the validation rules that apply to the request.

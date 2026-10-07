@@ -1,7 +1,8 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { niceScale } from '../composables/useNiceScale';
+import { computed, ref } from 'vue';
+import { useChartWidth } from '../composables/useChartWidth';
 import { money, moneyShort } from '../lib/format';
+import { niceScale } from '../lib/scale';
 
 /**
  * One figure a year, drawn against a ladder of thresholds: a year's income
@@ -35,18 +36,7 @@ const props = defineProps({
 
 const pad = { top: 12, right: 88, bottom: 28, left: 56 };
 
-const frame = ref(null);
-const width = ref(640);
-let observer = null;
-
-onMounted(() => {
-    observer = new ResizeObserver(([entry]) => {
-        width.value = Math.max(280, entry.contentRect.width);
-    });
-    observer.observe(frame.value);
-});
-
-onBeforeUnmount(() => observer?.disconnect());
+const { frame, width } = useChartWidth();
 
 /*
  * Tall enough for the highest year and for the first threshold above it, so

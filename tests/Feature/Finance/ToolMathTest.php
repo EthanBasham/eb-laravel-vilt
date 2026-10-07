@@ -175,3 +175,22 @@ it('finds the monthly saving that reaches a target', function () {
     expect($result['monthly'])->toBe(1000.0)
         ->and($result['years'][1]['balance'])->toEqual(12000);
 });
+
+/**
+ * With a return that only matches inflation, money saved buys exactly what
+ * it did: nothing was gained, and deposits counted at face value would show
+ * a loss.
+ */
+it('counts deposits in the same dollars as the balance when it deflates', function () {
+    $result = (new Calculators)->compound(['principal' => 0, 'monthly' => 500, 'rate' => 3, 'years' => 30, 'inflation' => 3]);
+
+    expect($result['contributed'])->toBeLessThan(500 * 12 * 30)
+        ->and($result['growth'])->toEqualWithDelta(0, 1);
+});
+
+it('reports the growth of savings that already outgrow the target', function () {
+    $result = (new Calculators)->savings(['target' => 50000, 'present' => 45000, 'rate' => 10, 'years' => 5]);
+
+    expect($result['monthly'])->toBe(0.0)
+        ->and($result['growth'])->toEqual($result['years'][5]['balance'] - 45000);
+});

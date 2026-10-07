@@ -2,6 +2,7 @@
 
 namespace App\Services\Finance;
 
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use App\Jobs\Finance\RunConversionMonteCarlo;
 use App\Models\Finance\ConversionStrategy;
@@ -35,6 +36,9 @@ class ConversionMonteCarlo
 {
     /** Nor does deflation run deeper than this. */
     private const WORST_INFLATION = -5.0;
+
+    /** The figures of a run's summary that describe() reports on. */
+    private const REPORTED = ['short_at_age', 'ending_after_heir_tax', 'tax_with_heirs', 'lifetime_tax', 'irmaa', 'converted'];
 
     /** The outcomes reported for each figure: a bad, a typical and a good one. */
     private const PERCENTILES = ['p10' => 10, 'p50' => 50, 'p90' => 90];
@@ -104,6 +108,21 @@ class ConversionMonteCarlo
     }
 
     /**
+     * Hands a run to the queue only when the settings are too big for a page
+     * load; a smaller one is worked out by the page itself. Says which.
+     */
+    public function queueIfNeeded(User $user, MonteCarloRun $settings): bool
+    {
+        if (! $this->needsBackground($user, $settings)) {
+            return false;
+        }
+
+        $this->queue($settings);
+
+        return true;
+    }
+
+    /**
      * The queued job's work: run everything and keep the results, stamped
      * with what they were run on.
      */
@@ -156,8 +175,11 @@ class ConversionMonteCarlo
                 // only one year's prices let them be ranked against each other.
                 ['rows' => $rows, 'summary' => $summary] = $this->board->simulate($strategy, $world, $years[$strategy->id], $path, inTodaysDollars: true);
 
+                // Only the figures describe() reads: a full summary for every
+                // run of every strategy is hundreds of megabytes at the most
+                // the settings allow.
                 $outcomes[$strategy->id][$run] = [
-                    'summary' => $summary,
+                    'summary' => Arr::only($summary, self::REPORTED),
                     'balances' => array_column($rows, 'total_balance'),
                 ];
             }

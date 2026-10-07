@@ -6,7 +6,6 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 use Database\Factories\Finance\ArmadaFactory;
 
 /**
@@ -41,19 +40,5 @@ class Armada extends OwnedModel
     public function scopeInDefaultOrder(Builder $query): Builder
     {
         return $query->orderBy('name')->orderBy('id');
-    }
-
-    // Relationships
-
-    /** @return HasMany<Holding, $this> */
-    public function holdings(): HasMany
-    {
-        return $this->hasMany(Holding::class);
-    }
-
-    /** @return HasMany<Flow, $this> */
-    public function flows(): HasMany
-    {
-        return $this->hasMany(Flow::class);
     }
 }

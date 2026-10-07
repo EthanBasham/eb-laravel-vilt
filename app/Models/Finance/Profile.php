@@ -76,6 +76,17 @@ class Profile extends OwnedModel
     }
 
     /**
+     * Saves these settings on the user's profile, making it if this is the
+     * first thing they have saved.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    public static function saveFor(User $user, array $attributes): self
+    {
+        return static::query()->updateOrCreate(['user_id' => $user->id], $attributes);
+    }
+
+    /**
      * Age this calendar year. Year arithmetic, because that is how the IRS
      * counts it for RMDs: the age you turn in the year, not the age today.
      *

@@ -9,7 +9,7 @@ import Field from '../Components/Field.vue';
 import FinDialog from '../Components/FinDialog.vue';
 import FinShell from '../Components/FinShell.vue';
 import LineChart from '../Components/LineChart.vue';
-import { chartColors, money, moneyBrief, moneyBriefSigned, moneySigned } from '../lib/format';
+import { colorOf, money, moneyBrief, moneyBriefSigned, moneySigned } from '../lib/format';
 
 const props = defineProps({
     horizon: Object,
@@ -68,7 +68,6 @@ const tone = (amount) => (amount < 0 ? 'font-bold text-fin-red-600' : 'text-fin-
 const ages = computed(() => Object.fromEntries(props.baseline.totals.map((year) => [year.year, year.age])));
 const yearAndAge = (year) => (year in ages.value ? `${year} (${ages.value[year]})` : String(year));
 
-const colorOf = (index) => chartColors[index % chartColors.length];
 const net = (totals) => totals.map((year) => ({ x: year.year, y: year.net }));
 
 // What is left each year: the baseline dashed, a line per scenario over it.

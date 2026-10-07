@@ -64,7 +64,7 @@ const latest = computed(() => props.snapshots[0]);
                 <StatTile
                     label="Against the projection" :value="latest.variance === null ? '—' : moneySigned(latest.variance)"
                     :hint="latest.variance === null ? 'Outside the projected window' : (latest.variance >= 0 ? 'Ahead of where you expected to be' : 'Behind where you expected to be')"
-                    :tone="latest.variance >= 0 ? 'good' : 'bad'"
+                    :tone="latest.variance === null ? undefined : (latest.variance >= 0 ? 'good' : 'bad')"
                 />
             </div>
 

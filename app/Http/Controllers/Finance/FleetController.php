@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Finance\SaveHoldingRequest;
 use App\Models\Finance\Holding;
 use App\Services\Finance\Fleet;
+use App\Services\Finance\HoldingBoard;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -27,38 +28,11 @@ class FleetController extends Controller
         ]);
     }
 
-    public function show(Request $request, Holding $holding, Fleet $fleet): Response
+    public function show(Request $request, Holding $holding, HoldingBoard $board): Response
     {
         abort_unless($holding->isOwnedBy($request->user()), 404);
 
-        $holding->load(['positions', 'parent', 'children.positions', 'children.children', 'flows.holding', 'flows.account', 'flows.children', 'securedBy', 'securedDebts.positions']);
-
-        $debt = (float) $holding->securedDebts->sum->value;
-        $income = (float) $holding->flows->where('direction', 'income')->sum->current_monthly_amount;
-        $expenses = (float) $holding->flows->where('direction', 'expense')->sum->current_monthly_amount;
-
-        return Inertia::render('Holding', [
-            'holding' => $holding->props,
-            'parent' => $holding->parent?->only(['id', 'name', 'type']),
-            // The accounts inside a compound holding, largest first.
-            'children' => $holding->children->sortByDesc->value->map->props->values(),
-            'positions' => $holding->positions->sortByDesc('value')->map->props->values(),
-            'flows' => $holding->flows->map->props->values(),
-            'secured_by' => $holding->securedBy?->only(['id', 'name']),
-            'secured_debts' => $holding->securedDebts->map->props->values(),
-            'summary' => [
-                'equity' => round($holding->value - $debt, 2),
-                'debt' => round($debt, 2),
-                'monthly_income' => round($income, 2),
-                'monthly_expenses' => round($expenses, 2),
-                'monthly_net' => round($income - $expenses, 2),
-                // Cash thrown off in a year against what the holding is worth.
-                'cash_yield' => $holding->value > 0 ? round(($income - $expenses) * 12 / $holding->value * 100, 2) : null,
-            ],
-            // What a debt can be secured against: the user's other assets.
-            'assets' => $fleet->holdings($request->user())->where('side', 'asset')->where('id', '!=', $holding->id)
-                ->map->only(['id', 'name'])->values(),
-        ]);
+        return Inertia::render('Holding', $board->for($request->user(), $holding));
     }
 
     public function store(SaveHoldingRequest $request): RedirectResponse

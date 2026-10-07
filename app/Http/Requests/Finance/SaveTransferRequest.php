@@ -2,7 +2,6 @@
 
 namespace App\Http\Requests\Finance;
 
-use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 use App\Models\Finance\Holding;
@@ -10,7 +9,7 @@ use App\Models\Finance\Holding;
 /**
  * An automated transfer, created or edited.
  */
-class SaveTransferRequest extends FormRequest
+class SaveTransferRequest extends FinanceRequest
 {
     /**
      * Get the validation rules that apply to the request.
@@ -19,7 +18,7 @@ class SaveTransferRequest extends FormRequest
      */
     public function rules(): array
     {
-        $own = fn () => Rule::exists('fin_holdings', 'id')->where('user_id', $this->user()->id);
+        $own = fn () => $this->owned(Holding::class);
 
         return [
             'name' => ['required', 'string', 'max:80'],

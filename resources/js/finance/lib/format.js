@@ -90,6 +90,19 @@ export const duration = (months) => {
     return [years ? `${years} yr` : null, rest || !years ? `${rest} mo` : null].filter(Boolean).join(' ');
 };
 
+/** A rate with its direction written out: 3 reads "+3%". Zero takes no sign. */
+export const percentSigned = (value, digits = 2) => `${value > 0 ? '+' : ''}${percent(value, digits)}`;
+
+/**
+ * The text colour for a figure that is good when it is above zero and bad
+ * below: a surplus, a variance, a change. Nothing to colour reads plain.
+ */
+export const signTone = (value) => {
+    if (missing(value)) return 'text-fin-charcoal';
+
+    return value < 0 ? 'text-fin-red-600' : 'text-fin-green-600';
+};
+
 /** The fixed order chart series take their colours in. */
 export const chartColors = [
     'var(--color-fin-chart-1)',
@@ -99,3 +112,6 @@ export const chartColors = [
     'var(--color-fin-chart-5)',
     'var(--color-fin-chart-6)',
 ];
+
+/** The colour of the series at a position, going round again past the last. */
+export const colorOf = (index) => chartColors[index % chartColors.length];

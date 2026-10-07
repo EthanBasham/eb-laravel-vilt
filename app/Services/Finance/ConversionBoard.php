@@ -345,8 +345,6 @@ class ConversionBoard
                 }
             }
 
-            $openingMagi ??= ($ordinary + $gains) / $index;
-
             // The RMD is worked on the balance the year opened with, which is
             // what `$traditional` still holds at this point in the loop.
             $rmd = 0.0;
@@ -354,6 +352,11 @@ class ConversionBoard
             if ($age >= $ages['rmd_start'] && $traditional > 0) {
                 $rmd = $traditional / $divisors[min($age, $oldestDivisor)];
             }
+
+            // The two years before the plan are taken to have looked like
+            // its first — RMD and all, or someone already drawing one would
+            // open in a lower IRMAA tier than their income puts them in.
+            $openingMagi ??= ($ordinary + $gains + $rmd) / $index;
 
             $traditional -= $rmd;
 

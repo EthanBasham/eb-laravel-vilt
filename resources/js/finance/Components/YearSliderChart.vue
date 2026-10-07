@@ -1,7 +1,8 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { niceScale } from '../composables/useNiceScale';
+import { computed, ref } from 'vue';
+import { useChartWidth } from '../composables/useChartWidth';
 import { money, moneyShort } from '../lib/format';
+import { niceScale } from '../lib/scale';
 
 /**
  * One flow across the years of the plan, with a slider on every year.
@@ -40,19 +41,8 @@ const pad = { top: 22, right: 14, bottom: 30, left: 56 };
 // Never narrower than a usable slider per year; the frame scrolls instead.
 const minWidth = computed(() => pad.left + pad.right + props.points.length * 14);
 
-const frame = ref(null);
 const svg = ref(null);
-const width = ref(640);
-let observer = null;
-
-onMounted(() => {
-    observer = new ResizeObserver(([entry]) => {
-        width.value = Math.max(minWidth.value, entry.contentRect.width);
-    });
-    observer.observe(frame.value);
-});
-
-onBeforeUnmount(() => observer?.disconnect());
+const { frame, width } = useChartWidth(minWidth);
 
 // The year being dragged or nudged, and where it has got to. Kept apart from
 // the points so the scale below does not move under the pointer mid-drag.

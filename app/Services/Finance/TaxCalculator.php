@@ -310,11 +310,10 @@ class TaxCalculator
      */
     public function deduction(string $status, float $index = 1.0, ?int $age = null): float
     {
-        $additional = $age !== null && $age >= (int) config('finance.tax.additional_deduction.age')
-            ? (float) config("finance.tax.additional_deduction.{$status}", config('finance.tax.additional_deduction.single'))
-            : 0.0;
+        $table = $this->table($status);
+        $additional = $age !== null && $age >= $table['additional_age'] ? $table['additional_deduction'] : 0.0;
 
-        return ($this->table($status)['deduction'] + $additional) * $index;
+        return ($table['deduction'] + $additional) * $index;
     }
 
     /**
@@ -330,12 +329,17 @@ class TaxCalculator
      * instance. An unknown status gets the single filer's. The deduction is
      * the profile's own on an instance from forProfile() that has one.
      *
-     * @return array{deduction: float, brackets: list<array{0: int|float, 1: int|float|null}>}
+     * Everything deduction() reads is kept here too: it is called for every
+     * tax worked out, hundreds of times in one simulated plan.
+     *
+     * @return array{deduction: float, additional_deduction: float, additional_age: int, brackets: list<array{0: int|float, 1: int|float|null}>}
      */
     private function table(string $status): array
     {
         return $this->tables[$status] ??= [
             'deduction' => $this->deduction ?? (float) config("finance.tax.standard_deduction.{$status}", config('finance.tax.standard_deduction.single')),
+            'additional_deduction' => (float) config("finance.tax.additional_deduction.{$status}", config('finance.tax.additional_deduction.single')),
+            'additional_age' => (int) config('finance.tax.additional_deduction.age'),
             'brackets' => config("finance.tax.brackets.{$status}") ?? config('finance.tax.brackets.single'),
         ];
     }

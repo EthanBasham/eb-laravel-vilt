@@ -125,7 +125,8 @@ it('shows the tab with the buckets and each strategy\'s result', function () {
     $this->actingAs($user)->get(route('finance.retirement', 'withdrawals'))
         ->assertInertia(fn ($page) => $page
             ->component('Withdrawals')
-            ->where('balances', ['deferred' => 100000, 'free' => 100000, 'taxable' => 100000])
+            ->where('balances', ['deferred' => 100000, 'free' => 100000, 'taxable' => 100000, 'total' => 300000])
+            ->where('default_spending_amount', 12000)
             ->has('kinds', 5)
             ->has('spending_rules', 3)
             ->has('strategies', 1)

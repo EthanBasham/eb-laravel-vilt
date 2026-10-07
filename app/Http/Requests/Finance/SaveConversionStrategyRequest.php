@@ -2,14 +2,14 @@
 
 namespace App\Http\Requests\Finance;
 
-use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use App\Models\Finance\Scenario;
 
 /**
  * A conversion strategy, created or edited. Most of it may be left blank:
  * see the migration for what each blank falls back to.
  */
-class SaveConversionStrategyRequest extends FormRequest
+class SaveConversionStrategyRequest extends FinanceRequest
 {
     /**
      * Get the validation rules that apply to the request.
@@ -23,7 +23,7 @@ class SaveConversionStrategyRequest extends FormRequest
             'name' => ['nullable', 'string', 'max:80'],
             'kind' => ['required', 'string', Rule::in(array_keys(config('finance.conversion_strategies')))],
             // Only one of the user's own projections can be built on.
-            'scenario_id' => ['nullable', 'integer', Rule::exists('fin_scenarios', 'id')->where('user_id', $this->user()->id)],
+            'scenario_id' => ['nullable', 'integer', $this->owned(Scenario::class)],
             'convert_from_age' => ['nullable', 'integer', 'between:18,110'],
             'convert_until_age' => ['nullable', 'integer', 'between:18,110', 'gte:convert_from_age'],
             // Null fills whichever bracket the year's income is already in.

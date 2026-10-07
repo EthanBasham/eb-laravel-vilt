@@ -25,6 +25,41 @@ abstract class OwnedModel extends Model
         return (int) $this->user_id === (int) $user->id;
     }
 
+    /**
+     * A route only ever binds the signed-in user's own row: anybody else's is
+     * a 404, the same as one that does not exist, and before the request is
+     * validated — so a form's error messages never describe another user's
+     * record. The controllers still check isOwnedBy() as well; this is a
+     * second lock on the same door, not a replacement for it.
+     *
+     * @param  mixed  $value
+     * @param  string|null  $field
+     */
+    public function resolveRouteBinding($value, $field = null): ?static
+    {
+        $userId = auth()->id();
+
+        if ($userId === null) {
+            return null;
+        }
+
+        return $this->resolveRouteBindingQuery($this, $value, $field)->where($this->qualifyColumn('user_id'), $userId)->first();
+    }
+
+    /**
+     * What a copy of something is called: its name with "copy" after it, cut
+     * to what the name columns hold. A thing with no name has a copy with
+     * none.
+     */
+    public static function copyName(?string $name): ?string
+    {
+        if ($name === null) {
+            return null;
+        }
+
+        return str("{$name} copy")->limit(80, '')->toString();
+    }
+
     // Scopes
 
     public function scopeOnlyOwnedBy(Builder $query, User $user): Builder

@@ -2,9 +2,7 @@
 
 namespace App\Http\Requests\Finance;
 
-use Illuminate\Foundation\Http\FormRequest;
-
-class SaveMonteCarloRequest extends FormRequest
+class SaveMonteCarloRequest extends FinanceRequest
 {
     /**
      * Get the validation rules that apply to the request.

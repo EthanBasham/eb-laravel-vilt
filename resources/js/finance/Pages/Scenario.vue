@@ -10,7 +10,7 @@ import ScenarioFlowGroup from '../Components/ScenarioFlowGroup.vue';
 import ScenarioFlowRow from '../Components/ScenarioFlowRow.vue';
 import ScenarioHoldingRow from '../Components/ScenarioHoldingRow.vue';
 import StatTile from '../Components/StatTile.vue';
-import { chartColors, money, moneyBrief, moneyBriefSigned, moneySigned } from '../lib/format';
+import { chartColors, money, moneyBrief, moneyBriefSigned, moneySigned, signTone } from '../lib/format';
 
 const props = defineProps({
     scenario: Object,
@@ -169,7 +169,7 @@ const applyRate = (direction) => {
                         <tbody>
                             <tr class="border-b border-fin-grey-100">
                                 <td class="px-5 py-2" colspan="7">
-                                    <button type="button" class="rounded-full border px-3 py-1 text-xs font-medium" :class="armadaFilter === undefined ? 'border-fin-charcoal bg-fin-charcoal text-fin-white' : 'border-fin-grey-300 bg-fin-white text-fin-charcoal hover:bg-fin-cream-100'" :aria-pressed="armadaFilter === undefined" @click="armadaFilter = undefined">
+                                    <button type="button" class="fin-pill" :aria-pressed="armadaFilter === undefined" @click="armadaFilter = undefined">
                                         Show every armada
                                     </button>
                                 </td>
@@ -181,8 +181,8 @@ const applyRate = (direction) => {
                                 </td>
                                 <td class="px-3 py-2.5 text-right text-fin-charcoal" :title="money(armada.income)">{{ moneyBrief(armada.income) }}</td>
                                 <td class="px-3 py-2.5 text-right text-fin-charcoal" :title="money(armada.expenses)">{{ moneyBrief(armada.expenses) }}</td>
-                                <td class="px-3 py-2.5 text-right font-medium" :class="armada.cashflow < 0 ? 'text-fin-red-600' : 'text-fin-green-600'" :title="money(armada.cashflow)">{{ moneyBriefSigned(armada.cashflow) }}</td>
-                                <td class="px-3 py-2.5 text-right font-medium" :class="armada.growth < 0 ? 'text-fin-red-600' : 'text-fin-green-600'" :title="money(armada.growth)">{{ moneyBriefSigned(armada.growth) }}</td>
+                                <td class="px-3 py-2.5 text-right font-medium" :class="signTone(armada.cashflow)" :title="money(armada.cashflow)">{{ moneyBriefSigned(armada.cashflow) }}</td>
+                                <td class="px-3 py-2.5 text-right font-medium" :class="signTone(armada.growth)" :title="money(armada.growth)">{{ moneyBriefSigned(armada.growth) }}</td>
                                 <td class="px-3 py-2.5 text-right text-fin-charcoal" :title="money(armada.net_worth_start)">{{ moneyBrief(armada.net_worth_start) }}</td>
                                 <td class="px-5 py-2.5 text-right font-medium text-fin-black" :title="money(armada.net_worth_end)">{{ moneyBrief(armada.net_worth_end) }}</td>
                             </tr>

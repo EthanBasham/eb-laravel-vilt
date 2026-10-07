@@ -84,8 +84,8 @@ class RealityBoard
         $attributes = [...$totals, 'projection' => array_map(fn (float $value): float => round($value), $projection), 'note' => $note];
 
         // whereDate, not updateOrCreate's attribute match — see
-        // BudgetController::updateActual for why a date cannot be matched as
-        // a string across drivers.
+        // Actual::record() for why a date cannot be matched as a string
+        // across drivers.
         $snapshot = Snapshot::query()->onlyOwnedBy($user)->whereDate('taken_on', now())->first();
 
         if ($snapshot) {
@@ -108,7 +108,12 @@ class RealityBoard
     {
         $from = now()->startOfMonth()->subMonths(self::BUDGET_MONTHS - 1);
 
-        $actuals = Actual::query()->onlyOwnedBy($user)->whereDate('month', '>=', $from)->with('flow')->get()
+        // Through the leaves, as the budget itself counts: a figure recorded
+        // on a flow that has since been broken into items is left out, or it
+        // would be counted beside the items' own.
+        $leaves = $this->fleet->flowLeaves($this->fleet->flows($user))->keyBy('id');
+
+        $actuals = Actual::query()->onlyOwnedBy($user)->whereDate('month', '>=', $from)->whereIn('flow_id', $leaves->keys())->get()
             ->groupBy(fn (Actual $actual): string => $actual->month->format('Y-m'));
 
         $history = [];
@@ -120,8 +125,8 @@ class RealityBoard
             $history[] = [
                 'month' => $month->format('Y-m'),
                 'label' => $month->format('M'),
-                'planned' => round((float) $entries->sum(fn (Actual $actual): float => $signed($actual->flow, $actual->flow->plannedFor($month))), 2),
-                'actual' => round((float) $entries->sum(fn (Actual $actual): float => $signed($actual->flow, $actual->amount)), 2),
+                'planned' => round((float) $entries->sum(fn (Actual $actual): float => $signed($leaves[$actual->flow_id], $leaves[$actual->flow_id]->plannedFor($month))), 2),
+                'actual' => round((float) $entries->sum(fn (Actual $actual): float => $signed($leaves[$actual->flow_id], $actual->amount)), 2),
                 'tracked' => $entries->count(),
             ];
         }

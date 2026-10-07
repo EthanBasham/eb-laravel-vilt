@@ -2,12 +2,10 @@
 
 namespace App\Http\Requests\Finance;
 
-use Illuminate\Foundation\Http\FormRequest;
-
 /**
  * An armada, created or renamed.
  */
-class SaveArmadaRequest extends FormRequest
+class SaveArmadaRequest extends FinanceRequest
 {
     /**
      * Get the validation rules that apply to the request.

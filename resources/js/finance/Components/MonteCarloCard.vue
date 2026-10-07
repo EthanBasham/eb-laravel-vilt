@@ -4,7 +4,7 @@ import { IconArrowsShuffle, IconPlayerPlay } from '@tabler/icons-vue';
 import { computed, watch } from 'vue';
 import Card from './Card.vue';
 import Field from './Field.vue';
-import { asDate, moneyBrief, money, number } from '../lib/format';
+import { moneyBrief, money, number } from '../lib/format';
 
 /**
  * The Monte Carlo settings and results on the conversion tab.
@@ -104,7 +104,7 @@ const successTone = (rate) => {
                 <template v-else-if="monteCarlo.status === 'failed'">
                     <span class="font-medium text-fin-red-600">The last run failed: {{ monteCarlo.error }}</span>
                 </template>
-                <template v-else-if="monteCarlo.ran_at">Last finished {{ asDate(monteCarlo.ran_at.slice(0, 10)) }}.</template>
+                <template v-else-if="monteCarlo.ran_at">Last finished {{ new Date(monteCarlo.ran_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) }}.</template>
             </template>
         </div>
 

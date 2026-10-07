@@ -76,6 +76,9 @@ class WithdrawalBoard
             );
         }
 
+        $total = (float) array_sum($world['balances']);
+        $defaultPercent = (float) config('finance.defaults.withdrawal_percent');
+
         return [
             'profile' => [
                 'age' => $profile->age,
@@ -86,13 +89,16 @@ class WithdrawalBoard
                 'inflation_rate' => $profile->inflation_rate,
                 'filing_status' => config("finance.tax.filing_statuses.{$world['status']}", $world['status']),
             ],
-            'balances' => $world['balances'],
+            'balances' => [...$world['balances'], 'total' => $total],
             'growth_rate' => $world['growth_rate'],
             'tax_year' => (int) config('finance.tax.year'),
             'kinds' => config('finance.withdrawal_strategies'),
             'spending_rules' => config('finance.spending_rules'),
             'fill_rates' => config('finance.conversion_fill_rates'),
-            'default_percent' => (float) config('finance.defaults.withdrawal_percent'),
+            'default_percent' => $defaultPercent,
+            // The classic figure on today's balance, to the nearest $100:
+            // what a fixed-amount strategy opens on.
+            'default_spending_amount' => round($total * $defaultPercent / 100, -2),
             'scenarios' => Scenario::query()->onlyOwnedBy($user)->inDefaultOrder()->get()->map->only(['id', 'name', 'bracket_inflation_rate'])->values(),
             'strategies' => $strategies->map(fn (WithdrawalStrategy $strategy): array => [
                 ...$strategy->props,
@@ -148,7 +154,6 @@ class WithdrawalBoard
                 }
             }
 
-            $openingMagi ??= ($ordinary + $gains) / $index;
             $opening = array_sum($balances);
 
             // The RMD is worked on the balance the year opened with.
@@ -159,6 +164,10 @@ class WithdrawalBoard
             }
 
             $balances['deferred'] -= $rmd;
+
+            // As ConversionBoard: the years before the plan are taken to
+            // have looked like its first, RMD included.
+            $openingMagi ??= ($ordinary + $gains + $rmd) / $index;
 
             // This year's premium was set by the income of two years ago,
             // against this year's tiers. See ConversionBoard for the detail.

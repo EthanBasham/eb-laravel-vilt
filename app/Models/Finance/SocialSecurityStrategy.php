@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Support\Facades\DB;
+use App\Models\User;
 use Database\Factories\Finance\SocialSecurityStrategyFactory;
 
 /**
@@ -47,6 +49,40 @@ class SocialSecurityStrategy extends OwnedModel
             'cola_rate' => 'float',
             'discount_rate' => 'float',
         ];
+    }
+
+    /**
+     * The three ages worth setting side by side before anything has been
+     * decided: as early as possible, at full retirement age, and at 70.
+     *
+     * @param  array{self: array<string, mixed>, spouse?: array<string, mixed>}  $people  SocialSecurityBoard::people(): each person's full retirement age (`fra`), in months.
+     */
+    public static function createStarters(User $user, array $people): void
+    {
+        $earliest = (int) config('finance.social_security.earliest_age');
+        $latest = (int) config('finance.social_security.latest_age');
+
+        $starters = [
+            "Claim at {$earliest}" => fn (array $person): array => [$earliest, 0],
+            'Claim at full retirement age' => fn (array $person): array => [intdiv($person['fra'], 12), $person['fra'] % 12],
+            "Wait until {$latest}" => fn (array $person): array => [$latest, 0],
+        ];
+
+        DB::transaction(function () use ($user, $people, $starters): void {
+            foreach ($starters as $name => $ageOf) {
+                [$age, $months] = $ageOf($people['self']);
+                [$spouseAge, $spouseMonths] = isset($people['spouse']) ? $ageOf($people['spouse']) : [null, 0];
+
+                static::query()->create([
+                    'user_id' => $user->id,
+                    'name' => $name,
+                    'claim_age' => $age,
+                    'claim_months' => $months,
+                    'spouse_claim_age' => $spouseAge,
+                    'spouse_claim_months' => $spouseMonths,
+                ]);
+            }
+        });
     }
 
     /** The settings as saved, nulls and all: what the edit form is filled from. */

@@ -139,8 +139,9 @@ class Flow extends OwnedModel
 
     /**
      * What the budget plans for this flow in one month: its monthly run rate
-     * while the flow is active, the whole amount in the month a one-time flow
-     * lands, and nothing otherwise.
+     * while the flow is active — grown at its own rate for a month in a later
+     * year, as amountInYear() grows the year — the whole amount in the month
+     * a one-time flow lands, and nothing otherwise.
      */
     public function plannedFor(CarbonInterface $month): float
     {
@@ -163,7 +164,7 @@ class Flow extends OwnedModel
             return 0.0;
         }
 
-        return $this->monthly_amount;
+        return $this->monthly_amount * (1 + $this->annual_growth_rate / 100) ** max(0, $month->year - now()->year);
     }
 
     protected function isIncome(): Attribute
@@ -318,6 +319,10 @@ class Flow extends OwnedModel
             'monthly_amount' => round($this->monthly_amount, 2),
             'annual_amount' => round($this->annual_amount, 2),
             'is_running' => $this->is_compound || $this->frequency === 'once' || $this->current_monthly_amount > 0 || $this->amount == 0,
+            // Not running because it has yet to begin, rather than because
+            // it is over. Decided here, in app time: a browser's idea of
+            // today is UTC's by the evening.
+            'starts_later' => (bool) $this->starts_on?->isAfter(today()),
         ]);
     }
 

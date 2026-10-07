@@ -1,7 +1,8 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { niceScale } from '../composables/useNiceScale';
+import { computed, ref } from 'vue';
+import { useChartWidth } from '../composables/useChartWidth';
 import { moneyShort } from '../lib/format';
+import { niceScale } from '../lib/scale';
 
 /**
  * The one line chart: change over time, for one series or a few.
@@ -10,7 +11,9 @@ import { moneyShort } from '../lib/format';
  * figures arrive finished from the server; everything computed here is
  * geometry (where a value sits on the page), never a financial result.
  *
- * Each series is `{ label, color, points: [{ x, y }], dashed?, area? }`. `x`
+ * Each series is `{ label, color, points: [{ x, y }], dashed?, area?, key? }`.
+ * Give `key` when two series may share a label — two strategies with the
+ * same name — or they would collide in the legend and the tooltip. `x`
  * is any number — a year, a month index, a timestamp — and series do not have
  * to share their x values: the hover finds the nearest x on the chart and
  * reports whichever series have a point there.
@@ -33,18 +36,7 @@ const pad = { top: 12, right: 16, bottom: 28, left: 56 };
 
 // The SVG is drawn at its real pixel width rather than scaled by viewBox, so
 // text stays the size it was set at on any screen.
-const frame = ref(null);
-const width = ref(640);
-let observer = null;
-
-onMounted(() => {
-    observer = new ResizeObserver(([entry]) => {
-        width.value = Math.max(240, entry.contentRect.width);
-    });
-    observer.observe(frame.value);
-});
-
-onBeforeUnmount(() => observer?.disconnect());
+const { frame, width } = useChartWidth(240);
 
 const drawn = computed(() => props.series.filter((line) => line.points.length > 0));
 const allPoints = computed(() => drawn.value.flatMap((line) => line.points));
@@ -141,7 +133,7 @@ const hovered = computed(() => {
         <!-- A legend only when there is more than one thing to tell apart; a
              single line is named by the card it sits in. -->
         <ul v-if="drawn.length > 1" class="mb-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-fin-grey-600">
-            <li v-for="line in drawn" :key="line.label" class="flex items-center gap-1.5">
+            <li v-for="line in drawn" :key="line.key ?? line.label" class="flex items-center gap-1.5">
                 <svg width="18" height="6" aria-hidden="true">
                     <line x1="0" y1="3" x2="18" y2="3" :stroke="line.color" stroke-width="2" stroke-linecap="round" :stroke-dasharray="line.dashed ? '4 4' : null" />
                 </svg>
@@ -179,7 +171,7 @@ const hovered = computed(() => {
                     stroke="var(--color-fin-grey-400)" stroke-width="1"
                 />
 
-                <template v-for="line in drawn" :key="line.label">
+                <template v-for="line in drawn" :key="line.key ?? line.label">
                     <path v-if="line.area" :d="areaPath(line)" :fill="line.color" fill-opacity="0.1" />
                     <path
                         :d="linePath(line)" fill="none" :stroke="line.color" stroke-width="2"
@@ -200,7 +192,7 @@ const hovered = computed(() => {
                 <!-- A dot per line: at the hovered x while hovering, otherwise
                      at the line's end. The white ring keeps it legible where
                      lines cross. -->
-                <template v-for="line in drawn" :key="`dot-${line.label}`">
+                <template v-for="line in drawn" :key="`dot-${line.key ?? line.label}`">
                     <circle
                         v-if="!hovered"
                         :cx="px(line.points[line.points.length - 1].x)" :cy="py(line.points[line.points.length - 1].y)"
@@ -209,7 +201,7 @@ const hovered = computed(() => {
                 </template>
                 <template v-if="hovered">
                     <circle
-                        v-for="row in hovered.rows" :key="`hover-${row.line.label}`"
+                        v-for="row in hovered.rows" :key="`hover-${row.line.key ?? row.line.label}`"
                         :cx="px(row.point.x)" :cy="py(row.point.y)"
                         r="4.5" :fill="row.line.color" stroke="var(--color-fin-white)" stroke-width="2"
                     />
@@ -222,7 +214,7 @@ const hovered = computed(() => {
                 :style="hovered.flip ? { right: `${width - hovered.left + 12}px` } : { left: `${hovered.left + 12}px` }"
             >
                 <p class="mb-1 font-medium text-fin-black">{{ formatX(hoverX) }}</p>
-                <p v-for="row in hovered.rows" :key="row.line.label" class="flex items-center justify-between gap-4 text-fin-grey-600">
+                <p v-for="row in hovered.rows" :key="row.line.key ?? row.line.label" class="flex items-center justify-between gap-4 text-fin-grey-600">
                     <span class="flex items-center gap-1.5">
                         <span class="h-2 w-2 rounded-full" :style="{ backgroundColor: row.line.color }" />
                         {{ row.line.label }}

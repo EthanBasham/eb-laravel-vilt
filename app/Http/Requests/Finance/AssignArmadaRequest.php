@@ -2,8 +2,7 @@
 
 namespace App\Http\Requests\Finance;
 
-use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
+use App\Models\Finance\Armada;
 
 /**
  * Holdings and flows moved into an armada, or out of every one.
@@ -11,7 +10,7 @@ use Illuminate\Validation\Rule;
  * The ids are not checked for ownership here: the controller only ever
  * updates rows through the owner's scope, so someone else's id moves nothing.
  */
-class AssignArmadaRequest extends FormRequest
+class AssignArmadaRequest extends FinanceRequest
 {
     /**
      * Get the validation rules that apply to the request.
@@ -22,7 +21,7 @@ class AssignArmadaRequest extends FormRequest
     {
         return [
             // Null takes them out of whichever armada they were in.
-            'armada_id' => ['present', 'nullable', 'integer', Rule::exists('fin_armadas', 'id')->where('user_id', $this->user()->id)],
+            'armada_id' => ['present', 'nullable', 'integer', $this->owned(Armada::class)],
             'holdings' => ['array', 'max:500'],
             'holdings.*' => ['integer'],
             'flows' => ['array', 'max:500'],

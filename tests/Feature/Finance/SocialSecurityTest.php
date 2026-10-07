@@ -260,3 +260,23 @@ it('says so when there is no benefit to write', function () {
 
     expect(Flow::query()->count())->toBe(0);
 });
+
+/**
+ * A spousal top-up starts once both have claimed. Written into the spouse's
+ * own benefit it would be paid from the day the spouse claimed — here, eight
+ * years too soon.
+ */
+it('writes a spousal top-up as an income of its own, from the month it is first paid', function () {
+    $user = claimant(['birth_date' => '1970-06-15', 'spouse_birth_date' => '1970-06-15', 'spouse_ss_monthly_benefit' => 500]);
+    $strategy = SocialSecurityStrategy::factory()->claimingAt(70)->create(['user_id' => $user->id, 'spouse_claim_age' => 62]);
+
+    $this->actingAs($user)->post(route('finance.retirement.social-security.apply', $strategy))->assertSessionHas('success');
+
+    $written = Flow::query()->orderBy('starts_on')->get()->map(fn (Flow $flow): array => [$flow->name, $flow->amount, $flow->starts_on->toDateString()])->all();
+
+    expect($written)->toBe([
+        ['Social Security (spouse)', 350.0, '2032-06-01'],
+        ['Social Security', 2480.0, '2040-06-01'],
+        ['Social Security (spouse, spousal top-up)', 500.0, '2040-06-01'],
+    ]);
+});

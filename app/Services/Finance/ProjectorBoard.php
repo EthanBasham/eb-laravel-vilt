@@ -52,6 +52,12 @@ class ProjectorBoard
 
         $start = $middle[0] ?? 0.0;
         $end = $middle[array_key_last($middle)] ?? 0.0;
+        // In the same dollars as the balances: in today's, each deposit is
+        // counted at what it is worth today, or the growth would be a real
+        // balance less nominal deposits.
+        $contributed = $options['real']
+            ? Amortization::depositsInTodaysDollars($expected['contributed'] / $months, $profile->inflation_rate, $months)
+            : $expected['contributed'];
         $thisYear = now()->year;
 
         return [
@@ -69,8 +75,8 @@ class ProjectorBoard
                 'end' => $end,
                 'cautious_end' => $cautious[array_key_last($cautious)] ?? 0.0,
                 'optimistic_end' => $optimistic[array_key_last($optimistic)] ?? 0.0,
-                'contributed' => round($expected['contributed']),
-                'growth' => round($end - $start - $expected['contributed']),
+                'contributed' => round($contributed),
+                'growth' => round($end - $start - $contributed),
                 'monthly_contribution' => round((float) $holdings->sum('monthly_contribution') + ($holdings->isNotEmpty() ? $options['extra_monthly'] : 0), 2),
             ],
             'holdings' => $holdings->map(function (Holding $holding) use ($expected, $shown): array {

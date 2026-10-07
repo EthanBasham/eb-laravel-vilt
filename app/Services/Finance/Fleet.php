@@ -41,7 +41,10 @@ class Fleet
                 ->setRelation('children', $holding->newCollection()));
         });
 
-        return $holdings;
+        // Largest first within each side, by what each is worth: the query
+        // can only order by the balance column, which is nothing for a
+        // holding valued by the accounts or positions inside it.
+        return $holdings->sortBy([['side', 'asc'], fn (Holding $a, Holding $b): int => $b->value <=> $a->value])->values();
     }
 
     /**

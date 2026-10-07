@@ -7,7 +7,7 @@ import Card from '../Components/Card.vue';
 import EmptyState from '../Components/EmptyState.vue';
 import FinShell from '../Components/FinShell.vue';
 import StatTile from '../Components/StatTile.vue';
-import { money, moneyExact, moneySigned } from '../lib/format';
+import { money, moneyExact, moneySigned, signTone } from '../lib/format';
 
 /**
  * The fleet in named parts. Each armada is a card with what it comes to;
@@ -84,7 +84,7 @@ const assign = () => {
                         </div>
                         <div>
                             <dt class="text-xs text-fin-grey-500">Left a month</dt>
-                            <dd class="mt-0.5 font-semibold" :class="armada.cashflow.net < 0 ? 'text-fin-red-600' : 'text-fin-green-600'">{{ moneySigned(armada.cashflow.net) }}</dd>
+                            <dd class="mt-0.5 font-semibold" :class="signTone(armada.cashflow.net)">{{ moneySigned(armada.cashflow.net) }}</dd>
                         </div>
                         <div>
                             <dt class="text-xs text-fin-grey-500">Income</dt>

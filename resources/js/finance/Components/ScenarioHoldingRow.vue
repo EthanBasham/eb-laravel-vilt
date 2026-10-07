@@ -3,7 +3,8 @@ import { router } from '@inertiajs/vue3';
 import { IconChevronDown } from '@tabler/icons-vue';
 import { computed, reactive, ref, watch } from 'vue';
 import YearSliderChart from './YearSliderChart.vue';
-import { money, moneyShort, moneySigned, percent, rateTone } from '../lib/format';
+import { money, moneyShort, moneySigned, percent, percentSigned, rateTone } from '../lib/format';
+import { numberOrNull } from '../lib/input';
 
 /**
  * One asset or liability inside a scenario: a row that opens onto its rate,
@@ -62,12 +63,6 @@ const save = () => {
     });
 };
 
-const numberOrNull = (event) => {
-    const value = Number(event.target.value);
-
-    return event.target.value === '' || Number.isNaN(value) ? null : value;
-};
-
 const setRate = (event) => { draft.rate = numberOrNull(event); save(); };
 const setContribution = (event) => { draft.contribution = numberOrNull(event); save(); };
 const reset = (field) => { draft[field] = null; save(); };
@@ -87,12 +82,6 @@ const points = computed(() => props.holding.series.map((point) => {
 const pinnedCount = computed(() => points.value.filter((point) => point.is_pinned).length);
 const rate = computed(() => draft.rate ?? props.holding.own_rate);
 const contribution = computed(() => draft.contribution ?? props.holding.own_contribution);
-const signedRate = (value) => `${value > 0 ? '+' : ''}${percent(value)}`;
-
-// Money moved in a year, net: in for an asset, off the balance for a debt.
-const moved = (year) => (isAsset.value
-    ? year.contributions + year.deposits + year.transfers_in - year.withdrawals - year.transfers_out
-    : year.contributions + year.transfers_in);
 </script>
 
 <template>
@@ -105,7 +94,7 @@ const moved = (year) => (isAsset.value
             </span>
 
             <span class="whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium" :class="rateTone(holding.side, rate)">
-                {{ isAsset ? signedRate(rate) : percent(rate) }} {{ isAsset ? '/ yr' : 'APR' }}
+                {{ isAsset ? percentSigned(rate) : percent(rate) }} {{ isAsset ? '/ yr' : 'APR' }}
             </span>
             <span v-if="pinnedCount" class="whitespace-nowrap rounded-full bg-fin-gold-100 px-2 py-0.5 text-[11px] font-medium text-fin-gold-600">
                 {{ pinnedCount }} {{ pinnedCount === 1 ? 'year' : 'years' }} by hand
@@ -169,7 +158,7 @@ const moved = (year) => (isAsset.value
                             <td class="px-3 py-1.5 text-right text-fin-charcoal">{{ money(year.start) }}</td>
                             <td class="px-3 py-1.5 text-right" :class="isAsset ? 'text-fin-green-600' : 'text-fin-red-600'">{{ isAsset ? moneySigned(year.growth) : money(year.growth) }}</td>
                             <td class="px-3 py-1.5 text-right text-fin-charcoal">
-                                {{ isAsset ? moneySigned(moved(year)) : money(moved(year)) }}
+                                {{ isAsset ? moneySigned(year.moved) : money(year.moved) }}
                                 <span v-if="year.unfunded > 0" class="block text-[11px] text-fin-red-600">{{ money(year.unfunded) }} it could not pay</span>
                             </td>
                             <td class="px-4 py-1.5 text-right font-medium text-fin-black">{{ money(year.amount) }}<span v-if="year.is_pinned" class="ml-1 text-[11px] font-normal text-fin-gold-600">by hand</span></td>

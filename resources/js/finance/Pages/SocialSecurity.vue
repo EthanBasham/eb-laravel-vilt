@@ -1,7 +1,6 @@
 <script setup>
 import { router, useForm } from '@inertiajs/vue3';
 import { IconArrowsExchange, IconPencil, IconPlus, IconSparkles, IconTrash } from '@tabler/icons-vue';
-import { computed, ref, watch } from 'vue';
 import Card from '../Components/Card.vue';
 import EmptyState from '../Components/EmptyState.vue';
 import Field from '../Components/Field.vue';
@@ -10,7 +9,9 @@ import LineChart from '../Components/LineChart.vue';
 import RetirementTabs from '../Components/RetirementTabs.vue';
 import SocialSecurityStrategyForm from '../Components/SocialSecurityStrategyForm.vue';
 import StatTile from '../Components/StatTile.vue';
-import { asMonth, chartColors, money, moneyBrief, moneyExact } from '../lib/format';
+import StrategyPicker from '../Components/StrategyPicker.vue';
+import { age, useStrategyBoard } from '../composables/useStrategyBoard';
+import { asMonth, colorOf, money, moneyBrief, moneyExact } from '../lib/format';
 
 /**
  * The Social Security tab: claiming strategies built by the user, run by the
@@ -37,9 +38,7 @@ benefitsForm.transform((data) => Object.fromEntries(Object.entries(data).map(([k
 
 const saveBenefits = () => benefitsForm.put('/finance/retirement/social-security/benefits', { preserveScroll: true });
 
-const form = ref({ open: false, strategy: null });
-const build = () => { form.value = { open: true, strategy: null }; };
-const edit = (strategy) => { form.value = { open: true, strategy }; };
+const { form, build, edit, selectedId, selectedIndex, selected, lines } = useStrategyBoard(() => props.strategies);
 
 const addStarters = () => router.post('/finance/retirement/social-security/strategies/starters', {}, { preserveScroll: true });
 
@@ -55,24 +54,6 @@ const apply = (strategy) => {
     }
 };
 
-const colorOf = (index) => chartColors[index % chartColors.length];
-
-const selectedId = ref(props.strategies[0]?.id ?? null);
-
-watch(() => props.strategies.map((strategy) => strategy.id), (ids) => {
-    if (!ids.includes(selectedId.value)) selectedId.value = ids[0] ?? null;
-});
-
-const selectedIndex = computed(() => props.strategies.findIndex((strategy) => strategy.id === selectedId.value));
-const selected = computed(() => props.strategies[selectedIndex.value] ?? null);
-
-const age = (value) => `Age ${value}`;
-
-const lines = (field) => props.strategies.map((strategy, index) => ({
-    label: strategy.name,
-    color: colorOf(index),
-    points: strategy.rows.map((row) => ({ x: row.age, y: row[field] })),
-}));
 
 const claimAge = (claim) => `${claim.age}${claim.months ? ` and ${claim.months} mo` : ''}`;
 
@@ -201,17 +182,7 @@ const fra = (person) => `${person.full_retirement_age.years}${person.full_retire
 
                 <Card v-if="selected" title="Year by year" flush>
                     <template v-if="strategies.length > 1" #actions>
-                        <div class="flex flex-wrap gap-1.5" role="group" aria-label="Strategy to look at">
-                            <button
-                                v-for="(strategy, index) in strategies" :key="strategy.id" type="button"
-                                class="flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium"
-                                :class="strategy.id === selectedId ? 'border-fin-charcoal bg-fin-charcoal text-fin-white' : 'border-fin-grey-300 bg-fin-white text-fin-charcoal hover:bg-fin-cream-100'"
-                                :aria-pressed="strategy.id === selectedId" @click="selectedId = strategy.id"
-                            >
-                                <span class="h-2 w-2 rounded-full" :style="{ backgroundColor: colorOf(index) }" aria-hidden="true" />
-                                {{ strategy.name }}
-                            </button>
-                        </div>
+                        <StrategyPicker v-model="selectedId" :strategies="strategies" :color-of="colorOf" />
                     </template>
 
                     <div class="max-h-[26rem] overflow-auto">

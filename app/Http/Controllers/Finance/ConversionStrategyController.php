@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Finance;
 
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Finance\ReplaceComparisonRequest;
 use App\Http\Requests\Finance\SaveConversionStrategyRequest;
@@ -59,14 +58,7 @@ class ConversionStrategyController extends Controller
             ? Scenario::query()->onlyOwnedBy($user)->inDefaultOrder()->get()->whenEmpty(fn ($none) => $none->push(null))
             : collect([Scenario::query()->find($request->validated('scenario_id'))]);
 
-        $made = DB::transaction(fn () => $projections->flatMap(fn (?Scenario $scenario) => collect(config('finance.conversion_strategies'))->map(fn (array $kind, string $key) => ConversionStrategy::query()->create([
-            'user_id' => $user->id,
-            'scenario_id' => $scenario?->id,
-            'kind' => $key,
-            'is_compared' => ConversionStrategy::hasRoomToCompare($user),
-            'conversion_amount' => ($kind['amount'] ?? false) ? config('finance.defaults.conversion_amount') : null,
-            'heir_income' => config('finance.defaults.heir_income'),
-        ]))->values()));
+        $made = ConversionStrategy::createStarters($user, $projections);
 
         $held = $made->where('is_compared', false)->count();
         $where = $held > 0 ? " {$held} of them are in the holding area, as the report is full." : '';
@@ -101,14 +93,7 @@ class ConversionStrategyController extends Controller
     {
         abort_unless($strategy->isOwnedBy($request->user()), 404);
 
-        $isFull = ConversionStrategy::query()->onlyOwnedBy($request->user())->onlyCompared()->count() >= (int) config('finance.conversion_comparison.max');
-
-        $copy = $strategy->replicate()->fill([
-            // An unnamed strategy's copy is unnamed too.
-            'name' => $strategy->name === null ? null : str("{$strategy->name} copy")->limit(80, '')->toString(),
-            'is_compared' => $strategy->is_compared && ! $isFull,
-        ]);
-        $copy->save();
+        $copy = $strategy->duplicate();
 
         $where = $strategy->is_compared && ! $copy->is_compared ? ' The report is full, so the copy is in the holding area.' : '';
 
@@ -126,7 +111,7 @@ class ConversionStrategyController extends Controller
 
         $most = (int) config('finance.conversion_comparison.max');
 
-        if (! $strategy->is_compared && ConversionStrategy::query()->onlyOwnedBy($request->user())->onlyCompared()->count() >= $most) {
+        if (! $strategy->is_compared && ConversionStrategy::comparisonIsFull($request->user())) {
             return back(fallback: route('finance.retirement'))->with('error', "No more than {$most} strategies can be in the report at once. Move one to the holding area first.");
         }
 
@@ -153,12 +138,7 @@ class ConversionStrategyController extends Controller
      */
     public function replaceComparison(ReplaceComparisonRequest $request): RedirectResponse
     {
-        $compared = $request->validated('strategies');
-
-        DB::transaction(function () use ($request, $compared): void {
-            ConversionStrategy::query()->onlyOwnedBy($request->user())->whereKeyNot($compared)->update(['is_compared' => false]);
-            ConversionStrategy::query()->onlyOwnedBy($request->user())->whereKey($compared)->update(['is_compared' => true]);
-        });
+        ConversionStrategy::replaceComparison($request->user(), $request->validated('strategies'));
 
         return back(fallback: route('finance.retirement'));
     }

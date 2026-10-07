@@ -2,9 +2,9 @@
 
 namespace App\Http\Requests\Finance;
 
-use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
+use App\Models\Finance\Armada;
 use App\Models\Finance\Holding;
 
 /**
@@ -14,7 +14,7 @@ use App\Models\Finance\Holding;
  * sets it from config so the two can never disagree. `armada_id` is cleared
  * on an account inside another, which follows the outer account's.
  */
-class SaveHoldingRequest extends FormRequest
+class SaveHoldingRequest extends FinanceRequest
 {
     /**
      * Get the validation rules that apply to the request.
@@ -43,7 +43,7 @@ class SaveHoldingRequest extends FormRequest
             'secured_by_id' => [
                 'nullable',
                 'integer',
-                Rule::exists('fin_holdings', 'id')->where('user_id', $this->user()->id)->where('side', 'asset'),
+                $this->owned(Holding::class)->where('side', 'asset'),
                 Rule::notIn([$this->route('holding')?->id]),
             ],
             /*
@@ -55,10 +55,10 @@ class SaveHoldingRequest extends FormRequest
             'parent_id' => [
                 'nullable',
                 'integer',
-                Rule::exists('fin_holdings', 'id')->where('user_id', $this->user()->id)->whereNull('parent_id'),
+                $this->owned(Holding::class)->whereNull('parent_id'),
                 Rule::notIn([$this->route('holding')?->id]),
             ],
-            'armada_id' => ['nullable', 'integer', Rule::exists('fin_armadas', 'id')->where('user_id', $this->user()->id)],
+            'armada_id' => ['nullable', 'integer', $this->owned(Armada::class)],
             'notes' => ['nullable', 'string', 'max:2000'],
         ];
     }

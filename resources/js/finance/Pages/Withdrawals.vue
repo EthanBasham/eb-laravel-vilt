@@ -1,15 +1,16 @@
 <script setup>
 import { router } from '@inertiajs/vue3';
 import { IconCopy, IconPencil, IconPlus, IconSparkles, IconTrash } from '@tabler/icons-vue';
-import { computed, ref, watch } from 'vue';
 import Card from '../Components/Card.vue';
 import EmptyState from '../Components/EmptyState.vue';
 import FinShell from '../Components/FinShell.vue';
 import LineChart from '../Components/LineChart.vue';
 import RetirementTabs from '../Components/RetirementTabs.vue';
 import StatTile from '../Components/StatTile.vue';
+import StrategyPicker from '../Components/StrategyPicker.vue';
 import WithdrawalStrategyForm from '../Components/WithdrawalStrategyForm.vue';
-import { chartColors, money, moneyBrief } from '../lib/format';
+import { age, bucketLines, useStrategyBoard } from '../composables/useStrategyBoard';
+import { colorOf, money, moneyBrief } from '../lib/format';
 
 /**
  * The withdrawals tab: ways of drawing the retirement accounts down, built by
@@ -27,13 +28,12 @@ const props = defineProps({
     spending_rules: Object,
     fill_rates: Array,
     default_percent: Number,
+    default_spending_amount: Number,
     scenarios: Array,
     strategies: Array,
 });
 
-const form = ref({ open: false, strategy: null });
-const build = () => { form.value = { open: true, strategy: null }; };
-const edit = (strategy) => { form.value = { open: true, strategy }; };
+const { form, build, edit, selectedId, selectedIndex, selected, lines } = useStrategyBoard(() => props.strategies);
 
 const addStarters = () => router.post('/finance/retirement/withdrawals/strategies/starters', {}, { preserveScroll: true });
 const duplicate = (strategy) => router.post(`/finance/retirement/withdrawals/strategies/${strategy.id}/duplicate`, {}, { preserveScroll: true });
@@ -44,31 +44,8 @@ const remove = (strategy) => {
     }
 };
 
-const colorOf = (index) => chartColors[index % chartColors.length];
-const balance = computed(() => props.balances.deferred + props.balances.free + props.balances.taxable);
 
-const selectedId = ref(props.strategies[0]?.id ?? null);
 
-watch(() => props.strategies.map((strategy) => strategy.id), (ids) => {
-    if (!ids.includes(selectedId.value)) selectedId.value = ids[0] ?? null;
-});
-
-const selectedIndex = computed(() => props.strategies.findIndex((strategy) => strategy.id === selectedId.value));
-const selected = computed(() => props.strategies[selectedIndex.value] ?? null);
-
-const age = (value) => `Age ${value}`;
-
-const lines = (field) => props.strategies.map((strategy, index) => ({
-    label: strategy.name,
-    color: colorOf(index),
-    points: strategy.rows.map((row) => ({ x: row.age, y: row[field] })),
-}));
-
-const bucketLines = computed(() => [
-    { label: 'Traditional', color: chartColors[1], points: selected.value.rows.map((row) => ({ x: row.age, y: row.traditional })) },
-    { label: 'Roth', color: chartColors[0], points: selected.value.rows.map((row) => ({ x: row.age, y: row.roth })) },
-    { label: 'Taxable savings', color: chartColors[2], dashed: true, points: selected.value.rows.map((row) => ({ x: row.age, y: row.taxable })) },
-]);
 
 /*
  * The comparison, a row to a figure. `best` names which end of the row is the
@@ -130,7 +107,7 @@ const assumptions = (strategy) => [
             <p v-if="!profile.has_birth_date" class="rounded-xl border border-fin-gold-300 bg-fin-gold-100 px-4 py-3 text-sm text-fin-charcoal">
                 Your profile has no birth date, so every strategy assumes you are 40. Set it in Profile &amp; settings for ages that mean something.
             </p>
-            <p v-if="balance <= 0" class="rounded-xl border border-fin-gold-300 bg-fin-gold-100 px-4 py-3 text-sm text-fin-charcoal">
+            <p v-if="balances.total <= 0" class="rounded-xl border border-fin-gold-300 bg-fin-gold-100 px-4 py-3 text-sm text-fin-charcoal">
                 There are no investable accounts in your fleet, so there is nothing to draw down and every strategy will come out the same.
             </p>
 
@@ -197,23 +174,13 @@ const assumptions = (strategy) => [
 
                 <Card v-if="selected" title="A closer look" subtitle="One strategy: where each year's money comes from, and what that leaves in each account.">
                     <template v-if="strategies.length > 1" #actions>
-                        <div class="flex flex-wrap gap-1.5" role="group" aria-label="Strategy to look at">
-                            <button
-                                v-for="(strategy, index) in strategies" :key="strategy.id" type="button"
-                                class="flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium"
-                                :class="strategy.id === selectedId ? 'border-fin-charcoal bg-fin-charcoal text-fin-white' : 'border-fin-grey-300 bg-fin-white text-fin-charcoal hover:bg-fin-cream-100'"
-                                :aria-pressed="strategy.id === selectedId" @click="selectedId = strategy.id"
-                            >
-                                <span class="h-2 w-2 rounded-full" :style="{ backgroundColor: colorOf(index) }" aria-hidden="true" />
-                                {{ strategy.name }}
-                            </button>
-                        </div>
+                        <StrategyPicker v-model="selectedId" :strategies="strategies" :color-of="colorOf" />
                     </template>
 
                     <div class="flex flex-col gap-7">
                         <section>
                             <h3 class="mb-3 text-sm font-semibold text-fin-black">Balances</h3>
-                            <LineChart :series="bucketLines" :height="230" :format-x="age" :x-ticks="8" />
+                            <LineChart :series="bucketLines(selected)" :height="230" :format-x="age" :x-ticks="8" />
                         </section>
 
                         <section>
@@ -269,7 +236,7 @@ const assumptions = (strategy) => [
 
         <WithdrawalStrategyForm
             :open="form.open" :strategy="form.strategy" :kinds="kinds" :spending-rules="spending_rules" :fill-rates="fill_rates" :scenarios="scenarios"
-            :profile="profile" :growth-rate="growth_rate" :balance="balance" :default-percent="default_percent" @close="form.open = false"
+            :profile="profile" :growth-rate="growth_rate" :balance="balances.total" :default-amount="default_spending_amount" :default-percent="default_percent" @close="form.open = false"
         />
     </FinShell>
 </template>

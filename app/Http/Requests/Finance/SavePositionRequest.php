@@ -2,10 +2,9 @@
 
 namespace App\Http\Requests\Finance;
 
-use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
-class SavePositionRequest extends FormRequest
+class SavePositionRequest extends FinanceRequest
 {
     /**
      * Get the validation rules that apply to the request.

@@ -2,13 +2,12 @@
 
 namespace App\Http\Requests\Finance;
 
-use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 /**
  * One rate for every income, or for every expense, in a scenario.
  */
-class SaveScenarioRatesRequest extends FormRequest
+class SaveScenarioRatesRequest extends FinanceRequest
 {
     /**
      * Get the validation rules that apply to the request.

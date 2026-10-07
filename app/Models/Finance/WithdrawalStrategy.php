@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\DB;
+use App\Models\User;
 use Database\Factories\Finance\WithdrawalStrategyFactory;
 
 /**
@@ -50,6 +52,28 @@ class WithdrawalStrategy extends OwnedModel
             'inflation_rate' => 'float',
             'growth_rate' => 'float',
         ];
+    }
+
+    /**
+     * One strategy for each order, all covering what the projection needs,
+     * so there is something to compare before anything has been decided.
+     */
+    public static function createStarters(User $user): void
+    {
+        DB::transaction(function () use ($user): void {
+            foreach (config('finance.withdrawal_strategies') as $key => $kind) {
+                static::query()->create(['user_id' => $user->id, 'name' => $kind['label'], 'kind' => $key]);
+            }
+        });
+    }
+
+    /** A saved copy, to try a variation on. */
+    public function duplicate(): static
+    {
+        $copy = $this->replicate()->fill(['name' => static::copyName($this->name)]);
+        $copy->save();
+
+        return $copy;
     }
 
     protected function kindLabel(): Attribute

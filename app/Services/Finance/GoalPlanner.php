@@ -111,7 +111,9 @@ class GoalPlanner
             'monthly' => round($monthly, 2),
             'months' => $months,
             'total_paid' => round($deposited, 2),
-            'growth' => round(max($goal->target_amount, $goal->saved_amount) - $deposited, 2),
+            // What the balance actually reaches, which is past the target
+            // when what is saved already outgrows it with nothing added.
+            'growth' => round(Amortization::futureValue($goal->saved_amount, $monthly, $rate, $months) - $deposited, 2),
             'note' => $note,
             'series' => $series,
         ];

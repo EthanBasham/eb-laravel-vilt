@@ -4,14 +4,10 @@ namespace App\Http\Controllers\Finance;
 
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Collection;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Finance\SaveFlowRequest;
 use App\Models\Finance\Flow;
-use App\Models\Finance\Profile;
-use App\Models\Finance\Transfer;
-use App\Services\Finance\Fleet;
-use App\Services\Finance\TaxCalculator;
+use App\Services\Finance\CashflowBoard;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -20,26 +16,9 @@ use Inertia\Response;
  */
 class FlowController extends Controller
 {
-    public function index(Request $request, Fleet $fleet, TaxCalculator $tax): Response
+    public function index(Request $request, CashflowBoard $board): Response
     {
-        $flows = $fleet->flows($request->user());
-
-        $byCategory = fn (string $direction): Collection => $flows->where('direction', $direction)
-            ->groupBy('category_label')
-            ->map(fn (Collection $group, string $label): array => ['label' => $label, 'value' => round((float) $group->sum->current_monthly_amount, 2)])
-            ->filter(fn (array $category): bool => $category['value'] > 0)
-            ->sortByDesc('value')
-            ->values();
-
-        return Inertia::render('Cashflow', [
-            'income' => $flows->where('direction', 'income')->map->props->values(),
-            'expenses' => $flows->where('direction', 'expense')->map->props->values(),
-            'cashflow' => $fleet->cashflow($flows, $tax->monthlyRunRateTax($flows, Profile::for($request->user()))),
-            'income_by_category' => $byCategory('income'),
-            'expenses_by_category' => $byCategory('expense'),
-            'holdings' => $fleet->holdings($request->user())->map->only(['id', 'name'])->values(),
-            'transfers' => Transfer::query()->onlyOwnedBy($request->user())->inDefaultOrder()->with(['from.parent', 'to.parent'])->get()->map->props->values(),
-        ]);
+        return Inertia::render('Cashflow', $board->for($request->user()));
     }
 
     public function store(SaveFlowRequest $request): RedirectResponse

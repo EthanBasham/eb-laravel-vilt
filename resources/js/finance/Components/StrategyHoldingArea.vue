@@ -2,7 +2,7 @@
 import { router } from '@inertiajs/vue3';
 import { IconCopy, IconPencil, IconPlus, IconReplace, IconReportAnalytics, IconSparkles, IconTrash } from '@tabler/icons-vue';
 import { computed, ref, watch } from 'vue';
-import { chartColors, moneyBrief } from '../lib/format';
+import { colorOf, moneyBrief } from '../lib/format';
 
 /**
  * The holding area: conversion strategies that exist but are not in the
@@ -60,6 +60,13 @@ const projectionsInUse = computed(() => {
 });
 
 const kindsInUse = computed(() => Object.entries(props.kinds).filter(([key]) => props.held.some((strategy) => strategy.kind === key)));
+
+// A filter whose choice has just left the holding area — its last card was
+// added to the report — would show nothing while cards are still held.
+watch(() => props.held.map((strategy) => `${strategy.scenario_id}:${strategy.kind}`).join(), () => {
+    if (projection.value !== 'all' && !props.held.some((strategy) => strategy.scenario_id === projection.value)) projection.value = 'all';
+    if (kind.value !== 'all' && !props.held.some((strategy) => strategy.kind === kind.value)) kind.value = 'all';
+});
 
 // The cards picked, by id. Dropped when a card leaves the holding area or is
 // filtered out of sight, so nothing unseen is ever sent.
@@ -131,7 +138,7 @@ const remove = (strategy) => {
 const projectionColor = (scenarioId) => {
     const index = props.scenarios.findIndex((scenario) => scenario.id === scenarioId);
 
-    return index === -1 ? 'var(--color-fin-grey-400)' : chartColors[index % chartColors.length];
+    return index === -1 ? 'var(--color-fin-grey-400)' : colorOf(index);
 };
 
 // The settings worth a line on the card, blanks left out.

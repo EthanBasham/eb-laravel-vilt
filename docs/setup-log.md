@@ -5049,3 +5049,26 @@ opens in each year's dollars. Monte Carlo is in today's dollars under either set
 **Roth report opens in today's dollars** (2026-10-06, uncommitted). Reverses the default in the
 entry above at the user's request: the switch starts on "Today's dollars" unless the browser has
 "each year's" saved.
+
+**Finance review pass** (2026-10-06, uncommitted). A structure and calculation review of the whole
+toolset; the durable rules from it are in `.ai/rules/{controllers-finance,requests-finance,finance}.md`.
+- Structure: controller logic moved onto models (`Scenario::adjustFlow/adjustHolding/duplicate/
+  setRateForDirection`, `ConversionStrategy::createStarters/duplicate/replaceComparison`,
+  `WithdrawalStrategy`/`SocialSecurityStrategy::createStarters`, `Actual::record`, `Profile::saveFor`)
+  and into new boards (`HoldingBoard`, `CashflowBoard`, `SettingsBoard`). `FinanceRequest` is the base
+  for every finance form request. `OwnedModel::resolveRouteBinding()` scopes route binding to the
+  signed-in user; the per-action `isOwnedBy` checks were deliberately kept beside it.
+- Calculations changed: budget history counts actuals through the flow leaves; a scenario's
+  adjusted count includes items; "set every expense to" writes the group and hands items back to
+  it; holdings list by value; `Flow::plannedFor()` grows a later year's month; an undated one-time
+  flow is dated today; compound/projector/savings/goal "growth" compare like with like; IRMAA's
+  opening lookback includes the RMD; a spousal top-up is written as its own income flow.
+- Performance: `TaxCalculator` caches the additional deduction per status; `ScenarioBoard` resolves
+  the plan's years once per projection; Monte Carlo keeps only the summary keys it reports; the
+  deferred Monte Carlo request no longer rebuilds the conversion board.
+- Frontend: `useChartWidth`, `useStrategyBoard`, `StrategyPicker`, `.fin-pill`, `lib/input.js`,
+  `lib/scale.js` (was `composables/useNiceScale.js`), `percentSigned`/`signTone`/`colorOf` in
+  `lib/format.js`.
+- Not done, for the owner to decide: see the review summary given in the session (Social Security
+  taxation inside the retirement tools, 401(k) contributions not deducted from taxable wages, the
+  Overview and scenario net-worth projections disagreeing, the larger Vue extractions).

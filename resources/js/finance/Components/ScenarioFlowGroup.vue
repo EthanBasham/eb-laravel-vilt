@@ -3,7 +3,8 @@ import { router } from '@inertiajs/vue3';
 import { IconChevronDown } from '@tabler/icons-vue';
 import { ref } from 'vue';
 import ScenarioFlowRow from './ScenarioFlowRow.vue';
-import { money, moneyShort, percent, rateTone } from '../lib/format';
+import { money, moneyShort, percentSigned, rateTone } from '../lib/format';
+import { numberOrNull } from '../lib/input';
 
 /**
  * A compound flow inside a scenario — "Household expenses" and the items in
@@ -35,13 +36,7 @@ const saveRate = (rate) => {
     });
 };
 
-const setRate = (event) => {
-    const rate = Number(event.target.value);
-
-    saveRate(event.target.value === '' || Number.isNaN(rate) ? null : rate);
-};
-
-const signedRate = (value) => `${value > 0 ? '+' : ''}${percent(value)}`;
+const setRate = (event) => saveRate(numberOrNull(event));
 </script>
 
 <template>
@@ -53,7 +48,7 @@ const signedRate = (value) => `${value > 0 ? '+' : ''}${percent(value)}`;
                 <span v-if="flow.account_name" class="ml-2 whitespace-nowrap rounded-full bg-fin-navy-100 px-2 py-0.5 text-[11px] text-fin-navy-700">from {{ flow.account_name }}</span>
             </span>
 
-            <span v-if="flow.has_scenario_rate" class="whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium" :class="rateTone(flow.direction, flow.rate)">{{ signedRate(flow.rate) }} / yr</span>
+            <span v-if="flow.has_scenario_rate" class="whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium" :class="rateTone(flow.direction, flow.rate)">{{ percentSigned(flow.rate) }} / yr</span>
             <span v-if="flow.pinned_count" class="whitespace-nowrap rounded-full bg-fin-gold-100 px-2 py-0.5 text-[11px] font-medium text-fin-gold-600">
                 {{ flow.pinned_count }} {{ flow.pinned_count === 1 ? 'year' : 'years' }} by hand
             </span>

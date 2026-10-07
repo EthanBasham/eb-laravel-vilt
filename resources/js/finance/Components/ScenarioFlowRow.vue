@@ -3,7 +3,8 @@ import { router } from '@inertiajs/vue3';
 import { IconChevronDown } from '@tabler/icons-vue';
 import { computed, reactive, ref, watch } from 'vue';
 import YearSliderChart from './YearSliderChart.vue';
-import { money, moneyShort, percent, rateTone } from '../lib/format';
+import { money, moneyShort, percentSigned, rateTone } from '../lib/format';
+import { numberOrNull } from '../lib/input';
 
 /**
  * One income or expense inside a scenario: a row that opens onto its rate and
@@ -59,9 +60,7 @@ const save = () => {
 };
 
 const setRate = (event) => {
-    const rate = Number(event.target.value);
-
-    draft.rate = event.target.value === '' || Number.isNaN(rate) ? null : rate;
+    draft.rate = numberOrNull(event);
     save();
 };
 
@@ -111,7 +110,6 @@ const points = computed(() => props.flow.series.map((point) => {
 
 const pinnedCount = computed(() => points.value.filter((point) => point.is_pinned).length);
 const rate = computed(() => draft.rate ?? props.flow.own_rate);
-const signedRate = (value) => `${value > 0 ? '+' : ''}${percent(value)}`;
 </script>
 
 <template>
@@ -124,7 +122,7 @@ const signedRate = (value) => `${value > 0 ? '+' : ''}${percent(value)}`;
             </span>
 
             <span v-if="!flow.is_one_time" class="whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium" :class="rateTone(flow.direction, rate)">
-                {{ signedRate(rate) }} / yr
+                {{ percentSigned(rate) }} / yr
             </span>
             <span v-if="pinnedCount" class="whitespace-nowrap rounded-full bg-fin-gold-100 px-2 py-0.5 text-[11px] font-medium text-fin-gold-600">
                 {{ pinnedCount }} {{ pinnedCount === 1 ? 'year' : 'years' }} by hand
@@ -148,7 +146,7 @@ const signedRate = (value) => `${value > 0 ? '+' : ''}${percent(value)}`;
                 <p v-else class="text-sm text-fin-grey-600">A one-time amount: it lands in its own year, and no rate applies. Move it by hand below.</p>
 
                 <button v-if="draft.rate !== null" type="button" class="fin-btn fin-btn-quiet" @click="useOwnRate">
-                    Use its own rate ({{ signedRate(flow.own_rate) }})
+                    Use its own rate ({{ percentSigned(flow.own_rate) }})
                 </button>
                 <p v-else-if="!flow.is_one_time" class="pb-2 text-xs text-fin-grey-500">
                     Its own rate, from Income &amp; expenses. A negative rate is a steady decrease.
