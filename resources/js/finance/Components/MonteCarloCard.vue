@@ -174,7 +174,7 @@ const successTone = (rate) => {
                 </tbody>
             </table>
             <p class="border-t border-fin-grey-100 px-5 py-3 text-xs text-fin-grey-500 printing:px-0">
-                Ranges run from a bad market (10th percentile) to a good one (90th). Returns and inflation are drawn from a bell curve around each strategy's own rates, so they understate how lopsided real crashes are. Today's dollars, as above.
+                Ranges run from a bad market (10th percentile) to a good one (90th). Returns and inflation are drawn from a bell curve around each strategy's own rates, so they understate how lopsided real crashes are. These are always in today's dollars, whichever the rest of the report is in: each market has its own inflation, so only one year's prices let them be compared.
             </p>
         </div>
     </Card>

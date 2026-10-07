@@ -5023,3 +5023,29 @@ holding area. Side by side has a "Clear Comparison" button (`DELETE
 retirement/strategies/comparison`), which holds every compared strategy and removes none. The
 projection label on a holding-area card takes the colour that projection has on the Projections
 & scenarios page (the chart colour at its position in the default order; "as entered" is grey).
+
+**Roth report in each year's own dollars** (2026-10-06, uncommitted). Reverses the earlier
+"everything in today's dollars" decision for the Roth conversions tab, at the user's request, to
+try how it reads. `ConversionBoard::simulate()` no longer deflates its rows or summary; each row
+carries `bracket_lines` and `irmaa_lines` (the thresholds of that year, the IRMAA ones two years
+on), and `ThresholdChart` draws them as rising lines rather than flat ones.
+- The Monte Carlo runs still use today's dollars (`simulate(..., inTodaysDollars: true)`): each
+  market has its own inflation, so nominal figures cannot be ranked across them. The fan chart's
+  steady line reads `total_balance_today` to match. The page says so in both places.
+- Heir tax and the savings-gains tax are still worked out in today's dollars on today's tables,
+  then raised to the price level the plan ends at.
+- Inputs are unchanged: a fixed conversion amount and a flat tax amount are still entered in
+  today's dollars.
+- Known cost: Side by side now compares nominal totals, so two strategies with different
+  inflation rates are no longer like for like. The Withdrawals tab was not touched.
+
+**Roth report: a switch between the two dollars** (2026-10-06, uncommitted). The user liked parts
+of each, so the page header now has "Each year's dollars / Today's dollars". `ConversionBoard::for()`
+sends every compared strategy worked out both ways (`rows`/`summary`, and the same under `today`)
+and `Retirement.vue` only picks between them, so switching is instant and needs no request. The
+choice is kept in the browser's localStorage (`finance.roth.dollars`), not on the profile; it
+opens in each year's dollars. Monte Carlo is in today's dollars under either setting.
+
+**Roth report opens in today's dollars** (2026-10-06, uncommitted). Reverses the default in the
+entry above at the user's request: the switch starts on "Today's dollars" unless the browser has
+"each year's" saved.

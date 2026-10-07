@@ -3,7 +3,7 @@ import { router } from '@inertiajs/vue3';
 import { IconChevronDown } from '@tabler/icons-vue';
 import { ref } from 'vue';
 import ScenarioFlowRow from './ScenarioFlowRow.vue';
-import { money, moneyShort, percent } from '../lib/format';
+import { money, moneyShort, percent, rateTone } from '../lib/format';
 
 /**
  * A compound flow inside a scenario — "Household expenses" and the items in
@@ -53,7 +53,7 @@ const signedRate = (value) => `${value > 0 ? '+' : ''}${percent(value)}`;
                 <span v-if="flow.account_name" class="ml-2 whitespace-nowrap rounded-full bg-fin-navy-100 px-2 py-0.5 text-[11px] text-fin-navy-700">from {{ flow.account_name }}</span>
             </span>
 
-            <span v-if="flow.has_scenario_rate" class="whitespace-nowrap rounded-full bg-fin-green-100 px-2 py-0.5 text-[11px] font-medium text-fin-green-700">{{ signedRate(flow.rate) }} / yr</span>
+            <span v-if="flow.has_scenario_rate" class="whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium" :class="rateTone(flow.direction, flow.rate)">{{ signedRate(flow.rate) }} / yr</span>
             <span v-if="flow.pinned_count" class="whitespace-nowrap rounded-full bg-fin-gold-100 px-2 py-0.5 text-[11px] font-medium text-fin-gold-600">
                 {{ flow.pinned_count }} {{ flow.pinned_count === 1 ? 'year' : 'years' }} by hand
             </span>

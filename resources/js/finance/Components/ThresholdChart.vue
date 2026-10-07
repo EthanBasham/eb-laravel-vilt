@@ -7,9 +7,10 @@ import { money, moneyShort } from '../lib/format';
  * One figure a year, drawn against a ladder of thresholds: a year's income
  * against the tops of the tax brackets, or against the IRMAA tiers.
  *
- * The thresholds are flat lines because everything arrives in today's
- * dollars. The bands between them are shaded alternately so it is plain which
- * one a year sits in, and each line is named at the right-hand edge.
+ * Every figure is in its own year's dollars, so a threshold that rises with
+ * prices is a line that climbs: each carries a value for every year. The
+ * bands between them are shaded alternately so it is plain which one a year
+ * sits in, and each line is named at the right-hand edge.
  *
  * Each point may carry `before`: the figure without the thing being studied
  * (the conversion). It is drawn dashed, and the gap up to the solid line is
@@ -18,8 +19,8 @@ import { money, moneyShort } from '../lib/format';
  *
  * Geometry only: every figure is worked out in PHP.
  *
- * `points` is `[{ x, y, before?, note? }]`; `thresholds` is `[{ label, value }]`,
- * lowest first.
+ * `points` is `[{ x, y, before?, note? }]`; `thresholds` is
+ * `[{ label, values }]`, lowest first, with one of `values` for each point.
  */
 const props = defineProps({
     points: { type: Array, required: true },
@@ -54,12 +55,14 @@ onBeforeUnmount(() => observer?.disconnect());
  */
 const scale = computed(() => {
     const peak = Math.max(0, ...props.points.map((point) => point.y));
-    const next = props.thresholds.find((threshold) => threshold.value > peak);
+    const next = props.thresholds.find((threshold) => Math.max(...threshold.values) > peak);
 
-    return niceScale(0, Math.max(peak * 1.08, next ? next.value * 1.04 : 0, 1000));
+    return niceScale(0, Math.max(peak * 1.08, next ? Math.max(...next.values) * 1.04 : 0, 1000));
 });
 
-const shown = computed(() => props.thresholds.filter((threshold) => threshold.value <= scale.value.high));
+// A line that starts on the chart is drawn, and stops at the top if it
+// climbs off it.
+const shown = computed(() => props.thresholds.filter((threshold) => threshold.values[0] <= scale.value.high));
 
 // Which lines get their name printed: all of them, except one that would sit
 // on top of the name below it (the 0% and 10% brackets are a few pixels apart
@@ -68,7 +71,7 @@ const named = computed(() => {
     let last = Infinity;
 
     return shown.value.filter((threshold) => {
-        const y = py(threshold.value);
+        const y = py(threshold.values[threshold.values.length - 1]);
         const clear = last - y >= 11;
 
         if (clear) last = y;
@@ -77,12 +80,21 @@ const named = computed(() => {
     }).map((threshold) => threshold.label);
 });
 
-// The bands between the lines, bottom to top, for the alternate shading.
+// The bands between the lines, bottom to top, for the alternate shading:
+// each runs from the line below it to the line above, year by year.
 const bands = computed(() => {
-    const edges = [0, ...shown.value.map((threshold) => threshold.value), scale.value.high];
+    const level = (value) => props.points.map(() => value);
+    const edges = [level(0), ...shown.value.map((threshold) => threshold.values), level(scale.value.high)];
+    const along = (values, reversed = false) => {
+        const pairs = values.map((value, index) => `${px(props.points[index].x).toFixed(1)},${py(value).toFixed(1)}`);
 
-    return edges.slice(0, -1).map((low, index) => ({ low, high: edges[index + 1], shaded: index % 2 === 1 }));
+        return (reversed ? pairs.reverse() : pairs).join(' L');
+    };
+
+    return edges.slice(0, -1).map((low, index) => ({ key: index, path: `M${along(low)} L${along(edges[index + 1], true)} Z`, shaded: index % 2 === 1 }));
 });
+
+const thresholdPath = (threshold) => `M${threshold.values.map((value, index) => `${px(props.points[index].x).toFixed(1)},${py(value).toFixed(1)}`).join(' L')}`;
 
 const plotWidth = computed(() => width.value - pad.left - pad.right);
 const plotHeight = computed(() => props.height - pad.top - pad.bottom);
@@ -130,9 +142,8 @@ const hovered = computed(() => {
 <template>
     <div ref="frame" class="relative" @mousemove="onMove" @mouseleave="hoverX = null">
         <svg v-if="points.length" :width="width" :height="height" role="img" :aria-label="`${label} each year against ${thresholds.map((threshold) => threshold.label).join(', ')}`">
-            <rect
-                v-for="band in bands" :key="band.low"
-                :x="pad.left" :width="plotWidth" :y="py(band.high)" :height="py(band.low) - py(band.high)"
+            <path
+                v-for="band in bands" :key="band.key" :d="band.path"
                 :fill="band.shaded ? 'var(--color-fin-cream-200)' : 'var(--color-fin-cream-50)'" fill-opacity="0.7"
             />
 
@@ -141,8 +152,8 @@ const hovered = computed(() => {
             </text>
 
             <g v-for="threshold in shown" :key="threshold.label">
-                <line :x1="pad.left" :x2="width - pad.right" :y1="py(threshold.value)" :y2="py(threshold.value)" stroke="var(--color-fin-grey-400)" stroke-width="1" stroke-dasharray="2 3" />
-                <text v-if="named.includes(threshold.label)" :x="width - pad.right + 6" :y="py(threshold.value) + 4" class="fill-fin-grey-600 text-[10px] font-medium">{{ threshold.label }}</text>
+                <path :d="thresholdPath(threshold)" fill="none" stroke="var(--color-fin-grey-400)" stroke-width="1" stroke-dasharray="2 3" />
+                <text v-if="named.includes(threshold.label)" :x="width - pad.right + 6" :y="py(threshold.values[threshold.values.length - 1]) + 4" class="fill-fin-grey-600 text-[10px] font-medium">{{ threshold.label }}</text>
             </g>
 
             <text v-for="point in xLabels" :key="point.x" :x="px(point.x)" :y="height - 8" text-anchor="middle" class="fill-fin-grey-500 text-[11px] tabular-nums">

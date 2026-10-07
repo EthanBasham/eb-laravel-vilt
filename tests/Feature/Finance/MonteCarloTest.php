@@ -57,7 +57,7 @@ it('moves the projected expenses with a market\'s own inflation', function () {
     ['world' => $world, 'years' => $years] = $board->context($user);
     $steps = 13;
 
-    $rows = $board->simulate($strategy, $world, $years[$strategy->id], ['shocks' => array_fill(0, $steps, 0.0), 'inflation' => array_fill(0, $steps, 10.0)])['rows'];
+    $rows = $board->simulate($strategy, $world, $years[$strategy->id], ['shocks' => array_fill(0, $steps, 0.0), 'inflation' => array_fill(0, $steps, 10.0)], inTodaysDollars: true)['rows'];
 
     expect($rows[1]['expenses'])->toEqual(60_000)
         ->and($rows[5]['expenses'])->toEqual(60_000);
@@ -65,13 +65,16 @@ it('moves the projected expenses with a market\'s own inflation', function () {
 
 /**
  * With no volatility every market is the steady one, so every run is the
- * single run the rest of the page shows, and every percentile agrees with it.
+ * single run the rest of the page shows — in today's dollars, as the runs
+ * are — and every percentile agrees with it.
  */
 it('agrees with the steady plan when the markets do not vary', function () {
     $user = monteCarloRetiree();
     $strategy = ConversionStrategy::factory()->ofKind('even')->create(['user_id' => $user->id]);
 
-    $steady = collect(app(ConversionBoard::class)->for($user)['strategies'])->firstWhere('id', $strategy->id);
+    $board = app(ConversionBoard::class);
+    ['world' => $world, 'years' => $years] = $board->context($user);
+    $steady = $board->simulate($strategy, $world, $years[$strategy->id], inTodaysDollars: true);
     $results = monteCarlo($user, ['runs' => 5, 'return_volatility' => 0, 'inflation_volatility' => 0])['strategies'][$strategy->id];
 
     expect($results['success_rate'])->toEqual(100)

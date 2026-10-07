@@ -1,7 +1,7 @@
 <script setup>
 import { Deferred, router, usePage } from '@inertiajs/vue3';
 import { IconArchive, IconCopy, IconFileTypePdf, IconPencil, IconPlus, IconSparkles } from '@tabler/icons-vue';
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import Card from '../Components/Card.vue';
 import ConversionStrategyForm from '../Components/ConversionStrategyForm.vue';
 import EmptyState from '../Components/EmptyState.vue';
@@ -92,7 +92,8 @@ const fan = computed(() => {
 
     return {
         band: result.balances.map((point) => ({ x: point.age, p10: point.p10, p50: point.p50, p90: point.p90 })),
-        line: selected.value.rows.map((row) => ({ x: row.age, y: row.total_balance })),
+        // The runs are in today's dollars, so the line over them is too.
+        line: selected.value.rows.map((row) => ({ x: row.age, y: row.total_balance_today })),
         runs: props.monte_carlo.results.runs,
     };
 });
@@ -138,12 +139,43 @@ const printReport = async () => {
 };
 
 const selectedIndex = computed(() => props.strategies.findIndex((strategy) => strategy.id === selectedId.value));
-const selected = computed(() => props.strategies[selectedIndex.value] ?? null);
+
+/*
+ * Which dollars the report is in: each year's own, or all of them brought
+ * back to today's prices. Every strategy arrives worked out both ways, so
+ * this only picks; the choice is remembered in this browser.
+ */
+const DOLLARS_KEY = 'finance.roth.dollars';
+const inTodaysDollars = ref(true);
+
+onMounted(() => {
+    try {
+        inTodaysDollars.value = window.localStorage.getItem(DOLLARS_KEY) !== 'each_year';
+    } catch {
+        // No storage: the report opens in today's dollars.
+    }
+});
+
+const showDollars = (today) => {
+    inTodaysDollars.value = today;
+
+    try {
+        window.localStorage.setItem(DOLLARS_KEY, today ? 'today' : 'each_year');
+    } catch {
+        // The switch still works for this visit.
+    }
+};
+
+const dollars = computed(() => (inTodaysDollars.value ? 'in today\'s dollars' : 'in the dollars of each year, not today\'s'));
+
+// The strategies with the figures of whichever dollars are being shown.
+const reported = computed(() => props.strategies.map((strategy) => (inTodaysDollars.value ? { ...strategy, ...strategy.today } : strategy)));
+const selected = computed(() => reported.value[selectedIndex.value] ?? null);
 
 const age = (value) => `Age ${value}`;
 
 // One line per strategy, of whichever figure in its rows.
-const lines = (field) => props.strategies.map((strategy, index) => ({
+const lines = (field) => reported.value.map((strategy, index) => ({
     label: strategy.label,
     color: colorOf(index),
     points: strategy.rows.map((row) => ({ x: row.age, y: row[field] })),
@@ -157,7 +189,12 @@ const tierName = (tier) => (tier === 0 ? 'no surcharge' : `tier ${tier}`);
  * just over a line named "32%" reads as being in the 32% bracket, when that
  * line is where 32% ends.
  */
-const startsAt = (lines) => lines.map((line) => ({ ...line, label: `${line.above} starts` }));
+const startsAt = (lines, field) => lines.map((line, position) => ({
+    label: `${line.above} starts`,
+    // Where the line stands in each year of the strategy looked at: it rises
+    // with that strategy's inflation rate.
+    values: selected.value.rows.map((row) => row[field][position]),
+}));
 
 const bracketPoints = computed(() => selected.value.rows.map((row) => ({
     x: row.age,
@@ -206,7 +243,7 @@ const figures = [
 const bestOf = (figure) => {
     if (!figure.best || props.strategies.length < 2) return null;
 
-    const values = props.strategies.map((strategy) => strategy.summary[figure.key]);
+    const values = reported.value.map((strategy) => strategy.summary[figure.key]);
 
     return figure.best === 'low' ? Math.min(...values) : Math.max(...values);
 };
@@ -230,6 +267,17 @@ const convertsWhen = (strategy) => {
 <template>
     <FinShell title="Retirement strategizer" subtitle="Build strategies for moving traditional money to Roth, then report on one, or compare several, by what each does to your tax, your Medicare premiums and what is left.">
         <template #actions>
+            <div v-if="strategies.length" class="flex gap-1.5" role="group" aria-label="Dollars the report is in">
+                <button
+                    v-for="choice in [{ today: true, label: 'Today\'s dollars' }, { today: false, label: 'Each year\'s dollars' }]" :key="choice.label" type="button"
+                    class="rounded-full border px-3 py-1 text-xs font-medium"
+                    :class="choice.today === inTodaysDollars ? 'border-fin-charcoal bg-fin-charcoal text-fin-white' : 'border-fin-grey-300 bg-fin-white text-fin-charcoal hover:bg-fin-cream-100'"
+                    :aria-pressed="choice.today === inTodaysDollars" @click="showDollars(choice.today)"
+                >
+                    {{ choice.label }}
+                </button>
+            </div>
+            <span v-if="strategies.length" class="h-6 w-px bg-fin-grey-300" aria-hidden="true" />
             <button type="button" class="fin-btn fin-btn-primary" @click="build"><IconPlus :size="16" /> Strategy</button>
             <span class="h-6 w-px bg-fin-grey-300" aria-hidden="true" />
             <form class="flex flex-wrap items-center gap-2" @submit.prevent="addSet">
@@ -277,7 +325,7 @@ const convertsWhen = (strategy) => {
 
             <template v-if="strategies.length">
                 <!-- One strategy: its figures as tiles, with nothing to be best of. -->
-                <Card v-if="isSingle" :title="selected.label" :subtitle="`${[selected.kind_label, convertsWhen(selected)].filter(Boolean).join(' ')} · ${assumptions(selected)}. Over the whole plan, in today's dollars.`">
+                <Card v-if="isSingle" :title="selected.label" :subtitle="`${[selected.kind_label, convertsWhen(selected)].filter(Boolean).join(' ')} · ${assumptions(selected)}. Over the whole plan, ${dollars}.`">
                     <template #actions>
                         <button type="button" class="fin-btn fin-btn-quiet" @click="printReport"><IconFileTypePdf :size="16" /> Export PDF</button>
                         <button type="button" class="fin-btn fin-btn-quiet" @click="edit(selected)"><IconPencil :size="16" /> Edit</button>
@@ -303,7 +351,7 @@ const convertsWhen = (strategy) => {
                     </dl>
                 </Card>
 
-                <Card v-else title="Side by side" :subtitle="`Over the whole plan, in today's dollars. A green figure is the best in its row. ${comparison.count} of at most ${comparison.max} in the report.`" flush>
+                <Card v-else title="Side by side" :subtitle="`Over the whole plan, ${dollars}. A green figure is the best in its row. ${comparison.count} of at most ${comparison.max} in the report.`" flush>
                     <template #actions>
                         <button type="button" class="fin-btn fin-btn-quiet" @click="printReport"><IconFileTypePdf :size="16" /> Export PDF</button>
                         <button type="button" class="fin-btn fin-btn-quiet" @click="clearComparison"><IconArchive :size="16" /> Clear Report</button>
@@ -336,7 +384,7 @@ const convertsWhen = (strategy) => {
                                         {{ figure.label }}
                                     </th>
                                     <td
-                                        v-for="strategy in strategies" :key="strategy.id" class="whitespace-nowrap px-3 py-2.5 text-right"
+                                        v-for="strategy in reported" :key="strategy.id" class="whitespace-nowrap px-3 py-2.5 text-right"
                                         :class="[figure.strong ? 'font-semibold' : '', strategy.summary[figure.key] === bestOf(figure) ? 'text-fin-green-600' : 'text-fin-black']"
                                         :title="money(strategy.summary[figure.key])"
                                     >
@@ -346,7 +394,7 @@ const convertsWhen = (strategy) => {
                                 </tr>
                                 <tr>
                                     <th scope="row" class="sticky left-0 whitespace-nowrap bg-fin-white px-5 py-2.5 text-left font-medium text-fin-charcoal">Highest bracket reached</th>
-                                    <td v-for="strategy in strategies" :key="strategy.id" class="px-3 py-2.5 text-right text-fin-black">
+                                    <td v-for="strategy in reported" :key="strategy.id" class="px-3 py-2.5 text-right text-fin-black">
                                         {{ strategy.summary.peak_marginal_rate }}%
                                         <span v-if="strategy.summary.short_at_age" class="block text-[11px] font-semibold text-fin-red-600">Money runs out at {{ strategy.summary.short_at_age }}</span>
                                     </td>
@@ -402,22 +450,24 @@ const convertsWhen = (strategy) => {
                             <section>
                                 <h3 class="text-sm font-semibold text-fin-black">Income against the tax brackets</h3>
                                 <p class="mb-3 mt-0.5 text-xs text-fin-grey-500">
-                                    Taxable ordinary income — the projection's, plus RMDs, conversions and withdrawals, less the standard deduction — against the federal brackets; each line is where the bracket named on it begins. The dashed line is the year had it not converted; the gold between is what converting added.
+                                    Taxable ordinary income — the projection's, plus RMDs, conversions and withdrawals, less the standard deduction — against the federal brackets; each line is where the bracket named on it begins{{ inTodaysDollars ? '' : ', rising each year with the strategy\'s inflation rate' }}. The dashed line is the year had it not converted; the gold between is what converting added.
                                 </p>
-                                <ThresholdChart :points="bracketPoints" :thresholds="startsAt(brackets)" :color="colorOf(selectedIndex)" :format-x="age" label="Taxable income" />
+                                <ThresholdChart :points="bracketPoints" :thresholds="startsAt(brackets, 'bracket_lines')" :color="colorOf(selectedIndex)" :format-x="age" label="Taxable income" />
                             </section>
                             <section>
                                 <h3 class="text-sm font-semibold text-fin-black">Income against the IRMAA tiers</h3>
                                 <p class="mb-3 mt-0.5 text-xs text-fin-grey-500">
-                                    Each line is where the tier named on it begins. Crossing one raises Medicare premiums two years later, and by the whole step, not a slice. Only years from 63 on can cost anything. Income is shown in the prices of the year it sets the premium for, so it reads against today's tiers.
+                                    Each line is where the tier named on it begins. Crossing one raises Medicare premiums two years later, and by the whole step, not a slice. Only years from 63 on can cost anything.
+                                    <template v-if="inTodaysDollars">Income is shown in the prices of the year it sets the premium for, so it reads against today's tiers.</template>
+                                    <template v-else>The lines are the tiers of the year the income sets the premium for, two years on, raised by the strategy's inflation rate.</template>
                                 </p>
-                                <ThresholdChart :points="irmaaPoints" :thresholds="startsAt(irmaa_tiers)" :color="colorOf(selectedIndex)" :format-x="age" label="Income for IRMAA" />
+                                <ThresholdChart :points="irmaaPoints" :thresholds="startsAt(irmaa_tiers, 'irmaa_lines')" :color="colorOf(selectedIndex)" :format-x="age" label="Income for IRMAA" />
                             </section>
                         </div>
 
                         <section v-if="fan" class="fin-keep">
                             <h3 class="text-sm font-semibold text-fin-black">Everything left, across {{ fan.runs }} markets</h3>
-                            <p class="mb-3 mt-0.5 text-xs text-fin-grey-500">Traditional, Roth and taxable together, in today's dollars. The band is where the middle 80% of markets land.</p>
+                            <p class="mb-3 mt-0.5 text-xs text-fin-grey-500">Traditional, Roth and taxable together. Always in today's dollars, whichever the rest of the report is in: each market has its own inflation, so only one year's prices let them be set side by side. The band is where the middle 80% of markets land.</p>
                             <FanChart :band="fan.band" :line="fan.line" :color="colorOf(selectedIndex)" :format-x="age" />
                         </section>
 

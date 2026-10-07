@@ -2,6 +2,7 @@
 
 namespace App\Services\Finance;
 
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use App\Models\Finance\ConversionStrategy;
 use App\Models\Finance\Holding;
@@ -65,8 +66,14 @@ use Closure;
  *    what was left unpaid (`leftover_tax`). The Roth five-year rules are
  *    ignored.
  *
- * Every figure returned is in today's dollars, deflated by the strategy's own
- * inflation rate. That is what lets a tax bracket be one flat line on a chart.
+ * Every figure returned is in the dollars of the year it belongs to, as the
+ * projection it builds on is — so the brackets and IRMAA tiers a year is
+ * charted against rise year by year, and each row carries its own
+ * (`bracket_lines`, `irmaa_lines`). Until 2026-10-06 everything was deflated
+ * to today's dollars instead; simulate() still can (`$inTodaysDollars`). The
+ * page is given both and switches between them, and the Monte Carlo runs are
+ * always in today's, since their markets each have their own inflation and
+ * can only be set side by side in one year's prices.
  */
 class ConversionBoard
 {
@@ -144,6 +151,9 @@ class ConversionBoard
             'strategies' => $strategies->map(fn (ConversionStrategy $strategy): array => [
                 ...$strategy->props,
                 ...$this->simulate($strategy, $world, $years[$strategy->id]),
+                // The same run in today's dollars, for the page's switch
+                // between the two.
+                'today' => Arr::only($this->simulate($strategy, $world, $years[$strategy->id], inTodaysDollars: true), ['rows', 'summary']),
             ])->values(),
             // The holding area: settings only, nothing worked out.
             'held' => ConversionStrategy::query()->onlyOwnedBy($user)->notCompared()->inDefaultOrder()->with('scenario')->get()
@@ -272,9 +282,10 @@ class ConversionBoard
      * @param  array<string, mixed>  $world  What for() worked out once: the profile, ages, opening balances, contributions and tax tables.
      * @param  array<int, array{year: int, age: int, income: float, expenses: float, taxed: array<string, float>}>  $years  The projection, keyed by year.
      * @param  array{shocks: list<float>, inflation: list<float>}|null  $path  One market: for each year of the plan, in order, how many points the return lands above or below each bucket's average, and the inflation rate (percent). Null is the steady market the strategy's own rates describe.
+     * @param  bool  $inTodaysDollars  Deflate every figure to today's prices, rather than leave each in its own year's.
      * @return array{assumptions: array<string, mixed>, rows: list<array<string, float|int|null>>, summary: array<string, float|int|null>}
      */
-    public function simulate(ConversionStrategy $strategy, array $world, array $years, ?array $path = null): array
+    public function simulate(ConversionStrategy $strategy, array $world, array $years, ?array $path = null, bool $inTodaysDollars = false): array
     {
         ['status' => $status, 'ages' => $ages, 'federal' => $federal, 'tax_on' => $taxOn, 'divisors' => $divisors] = $world;
 
@@ -284,6 +295,8 @@ class ConversionBoard
         $taxations = config('finance.flow_taxations');
         $oldestDivisor = array_key_last($divisors);
         $contributions = $world['contributions'];
+        $bracketCeilings = array_column($this->bracketLines($world), 'value');
+        $irmaaCeilings = array_column($this->irmaaLines($world), 'value');
 
         ['deferred' => $traditional, 'free' => $roth, 'taxable' => $taxable] = $world['balances'];
 
@@ -499,52 +512,65 @@ class ConversionBoard
             $deduction = $federal->deduction($status, $index, $age);
             $magi[$year] = $bracketIncome + $gains;
 
-            // Year-end balances are deflated by the *next* year's index,
-            // since that is the price level they will be spent at.
+            // In today's dollars, year-end balances are deflated by the
+            // *next* year's index, since that is the price level they will
+            // be spent at.
             $endIndex = $index * $inflation;
+
+            // What each figure is divided by to be shown: nothing, unless
+            // today's dollars were asked for.
+            $level = $inTodaysDollars ? $index : 1.0;
+            $irmaaLevel = $inTodaysDollars ? $irmaaIndex : 1.0;
+            $endLevel = $inTodaysDollars ? $endIndex : 1.0;
 
             $rows[] = [
                 'age' => $age,
                 'year' => $year,
-                'income' => round($cashIncome / $index),
-                'expenses' => round($expenses / $index),
-                'rmd' => round($rmd / $index),
-                'conversion' => round($conversion / $index),
-                'withdrawal' => round($fromTraditional / $index),
+                'income' => round($cashIncome / $level),
+                'expenses' => round($expenses / $level),
+                'rmd' => round($rmd / $level),
+                'conversion' => round($conversion / $level),
+                'withdrawal' => round($fromTraditional / $level),
                 // Ordinary income before the deduction, and taxable income
                 // after it — what the brackets are read against — with and
                 // without the conversion, so a chart can show what the
                 // conversion did.
-                'bracket_income' => round($bracketIncome / $index),
-                'taxable_income' => round(max(0.0, $bracketIncome - $deduction) / $index),
-                'taxable_income_before' => round(max(0.0, $incomeBefore - $deduction) / $index),
+                'bracket_income' => round($bracketIncome / $level),
+                'taxable_income' => round(max(0.0, $bracketIncome - $deduction) / $level),
+                'taxable_income_before' => round(max(0.0, $incomeBefore - $deduction) / $level),
                 // The bracket the year's last dollar is taxed in. Asked of a
                 // dollar less, because marginalRate() gives the rate on the
                 // *next* dollar, and a year filled exactly to the top of the
                 // 35% bracket would otherwise read as 37%.
                 'marginal_rate' => $federal->marginalRate(max(0.0, $bracketIncome - 1), $status, $index, $age),
-                // What the IRMAA tiers are read against, in the prices of the
-                // year whose premium it sets, two years on, so it can be set
-                // against today's tiers. `irmaa` is the surcharge paid this
-                // year.
-                'magi' => round($magi[$year] / $irmaaIndex),
-                'magi_before' => round(($incomeBefore + $gains) / $irmaaIndex),
+                // What the IRMAA tiers are read against: the tiers of the
+                // year whose premium it sets, two years on (`irmaa_lines`).
+                // `irmaa` is the surcharge paid this year.
+                'magi' => round($magi[$year] / $irmaaLevel),
+                'magi_before' => round(($incomeBefore + $gains) / $irmaaLevel),
                 'magi_tier' => $this->irmaaTier($magi[$year] / $irmaaIndex, $world['irmaa']),
                 'irmaa_tier' => $irmaaTier,
-                'irmaa' => round($irmaa / $index),
-                'tax' => round($tax / $index),
+                'irmaa' => round($irmaa / $level),
+                'tax' => round($tax / $level),
                 // Of that, what the conversion alone added, how much of it
                 // came out of the converted money, and the early-withdrawal
                 // penalty, if any.
-                'conversion_tax' => round($conversionTax / $index),
-                'conversion_tax_withheld' => round($withheld / $index),
-                'penalty' => round($penalty / $index),
-                'tax_and_irmaa' => round($tax / $index) + round($irmaa / $index),
-                'traditional' => round($traditional / $endIndex),
-                'roth' => round($roth / $endIndex),
-                'taxable' => round($taxable / $endIndex),
-                'retirement_balance' => round($traditional / $endIndex) + round($roth / $endIndex),
-                'total_balance' => round($traditional / $endIndex) + round($roth / $endIndex) + round($taxable / $endIndex),
+                'conversion_tax' => round($conversionTax / $level),
+                'conversion_tax_withheld' => round($withheld / $level),
+                'penalty' => round($penalty / $level),
+                'tax_and_irmaa' => round($tax / $level) + round($irmaa / $level),
+                'traditional' => round($traditional / $endLevel),
+                'roth' => round($roth / $endLevel),
+                'taxable' => round($taxable / $endLevel),
+                'retirement_balance' => round($traditional / $endLevel) + round($roth / $endLevel),
+                'total_balance' => round($traditional / $endLevel) + round($roth / $endLevel) + round($taxable / $endLevel),
+                // The same in today's dollars whatever the rest is in, to be
+                // drawn over the Monte Carlo runs' spread.
+                'total_balance_today' => round($traditional / $endIndex) + round($roth / $endIndex) + round($taxable / $endIndex),
+                // Where each bracket and each IRMAA tier tops out this year,
+                // in the order of bracketLines() and irmaaLines().
+                'bracket_lines' => array_map(fn (float $ceiling): float => round($ceiling * $index / $level), $bracketCeilings),
+                'irmaa_lines' => array_map(fn (float $ceiling): float => round($ceiling * $irmaaIndex / $irmaaLevel), $irmaaCeilings),
             ];
 
             $index = $endIndex;
@@ -554,11 +580,16 @@ class ConversionBoard
         $last = $rows[array_key_last($rows)];
         $lifetimeTax = array_sum(array_column($rows, 'tax'));
         $lifetimeIrmaa = array_sum(array_column($rows, 'irmaa'));
-        $heirTax = round($this->heirTax($strategy, $last['traditional']));
-        // The growth still sitting untaxed in the taxable bucket, in
-        // today's dollars. A loss is no gain, not a negative one.
-        $taxableGain = round(max(0.0, $taxable - $basis) / $index);
-        $gainsTax = round($this->gainsTax($world, $taxableGain, $finalIncome));
+        // The two taxes still owed are worked out in today's dollars, on
+        // today's tables, and then raised to the prices the plan ends at —
+        // unless today's dollars are what was asked for.
+        $endLevel = $inTodaysDollars ? 1.0 : $index;
+        $heirTax = round($this->heirTax($strategy, round($traditional / $index)) * $endLevel);
+        // The growth still sitting untaxed in the taxable bucket. A loss is
+        // no gain, not a negative one.
+        $gainToday = round(max(0.0, $taxable - $basis) / $index);
+        $taxableGain = round($gainToday * $endLevel);
+        $gainsTax = round(round($this->gainsTax($world, $gainToday, $finalIncome)) * $endLevel);
         $endingBalance = $last['traditional'] + $last['roth'] + $last['taxable'];
 
         return [

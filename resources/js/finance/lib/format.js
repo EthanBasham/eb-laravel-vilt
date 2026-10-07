@@ -46,6 +46,23 @@ export const moneySigned = (value) => {
 /** A rate as it is stored: 4.25 reads "4.25%". */
 export const percent = (value, digits = 2) => (missing(value) ? '—' : `${plain.format(Number(value).toFixed(digits))}%`);
 
+/**
+ * The pill colours for a yearly rate: green when it moves the plan in your
+ * favour — an income or an asset rising, an expense or a debt's interest
+ * falling — red when it moves against, and grey when it does not move at all.
+ *
+ * `kind` is a flow's direction or a holding's side.
+ */
+export const rateTone = (kind, rate) => {
+    if (missing(rate) || Number(rate) === 0) return 'bg-fin-grey-100 text-fin-grey-600';
+
+    if ((Number(rate) > 0) === ['income', 'asset'].includes(kind)) {
+        return 'bg-fin-green-100 text-fin-green-700';
+    }
+
+    return 'bg-fin-red-100 text-fin-red-600';
+};
+
 export const number = (value) => (missing(value) ? '—' : plain.format(value));
 
 /**

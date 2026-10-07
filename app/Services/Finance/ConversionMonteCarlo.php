@@ -152,7 +152,9 @@ class ConversionMonteCarlo
                     'inflation' => array_map(fn (float $score): float => max(self::WORST_INFLATION, $inflation + $settings->inflation_volatility * $score), $inflationScores),
                 ];
 
-                ['rows' => $rows, 'summary' => $summary] = $this->board->simulate($strategy, $world, $years[$strategy->id], $path);
+                // In today's dollars: each market has its own inflation, so
+                // only one year's prices let them be ranked against each other.
+                ['rows' => $rows, 'summary' => $summary] = $this->board->simulate($strategy, $world, $years[$strategy->id], $path, inTodaysDollars: true);
 
                 $outcomes[$strategy->id][$run] = [
                     'summary' => $summary,

@@ -112,8 +112,7 @@ it('converts the same amount each year, then whatever is left', function () {
 it('holds a fixed amount in today\'s dollars, rising with the strategy\'s inflation', function () {
     $plan = runStrategy(conversionRetiree(), 'fixed', ['conversion_amount' => 300_000, 'inflation_rate' => 5]);
 
-    // $300,000, $315,000 and $330,750 as written on the day.
-    expect(collect($plan['rows'])->whereBetween('age', [68, 70])->pluck('conversion')->all())->toEqual([300_000, 300_000, 300_000])
+    expect(collect($plan['rows'])->whereBetween('age', [68, 70])->pluck('conversion')->all())->toEqual([300_000, 315_000, 330_750])
         ->and(atAge($plan, 71)['conversion'])->toBeLessThan(300_000)
         ->and($plan['summary']['ending_traditional'])->toEqual(0);
 });
@@ -297,14 +296,19 @@ it('holds each year $100 under the line of the tier it is already in, year after
     $plan = runStrategy($user, 'fill_bracket_irmaa', ['fill_rate' => 24, 'inflation_rate' => 2.5]);
     $rows = collect($plan['rows'])->keyBy('age');
 
+    // How far under a line of its own year an income sits, in today's
+    // dollars: the margin is $100 of them, so it rises with prices too.
+    // Both figures are rounded to the dollar, so it reads a dollar either way.
+    $under = fn (array $row, int $line): float => ($row['irmaa_lines'][$line] - $row['magi']) / 1.025 ** ($row['age'] - 68 + 2);
+
     // Until the RMDs begin the pension alone is under the first line, and
     // every year is filled to $100 short of it — so no premium two years on
     // is ever raised.
-    expect($rows->only([68, 69, 70, 71, 72])->pluck('magi')->unique()->all())->toEqual([108_900])
+    expect($rows->only([68, 69, 70, 71, 72])->map(fn (array $row): float => $under($row, 0)))->each->toEqualWithDelta(100, 1)
         ->and($rows->only([70, 71, 72, 73, 74])->pluck('irmaa')->unique()->all())->toEqual([0])
         // From 73 the RMD carries income past that line by itself. The
-        // conversion then stays $100 under the next one, $137,000.
-        ->and($rows->only([73, 74, 75, 76, 77, 78, 79, 80])->pluck('magi')->unique()->all())->toEqual([136_900])
+        // conversion then stays $100 under the next one.
+        ->and($rows->only([73, 74, 75, 76, 77, 78, 79, 80])->map(fn (array $row): float => $under($row, 1)))->each->toEqualWithDelta(100, 1)
         ->and($rows->max('irmaa_tier'))->toBe(1);
 });
 
@@ -408,8 +412,7 @@ it('charges IRMAA for each of two people on a joint return', function () {
 /**
  * The tiers rise with prices, and a premium is read against the tiers of its
  * own year. $112,000 earned at 68 is over this year's $109,000 line, but with
- * prices up 5% a year it sets the premium at 70 against a line of $120,173:
- * $101,587 in that year's dollars.
+ * prices up 5% a year it sets the premium at 70 against a line of $120,173.
  */
 it('reads an income against the IRMAA tiers of the year whose premium it sets', function () {
     $user = conversionRetiree();
@@ -417,7 +420,8 @@ it('reads an income against the IRMAA tiers of the year whose premium it sets', 
 
     $plan = runStrategy($user, 'none', ['inflation_rate' => 5]);
 
-    expect(atAge($plan, 68)['magi'])->toEqual(101_587)
+    expect(atAge($plan, 68)['magi'])->toEqual(112_000)
+        ->and(atAge($plan, 68)['irmaa_lines'][0])->toEqual(120_173)
         ->and(atAge($plan, 68)['magi_tier'])->toBe(0)
         ->and(atAge($plan, 70)['irmaa_tier'])->toBe(0)
         ->and(atAge($plan, 70)['irmaa'])->toEqual(0);
@@ -595,15 +599,36 @@ it('takes its inflation rate from the strategy, then the projection, then the pr
 });
 
 /**
- * In today's dollars a bracket is the same line every year, whatever the
- * inflation rate: the tables and the dollars rise together.
+ * Each year is in its own dollars, so the top of a bracket is a line that
+ * rises with the strategy's inflation, and a year filled to it rises with it:
+ * $50,400 today is $61,262 after four years at 5%.
  */
-it('reports today\'s dollars, so the same bracket is filled to the same line every year', function () {
+it('reports each year in its own dollars, against bracket lines that rise with inflation', function () {
     $plan = runStrategy(conversionRetiree(), 'fill_bracket', ['fill_rate' => 12, 'inflation_rate' => 5]);
 
-    expect(atAge($plan, 68)['bracket_income'])->toEqual(68_550)
-        ->and(atAge($plan, 72)['bracket_income'])->toEqual(68_550)
-        ->and(atAge($plan, 72)['taxable_income'])->toEqual(50_400);
+    expect(atAge($plan, 68)['bracket_lines'][1])->toEqual(50_400)
+        ->and(atAge($plan, 68)['taxable_income'])->toEqual(50_400)
+        ->and(atAge($plan, 72)['bracket_lines'][1])->toEqual(61_262)
+        ->and(atAge($plan, 72)['taxable_income'])->toEqual(61_262);
+});
+
+/**
+ * Asked for today's dollars, as the Monte Carlo runs do, a bracket is the
+ * same line every year whatever the inflation rate: the tables and the
+ * dollars rise together.
+ */
+it('reports today\'s dollars when asked, so the same bracket is filled to the same line every year', function () {
+    $user = conversionRetiree();
+    $strategy = ConversionStrategy::factory()->ofKind('fill_bracket', ['growth_rate' => 0, 'fill_rate' => 12, 'inflation_rate' => 5])->create(['user_id' => $user->id]);
+
+    $board = app(ConversionBoard::class);
+    ['world' => $world, 'years' => $years] = $board->context($user);
+    $rows = collect($board->simulate($strategy, $world, $years[$strategy->id], inTodaysDollars: true)['rows'])->keyBy('age');
+
+    expect($rows[68]['bracket_income'])->toEqual(68_550)
+        ->and($rows[72]['bracket_income'])->toEqual(68_550)
+        ->and($rows[72]['taxable_income'])->toEqual(50_400)
+        ->and($rows[72]['bracket_lines'][1])->toEqual(50_400);
 });
 
 it('grows the balances at the fleet\'s own rate unless the strategy names one', function () {
@@ -670,6 +695,8 @@ it('gives the page the lines a year is charted against, and each strategy run', 
             ->where('strategies.0.name', 'Even')
             ->where('strategies.0.kind_label', 'Even conversions before RMDs')
             ->has('strategies.0.rows', 13)
+            ->has('strategies.0.today.rows', 13)
+            ->has('strategies.0.today.summary.tax_with_heirs')
             ->has('strategies.0.summary.tax_with_heirs'));
 });
 

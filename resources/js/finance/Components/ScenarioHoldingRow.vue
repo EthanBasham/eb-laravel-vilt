@@ -3,7 +3,7 @@ import { router } from '@inertiajs/vue3';
 import { IconChevronDown } from '@tabler/icons-vue';
 import { computed, reactive, ref, watch } from 'vue';
 import YearSliderChart from './YearSliderChart.vue';
-import { money, moneyShort, moneySigned, percent } from '../lib/format';
+import { money, moneyShort, moneySigned, percent, rateTone } from '../lib/format';
 
 /**
  * One asset or liability inside a scenario: a row that opens onto its rate,
@@ -104,7 +104,7 @@ const moved = (year) => (isAsset.value
                 <span v-if="holding.unfunded > 0" class="ml-2 whitespace-nowrap rounded-full bg-fin-red-100 px-2 py-0.5 text-[11px] font-medium text-fin-red-600">{{ moneyShort(holding.unfunded) }} it could not pay</span>
             </span>
 
-            <span class="whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium" :class="draft.rate === null ? 'bg-fin-grey-100 text-fin-grey-600' : 'bg-fin-green-100 text-fin-green-700'">
+            <span class="whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium" :class="rateTone(holding.side, rate)">
                 {{ isAsset ? signedRate(rate) : percent(rate) }} {{ isAsset ? '/ yr' : 'APR' }}
             </span>
             <span v-if="pinnedCount" class="whitespace-nowrap rounded-full bg-fin-gold-100 px-2 py-0.5 text-[11px] font-medium text-fin-gold-600">
