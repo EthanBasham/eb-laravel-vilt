@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Finance;
 
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 use App\Models\Finance\Scenario;
 
 /**
@@ -11,6 +12,24 @@ use App\Models\Finance\Scenario;
  */
 class SaveConversionStrategyRequest extends FinanceRequest
 {
+    /**
+     * A year with neither figure set is not set by hand at all, and a
+     * strategy with no such year has none — which is what marks it as
+     * customised or not.
+     */
+    protected function prepareForValidation(): void
+    {
+        $overrides = $this->input('overrides');
+
+        if (! is_array($overrides)) {
+            return;
+        }
+
+        $set = array_filter($overrides, fn (mixed $year): bool => ! is_array($year) || ($year['conversion'] ?? null) !== null || ($year['withheld'] ?? null) !== null);
+
+        $this->merge(['overrides' => $set === [] ? null : $set]);
+    }
+
     /**
      * Get the validation rules that apply to the request.
      *
@@ -35,10 +54,32 @@ class SaveConversionStrategyRequest extends FinanceRequest
             // percentage, or dollars a year, by the mode. The other two modes
             // do not read it.
             'tax_outside_amount' => ['nullable', 'required_if:tax_payment,percent,flat', 'numeric', 'min:0', $this->input('tax_payment') === 'percent' ? 'max:100' : 'max:999999999'],
+            // The years set by hand, keyed by year: what to convert, and how
+            // much of the tax comes out of the converted money, in today's
+            // dollars. A null figure is left to the strategy.
+            'overrides' => ['nullable', 'array', 'max:150'],
+            'overrides.*' => ['array:conversion,withheld'],
+            'overrides.*.conversion' => ['nullable', 'numeric', 'min:0', 'max:999999999'],
+            'overrides.*.withheld' => ['nullable', 'numeric', 'min:0', 'max:999999999'],
             'inflation_rate' => ['nullable', 'numeric', 'between:-5,15'],
             'growth_rate' => ['nullable', 'numeric', 'between:-10,20'],
             'heir_is_charity' => ['required', 'boolean'],
             'heir_income' => ['nullable', 'numeric', 'min:0', 'max:999999999'],
+        ];
+    }
+
+    /**
+     * The keys of `overrides` are the years set by hand, which a per-field
+     * rule cannot see.
+     *
+     * @return array<int, callable>
+     */
+    public function after(): array
+    {
+        return [
+            function (Validator $validator): void {
+                $this->validatePinnedYears($validator, 'a conversion');
+            },
         ];
     }
 

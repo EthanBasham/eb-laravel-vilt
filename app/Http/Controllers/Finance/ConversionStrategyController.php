@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Finance;
 
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
@@ -10,6 +11,7 @@ use App\Http\Requests\Finance\SaveConversionStrategyRequest;
 use App\Http\Requests\Finance\StoreStarterStrategiesRequest;
 use App\Models\Finance\ConversionStrategy;
 use App\Models\Finance\Scenario;
+use App\Services\Finance\ConversionBoard;
 
 /**
  * The strategies the Retirement Strategizer reports on. Ordinary CRUD: the
@@ -70,6 +72,16 @@ class ConversionStrategyController extends Controller
         $on = $projections->first() ? " on {$projections->first()->name}" : '';
 
         return back(fallback: route('finance.retirement'))->with('success', "One strategy of each kind added{$on}.{$where}");
+    }
+
+    /**
+     * What a strategy's settings would convert year by year, without keeping
+     * them: the form's table of years set by hand asks this each time one is
+     * changed. Plain JSON, not an Inertia visit.
+     */
+    public function preview(SaveConversionStrategyRequest $request, ConversionBoard $board): JsonResponse
+    {
+        return response()->json(['rows' => $board->preview($request->user(), new ConversionStrategy($request->validated()))]);
     }
 
     public function update(SaveConversionStrategyRequest $request, ConversionStrategy $strategy): RedirectResponse

@@ -110,6 +110,7 @@ Route::patch('/retirement/withdrawals/strategies/{strategy}', [WithdrawalStrateg
 Route::post('/retirement/withdrawals/strategies/{strategy}/duplicate', [WithdrawalStrategyController::class, 'duplicate'])->name('retirement.withdrawals.duplicate');
 Route::delete('/retirement/withdrawals/strategies/{strategy}', [WithdrawalStrategyController::class, 'destroy'])->name('retirement.withdrawals.destroy');
 Route::post('/retirement/strategies', [ConversionStrategyController::class, 'store'])->name('retirement.strategies.store');
+Route::post('/retirement/strategies/preview', [ConversionStrategyController::class, 'preview'])->name('retirement.strategies.preview');
 Route::post('/retirement/strategies/starters', [ConversionStrategyController::class, 'storeStarters'])->name('retirement.strategies.starters');
 // Which strategies are set side by side. On the comparison as a whole, PUT
 // replaces it and DELETE empties it; the other two move one strategy in or

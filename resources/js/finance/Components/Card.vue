@@ -2,6 +2,7 @@
 /**
  * The white panel everything sits on. A title row when it has a title, and
  * `flush` for a card whose body is a table that should run edge to edge.
+ * The `subtitle` slot stands in for the prop when the caption needs markup.
  */
 defineProps({
     title: { type: String, default: '' },
@@ -15,7 +16,7 @@ defineProps({
         <header v-if="title || $slots.actions" class="flex flex-wrap items-start justify-between gap-3 px-5 pt-5" :class="flush ? 'pb-4' : 'pb-1'">
             <div>
                 <h2 class="text-sm font-semibold text-fin-black">{{ title }}</h2>
-                <p v-if="subtitle" class="mt-0.5 text-xs text-fin-grey-500">{{ subtitle }}</p>
+                <p v-if="subtitle || $slots.subtitle" class="mt-0.5 text-xs text-fin-grey-500"><slot name="subtitle">{{ subtitle }}</slot></p>
             </div>
 
             <div class="flex items-center gap-2">

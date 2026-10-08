@@ -324,7 +324,10 @@ const convertsWhen = (strategy) => {
                     </dl>
                 </Card>
 
-                <Card v-else title="Side by side" :subtitle="`Over the whole plan, ${dollars}. A green figure is the best in its row. ${comparison.count} of at most ${comparison.max} in the report.`" flush>
+                <Card v-else title="Side by side" flush>
+                    <template #subtitle>
+                        Over the whole plan, in <strong class="font-semibold text-fin-charcoal">{{ inTodaysDollars ? 'today\'s dollars' : 'the dollars of each year' }}</strong>{{ inTodaysDollars ? '' : ', not today\'s' }}. A green figure is the best in its row. {{ comparison.count }} of at most {{ comparison.max }} in the report.
+                    </template>
                     <template #actions>
                         <button type="button" class="fin-btn fin-btn-quiet" @click="printReport"><IconFileTypePdf :size="16" /> Export PDF</button>
                         <button type="button" class="fin-btn fin-btn-quiet" @click="clearComparison"><IconArchive :size="16" /> Clear Report</button>

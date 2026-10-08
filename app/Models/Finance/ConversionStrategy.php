@@ -20,11 +20,12 @@ use Database\Factories\Finance\ConversionStrategyFactory;
  * and only for the strategies being compared (`is_compared`). The rest wait
  * in the holding area, costing the page nothing.
  *
+ * @property-read bool $is_customized
  * @property-read string $kind_label
  * @property-read string $label
  * @property-read array<string, mixed> $props
  */
-#[Fillable(['user_id', 'scenario_id', 'name', 'kind', 'is_compared', 'convert_from_age', 'convert_until_age', 'fill_rate', 'conversion_amount', 'tax_payment', 'tax_outside_amount', 'inflation_rate', 'growth_rate', 'heir_is_charity', 'heir_income'])]
+#[Fillable(['user_id', 'scenario_id', 'name', 'kind', 'is_compared', 'convert_from_age', 'convert_until_age', 'fill_rate', 'conversion_amount', 'tax_payment', 'tax_outside_amount', 'overrides', 'inflation_rate', 'growth_rate', 'heir_is_charity', 'heir_income'])]
 class ConversionStrategy extends OwnedModel
 {
     /** @use HasFactory<ConversionStrategyFactory> */
@@ -56,6 +57,7 @@ class ConversionStrategy extends OwnedModel
             'fill_rate' => 'float',
             'conversion_amount' => 'float',
             'tax_outside_amount' => 'float',
+            'overrides' => 'array',
             'inflation_rate' => 'float',
             'growth_rate' => 'float',
             'heir_is_charity' => 'boolean',
@@ -143,6 +145,12 @@ class ConversionStrategy extends OwnedModel
         return $copy;
     }
 
+    /** Whether any year of it has been set by hand, over what its kind would do. */
+    protected function isCustomized(): Attribute
+    {
+        return Attribute::get(fn (): bool => ! empty($this->overrides));
+    }
+
     protected function kindLabel(): Attribute
     {
         return Attribute::get(fn (): string => config("finance.conversion_strategies.{$this->kind}.label", $this->kind));
@@ -150,11 +158,12 @@ class ConversionStrategy extends OwnedModel
 
     /**
      * What it is called: its own name, or — as a name is optional — the
-     * projection it runs on and its kind.
+     * projection it runs on and its kind, marked `[C]` once any year of it
+     * has been set by hand.
      */
     protected function label(): Attribute
     {
-        return Attribute::get(fn (): string => $this->name ?? ($this->scenario?->name ?? 'As entered').' · '.$this->kind_label);
+        return Attribute::get(fn (): string => $this->name ?? ($this->scenario?->name ?? 'As entered').' · '.$this->kind_label.($this->is_customized ? ' [C]' : ''));
     }
 
     /** The settings as saved, nulls and all: what the edit form is filled from. */
@@ -174,6 +183,8 @@ class ConversionStrategy extends OwnedModel
             'conversion_amount' => $this->conversion_amount,
             'tax_payment' => $this->tax_payment,
             'tax_outside_amount' => $this->tax_outside_amount,
+            'overrides' => $this->overrides,
+            'is_customized' => $this->is_customized,
             'inflation_rate' => $this->inflation_rate,
             'growth_rate' => $this->growth_rate,
             'heir_is_charity' => $this->heir_is_charity,

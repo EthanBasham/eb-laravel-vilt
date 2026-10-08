@@ -5072,3 +5072,28 @@ toolset; the durable rules from it are in `.ai/rules/{controllers-finance,reques
 - Not done, for the owner to decide: see the review summary given in the session (Social Security
   taxation inside the retirement tools, 401(k) contributions not deducted from taxable wages, the
   Overview and scenario net-worth projections disagreeing, the larger Vue extractions).
+
+## 2026-10-07 — Finance: years of a conversion strategy set by hand
+
+Editing a Roth conversion strategy now offers **Customize**, which swaps the settings for a table of
+every year of the plan. A year's conversion, and how much of its tax comes out of the converted
+money, can be typed in; a blank follows the strategy.
+
+- Stored as `overrides` (json, nullable) on `fin_conversion_strategies`, keyed by year like a
+  scenario's pinned years: `{"2031": {"conversion": 50000, "withheld": null}}`. Figures are in
+  **today's dollars**, like `conversion_amount` and a flat `tax_outside_amount`, and a null one is
+  left to the strategy. The request drops a year with neither set, and stores null for none.
+- `ConversionBoard::simulate()` reads them: a conversion set by hand ignores the kind, the age range
+  and the spare-income cap of tax paid "from outside" (its tax is found like any other shortfall),
+  and is capped only at what is left. Tax set by hand to come from the conversion is capped at the
+  conversion's tax; set alone, the strategy still sizes the conversion, with that much less for the
+  year's surplus to pay.
+- Only one figure of the tax split is stored (`withheld`). "Paid from taxable savings" in the table
+  is the remainder and is read-only — the engine finds it from the year's spare income first and
+  taxable savings after, as it always has.
+- The table is filled from `POST /finance/retirement/strategies/preview`, which runs unsaved
+  settings and returns plain JSON. It is the sub-project's first `useHttp` call rather than an
+  Inertia visit, so a held strategy (never simulated for the page) can be customised too, and the
+  years after a change follow it.
+- `ConversionStrategy::label` adds ` [C]` to the default projection-and-kind name when
+  `is_customized`. A name the user gave is left alone.

@@ -843,6 +843,141 @@ it('hides another user\'s strategy behind a 404', function (string $method, stri
     'destroy' => ['delete', 'finance.retirement.strategies.destroy'],
 ]);
 
+// Years set by hand
+
+it('converts what a year set by hand says, and leaves every other year to the strategy', function () {
+    // 70 in 2028. The usual window is 65 through 72, so 73 is outside it.
+    $plan = runStrategy(conversionRetiree(), 'fixed', ['conversion_amount' => 200_000, 'overrides' => [
+        2028 => ['conversion' => 50_000, 'withheld' => null],
+        2031 => ['conversion' => 20_000, 'withheld' => null],
+    ]]);
+
+    expect(collect($plan['rows'])->whereBetween('age', [68, 73])->pluck('conversion')->all())->toEqual([200_000, 200_000, 50_000, 200_000, 200_000, 20_000]);
+});
+
+it('converts no more in a year set by hand than is left to convert', function () {
+    $plan = runStrategy(conversionRetiree(), 'none', ['overrides' => [2026 => ['conversion' => 5_000_000, 'withheld' => null]]]);
+
+    expect(atAge($plan, 68)['conversion'])->toEqual(1_000_000)
+        ->and(atAge($plan, 68)['traditional'])->toEqual(0);
+});
+
+it('holds an amount set by hand in today\'s dollars', function () {
+    $plan = runStrategy(conversionRetiree(), 'none', ['inflation_rate' => 10, 'overrides' => [2027 => ['conversion' => 50_000, 'withheld' => 1_000]]]);
+
+    expect(atAge($plan, 69))->toMatchArray(['conversion' => 55_000.0, 'conversion_tax_withheld' => 1_100.0])
+        ->and(collect($plan['today']['rows'])->firstWhere('age', 69))->toMatchArray(['conversion' => 50_000.0, 'conversion_tax_withheld' => 1_000.0]);
+});
+
+it('converts an amount set by hand even when the year has nothing spare to pay its tax from', function () {
+    $user = conversionRetiree(spare: 0);
+    Flow::factory()->income('pension')->create(['user_id' => $user->id, 'amount' => 40_000, 'frequency' => 'annual']);
+    Flow::factory()->create(['user_id' => $user->id, 'amount' => 60_000, 'frequency' => 'annual']);
+
+    $plan = runStrategy($user, 'fill_bracket', ['fill_rate' => 12, 'overrides' => [2026 => ['conversion' => 30_000, 'withheld' => null]]]);
+
+    expect(atAge($plan, 68)['conversion'])->toEqual(30_000)
+        // The tax is paid from outside the conversion, so all of it reaches the Roth.
+        ->and(atAge($plan, 68)['conversion_tax_withheld'])->toEqual(0)
+        ->and(atAge($plan, 68)['roth'])->toEqual(30_000)
+        ->and(atAge($plan, 69)['conversion'])->toEqual(0);
+});
+
+/*
+ * The year of the tax-payment test above: $68,550 fills the 12% bracket and
+ * adds $5,800 of tax.
+ */
+it('takes the tax set by hand out of the converted money, and no more than the tax comes to', function (array $year, int $fromConversion) {
+    $plan = runStrategy(conversionRetiree(), 'fill_bracket', ['fill_rate' => 12, 'convert_from_age' => 68, 'convert_until_age' => 68, 'overrides' => [2026 => $year]]);
+
+    expect(atAge($plan, 68)['conversion'])->toEqual(68_550)
+        ->and(atAge($plan, 68)['conversion_tax'])->toEqual(5800)
+        ->and(atAge($plan, 68)['conversion_tax_withheld'])->toEqual($fromConversion)
+        ->and(atAge($plan, 68)['roth'])->toEqual(68_550 - $fromConversion)
+        ->and(atAge($plan, 68)['taxable'])->toEqual(2_000_000 + 1_000_000 - (5800 - $fromConversion));
+})->with([
+    'part of it' => [['conversion' => null, 'withheld' => 2_000], 2_000],
+    'none of it, the amount set too' => [['conversion' => 68_550, 'withheld' => 0], 0],
+    'more than there is' => [['conversion' => null, 'withheld' => 50_000], 5_800],
+]);
+
+it('marks an unnamed strategy with a year set by hand, and leaves a name alone', function () {
+    $user = conversionRetiree();
+    $overrides = [2028 => ['conversion' => 50_000, 'withheld' => null]];
+    ConversionStrategy::factory()->ofKind('even')->create(['user_id' => $user->id, 'overrides' => $overrides]);
+    ConversionStrategy::factory()->ofKind('even')->create(['user_id' => $user->id, 'overrides' => $overrides, 'name' => 'My pick']);
+    ConversionStrategy::factory()->ofKind('even')->create(['user_id' => $user->id]);
+
+    $this->actingAs($user)->get(route('finance.retirement'))
+        ->assertInertia(fn ($page) => $page
+            ->where('strategies.0.label', 'As entered · Even conversions before RMDs [C]')
+            ->where('strategies.0.is_customized', true)
+            ->where('strategies.1.label', 'My pick')
+            ->where('strategies.2.label', 'As entered · Even conversions before RMDs')
+            ->where('strategies.2.is_customized', false));
+});
+
+it('keeps the years set by hand, dropping any with nothing set', function () {
+    $user = conversionRetiree();
+    $strategy = ConversionStrategy::factory()->ofKind('even')->create(['user_id' => $user->id]);
+
+    $this->actingAs($user)->patch(route('finance.retirement.strategies.update', $strategy), strategyPayload(['overrides' => [
+        2028 => ['conversion' => 50_000, 'withheld' => null],
+        2029 => ['conversion' => null, 'withheld' => null],
+        2030 => ['conversion' => null, 'withheld' => 0],
+    ]]))->assertSessionHasNoErrors();
+
+    expect($strategy->fresh()->overrides)->toBe([2028 => ['conversion' => 50_000, 'withheld' => null], 2030 => ['conversion' => null, 'withheld' => 0]]);
+
+    $this->actingAs($user)->patch(route('finance.retirement.strategies.update', $strategy), strategyPayload(['overrides' => [2029 => ['conversion' => null, 'withheld' => null]]]))->assertSessionHasNoErrors();
+
+    expect($strategy->fresh()->overrides)->toBeNull()
+        ->and($strategy->fresh()->is_customized)->toBeFalse();
+});
+
+it('refuses a year set by hand that it could not run', function (array $overrides) {
+    $user = conversionRetiree();
+
+    $this->actingAs($user)->post(route('finance.retirement.strategies.store'), strategyPayload(['overrides' => $overrides]))->assertSessionHasErrors();
+
+    expect(ConversionStrategy::query()->count())->toBe(0);
+})->with([
+    'a year gone by' => [[2025 => ['conversion' => 50_000]]],
+    'something that is not a year' => [['soon' => ['conversion' => 50_000]]],
+    'a conversion below nothing' => [[2028 => ['conversion' => -1]]],
+    'tax below nothing' => [[2028 => ['withheld' => -1]]],
+    'a figure it does not know' => [[2028 => ['conversion' => 50_000, 'roth' => 50_000]]],
+]);
+
+it('previews what settings would convert each year, in today\'s dollars, without keeping them', function () {
+    $user = conversionRetiree();
+
+    $rows = $this->actingAs($user)
+        ->postJson(route('finance.retirement.strategies.preview'), strategyPayload(['kind' => 'fixed', 'conversion_amount' => 300_000, 'growth_rate' => 0, 'overrides' => [2027 => ['conversion' => 50_000, 'withheld' => 1_000]]]))
+        ->assertOk()
+        ->json('rows');
+
+    expect($rows)->toHaveCount(13)
+        ->and(array_keys($rows[0]))->toBe(['age', 'year', 'conversion', 'conversion_tax', 'conversion_tax_withheld', 'traditional'])
+        ->and(array_column($rows, 'conversion', 'year'))->toMatchArray([2026 => 300_000, 2027 => 50_000, 2028 => 300_000])
+        ->and($rows[1]['conversion_tax_withheld'])->toEqual(1_000)
+        ->and(ConversionStrategy::query()->count())->toBe(0);
+});
+
+it('will not preview settings it could not save', function (array $overrides, string $field) {
+    $this->actingAs(conversionRetiree())
+        ->postJson(route('finance.retirement.strategies.preview'), strategyPayload($overrides))
+        ->assertJsonValidationErrors($field);
+})->with([
+    'a kind it does not know' => [['kind' => 'backdoor'], 'kind'],
+    'someone else\'s projection' => [fn () => ['scenario_id' => Scenario::factory()->create()->id], 'scenario_id'],
+    'a year gone by' => [['overrides' => [2025 => ['conversion' => 50_000]]], 'overrides'],
+]);
+
+it('asks a guest to sign in before previewing', function () {
+    $this->postJson(route('finance.retirement.strategies.preview'), strategyPayload())->assertUnauthorized();
+});
+
 // The holding area
 
 it('runs only the strategies being compared, and lists the rest as settings alone', function () {

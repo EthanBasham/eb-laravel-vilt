@@ -167,6 +167,26 @@ class ConversionBoard
     }
 
     /**
+     * One strategy's conversions year by year, in today's dollars, saved or
+     * not: what the form's table of years set by hand is filled from, so it
+     * can show what the settings being edited would do before they are kept.
+     *
+     * @return list<array{year: int, age: int, conversion: float, conversion_tax: float, conversion_tax_withheld: float, traditional: float}>
+     */
+    public function preview(User $user, ConversionStrategy $strategy): array
+    {
+        $world = $this->world($user);
+        $years = $this->scenarios->yearly(
+            $this->scenarios->rows($this->fleet->flows($user), $strategy->scenario?->scenarioFlows ?? collect(), $world['profile']),
+        );
+
+        return array_map(
+            fn (array $row): array => Arr::only($row, ['year', 'age', 'conversion', 'conversion_tax', 'conversion_tax_withheld', 'traditional']),
+            $this->simulate($strategy, $world, $years, inTodaysDollars: true)['rows'],
+        );
+    }
+
+    /**
      * The household as every retirement tool reads it: the profile, the ages
      * that matter, the three buckets with what each holds, takes in and grows
      * at, and the tax tables.
@@ -292,6 +312,8 @@ class ConversionBoard
         $inflationRate = $this->inflationRate($strategy, $world);
         $growthRates = $this->bucketRates($strategy, $world);
         $window = $this->window($strategy->kind, $strategy->convert_from_age, $strategy->convert_until_age, $ages);
+        // Read once: the cast decodes it afresh each time it is asked for.
+        $overrides = $strategy->overrides ?? [];
         $taxations = config('finance.flow_taxations');
         $oldestDivisor = array_key_last($divisors);
         $contributions = $world['contributions'];
@@ -406,10 +428,21 @@ class ConversionBoard
              * conversion's own tax would push the year over the very line the
              * conversion stopped at.
              */
-            $evaluate = function (float $fromTraditional, bool $converting) use ($strategy, $window, $age, $traditional, $ordinary, $rmd, $gains, $world, $index, $irmaaIndex, $taxWith, $penaltyOn, $saving, $expenses, $irmaa, $cashIncome): array {
-                $conversion = $converting
-                    ? $this->conversion($strategy, $window, $age, $traditional - $fromTraditional, $ordinary + $rmd + $fromTraditional, $gains, $world, $index, $irmaaIndex)
-                    : 0.0;
+            // A year set by hand: what to convert, and how much of the tax
+            // to take out of the converted money, either of which may be
+            // left to the strategy. Entered in today's dollars.
+            $pinned = $overrides[$year] ?? [];
+            $pinnedConversion = isset($pinned['conversion']) ? (float) $pinned['conversion'] * $index : null;
+            $pinnedWithheld = isset($pinned['withheld']) ? (float) $pinned['withheld'] * $index : null;
+
+            $evaluate = function (float $fromTraditional, bool $converting) use ($pinnedConversion, $pinnedWithheld, $strategy, $window, $age, $traditional, $ordinary, $rmd, $gains, $world, $index, $irmaaIndex, $taxWith, $penaltyOn, $saving, $expenses, $irmaa, $cashIncome): array {
+                $conversion = match (true) {
+                    ! $converting => 0.0,
+                    // Whatever the window or the kind: as much of what was
+                    // asked for as there is.
+                    $pinnedConversion !== null => min(max(0.0, $traditional - $fromTraditional), $pinnedConversion),
+                    default => $this->conversion($strategy, $window, $age, $traditional - $fromTraditional, $ordinary + $rmd + $fromTraditional, $gains, $world, $index, $irmaaIndex),
+                };
 
                 /*
                  * A conversion whose tax is paid from outside it is paid from
@@ -419,12 +452,17 @@ class ConversionBoard
                  * bigger than that surplus can pay the tax on. Savings are
                  * never drawn down to pay for a conversion, and a year with
                  * nothing to spare converts nothing.
+                 *
+                 * An amount set by hand is converted regardless, its tax
+                 * found like any other shortfall. Tax set by hand to come
+                 * out of the conversion is that much the surplus need not
+                 * pay.
                  */
-                $paysFromSurplus = $strategy->tax_payment === 'outside';
+                $paysFromSurplus = $strategy->tax_payment === 'outside' && $pinnedConversion === null;
 
                 if ($conversion > 0 && $paysFromSurplus) {
                     $spare = $cashIncome + $rmd + $fromTraditional - $expenses - $taxWith($rmd + $fromTraditional) - $penaltyOn($fromTraditional) - $irmaa - $saving;
-                    $conversion = $this->affordable($conversion, $spare, fn (float $amount): float => $taxWith($rmd + $fromTraditional + $amount) - $taxWith($rmd + $fromTraditional));
+                    $conversion = $this->affordable($conversion, $spare + ($pinnedWithheld ?? 0.0), fn (float $amount): float => $taxWith($rmd + $fromTraditional + $amount) - $taxWith($rmd + $fromTraditional));
                 }
 
                 // The tax the conversion adds on top of everything else the
@@ -432,7 +470,8 @@ class ConversionBoard
                 // before it reaches the Roth. The whole conversion is income
                 // either way; withholding only changes where the tax is found.
                 $conversionTax = $conversion > 0 ? $taxWith($rmd + $fromTraditional + $conversion) - $taxWith($rmd + $fromTraditional) : 0.0;
-                $withheld = min($conversion, $this->withheld($strategy, $conversionTax, $index));
+                // No more is withheld by hand than the tax comes to.
+                $withheld = min($conversion, $pinnedWithheld === null ? $this->withheld($strategy, $conversionTax, $index) : min($conversionTax, $pinnedWithheld));
 
                 // Withheld money never reaches the Roth, so before 59½ it is
                 // an early withdrawal like any other.
