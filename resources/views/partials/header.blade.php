@@ -46,7 +46,26 @@
                         </a>
                     @else
                         <x-nav-link :href="route('wot.dashboard')" :active="request()->routeIs('wot.*')">
-                            World of Tanks
+                            <span class="flex items-center gap-2">
+                                <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M2 15a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3" />
+                                    <path d="M6 12l1 -5h5l3 5" />
+                                    <path d="M21 9l-7.8 0" />
+                                </svg>
+                                WOT Hub
+                            </span>
+                        </x-nav-link>
+
+                        <x-nav-link :href="route('finance.overview')" :active="request()->routeIs('finance.*')">
+                            <span class="flex items-center gap-2">
+                                <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M2 20a2.4 2.4 0 0 0 2 1a2.4 2.4 0 0 0 2 -1a2.4 2.4 0 0 1 2 -1a2.4 2.4 0 0 1 2 1a2.4 2.4 0 0 0 2 1a2.4 2.4 0 0 0 2 -1a2.4 2.4 0 0 1 2 -1a2.4 2.4 0 0 1 2 1a2.4 2.4 0 0 0 2 1a2.4 2.4 0 0 0 2 -1" />
+                                    <path d="M4 18l-1 -5h18l-2 4" />
+                                    <path d="M5 13v-6h8l4 6" />
+                                    <path d="M7 7v-4h-1" />
+                                </svg>
+                                Financial Fleet
+                            </span>
                         </x-nav-link>
 
                         <x-nav-link :href="route('dashboard')" :active="request()->routeIs('dashboard')">

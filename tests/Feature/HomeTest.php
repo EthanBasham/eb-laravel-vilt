@@ -14,7 +14,10 @@ it('offers registration to guests and the dashboard to signed-in users', functio
 
     $this->actingAs(User::factory()->create())
         ->get(route('home'))
-        ->assertSee('World of Tanks dashboard')
+        ->assertSee('WOT Hub')
+        ->assertSee(route('wot.dashboard'))
+        ->assertSee('Financial Fleet')
+        ->assertSee(route('finance.overview'))
         ->assertDontSee('Create an account');
 });
 
