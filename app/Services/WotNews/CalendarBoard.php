@@ -21,10 +21,13 @@ class CalendarBoard
      */
     public function for(Carbon $month, ?User $user): array
     {
-        // The grid is whole weeks. Where a week starts comes from the locale,
-        // which is en_US (Sunday first); MonthGrid.vue's labels assume it.
-        $gridStart = $month->copy()->startOfWeek();
-        $gridEnd = $month->copy()->endOfMonth()->endOfWeek();
+        // The grid is whole weeks, Sunday to Saturday, because MonthGrid.vue's
+        // labels are fixed that way. Named rather than left to the locale:
+        // Carbon starts the week on Monday under `en` and on Sunday under
+        // `en_US`, and production ran with the first while development ran
+        // with the second — every date sat one column left of its weekday.
+        $gridStart = $month->copy()->startOfWeek(Carbon::SUNDAY);
+        $gridEnd = $month->copy()->endOfMonth()->endOfWeek(Carbon::SATURDAY);
 
         // Ignored events are gone from the grid and the long-campaign list
         // below — the whole point of ignoring one. They stay in "Coming up",

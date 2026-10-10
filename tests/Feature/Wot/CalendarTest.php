@@ -49,6 +49,21 @@ it('lays the month out in whole weeks from Sunday to Saturday', function () {
 });
 
 /**
+ * Carbon takes the first day of the week from the locale: Monday under `en`,
+ * Sunday under `en_US`. Production ran with `en` and development with `en_US`,
+ * so the same code put every date one column left of its weekday in production
+ * only. The column labels are fixed, so the grid must be too.
+ */
+it('starts the week on Sunday whatever the locale', function (string $locale) {
+    app()->setLocale($locale);
+
+    $days = collect(september(User::factory()->create())->viewData('page')['props']['days']);
+
+    expect($days->first()['date'])->toBe('2026-08-30')
+        ->and($days->last()['date'])->toBe('2026-10-03');
+})->with(['en', 'en_US', 'en_GB']);
+
+/**
  * On the 31st, parsing "2026-09" with the day filled in from today gave
  * September 31st, which rolled over to October.
  */
