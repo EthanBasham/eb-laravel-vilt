@@ -3,13 +3,13 @@ import { Head } from '@inertiajs/vue3';
 import { ref } from 'vue';
 import { IconCheck, IconPencil } from '@tabler/icons-vue';
 import AppShell from '../Components/AppShell.vue';
-import EmptyState from '../Components/EmptyState.vue';
 import PageHeader from '../Components/PageHeader.vue';
 import StatTile from '../Components/StatTile.vue';
 import ViewTabs from '../Components/ViewTabs.vue';
 import BattlePassTab from '../Components/Crews/BattlePassTab.vue';
 import BooksTable from '../Components/Crews/BooksTable.vue';
 import CrewBoard from '../Components/Crews/CrewBoard.vue';
+import GuideTab from '../Components/Crews/GuideTab.vue';
 import RecruitsPanel from '../Components/Crews/RecruitsPanel.vue';
 import { n } from '../lib/format';
 
@@ -18,6 +18,11 @@ defineProps({
     recruits: { type: Object, required: true },
     books: { type: Object, required: true },
     battle_pass: { type: Array, default: () => [] },
+    // The Guide tab: the guides kept, the catalogue of perks, and which of
+    // them each role can train.
+    guides: { type: Array, default: () => [] },
+    perks: { type: Object, default: () => ({}) },
+    role_perks: { type: Object, default: () => ({}) },
     settings: { type: Object, required: true },
     xp_progression: { type: Array, default: () => [] },
     roles: { type: Object, default: () => ({}) },
@@ -109,10 +114,12 @@ const editingBattlePass = ref(false);
             :vehicles="vehicles"
         />
 
-        <section v-else class="mt-4" aria-labelledby="guide-heading">
-            <h2 id="guide-heading" class="sr-only">Guide</h2>
-
-            <EmptyState>Nothing here yet.</EmptyState>
-        </section>
+        <GuideTab
+            v-else
+            :guides="guides"
+            :roles="roles"
+            :perks="perks"
+            :role-perks="role_perks"
+        />
     </AppShell>
 </template>

@@ -19,6 +19,7 @@ use App\Models\WotGrindSetting;
 use App\Models\WotTankCrew;
 use App\Models\WotVehicle;
 use App\Services\Wargaming\CrewBoard;
+use App\Services\Wargaming\CrewGuideBoard;
 use App\Services\Wargaming\CrewInventory;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -33,7 +34,7 @@ use Inertia\Response;
  */
 class CrewController extends Controller
 {
-    public function index(Request $request, CrewBoard $board, CrewInventory $inventory): Response
+    public function index(Request $request, CrewBoard $board, CrewInventory $inventory, CrewGuideBoard $guides): Response
     {
         $account = $request->user()->wotAccount;
 
@@ -47,6 +48,8 @@ class CrewController extends Controller
             'crews' => $board->for($account),
             ...$inventory->for($account),
             'battle_pass' => $this->battlePass($account),
+            // `guides`, and the `perks` and `role_perks` they are drawn from.
+            ...$guides->for($account),
             // Passed through as stored, null included — the client tells "never
             // saved" from "saved as empty" by it.
             'settings' => ['crews_filters' => $settings->crews_filters],

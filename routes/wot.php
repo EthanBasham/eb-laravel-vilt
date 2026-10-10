@@ -5,6 +5,7 @@ use App\Http\Controllers\Wot\AccountLinkController;
 use App\Http\Controllers\Wot\BookmarkController;
 use App\Http\Controllers\Wot\CalendarController;
 use App\Http\Controllers\Wot\CrewController;
+use App\Http\Controllers\Wot\CrewGuideController;
 use App\Http\Controllers\Wot\DashboardController;
 use App\Http\Controllers\Wot\GrindController;
 use App\Http\Controllers\Wot\NewsController;
@@ -51,8 +52,8 @@ Route::patch('/grinding/blueprints/{nation}', [GrindController::class, 'updateBl
 
 /*
  * Crews. Four tabs over one page, like the grinding board: the tech-tree board
- * itself, the stockpiles behind it, the Battle Pass roster, and a guide yet to
- * be written.
+ * itself, the stockpiles behind it, the Battle Pass roster, and the perk
+ * guides.
  *
  * Nothing under here is fetched from Wargaming. The public API has no endpoint
  * for a player's own tankmen at all, so every route below writes something
@@ -76,6 +77,16 @@ Route::patch('/crews/books/{bookType}/{nation}', [CrewController::class, 'update
 Route::post('/crews/battle-pass', [CrewController::class, 'storeBattlePassCrew'])->name('crews.battle-pass.store');
 Route::patch('/crews/battle-pass/{crew}', [CrewController::class, 'updateBattlePassCrew'])->name('crews.battle-pass.update');
 Route::delete('/crews/battle-pass/{crew}', [CrewController::class, 'destroyBattlePassCrew'])->name('crews.battle-pass.destroy');
+
+// The Guide tab. A guide is its name; what each role in it trains is saved a
+// role at a time, so the role is part of the path and only the five there are
+// match it.
+Route::post('/crews/guides', [CrewGuideController::class, 'store'])->name('crews.guides.store');
+Route::patch('/crews/guides/{guide}', [CrewGuideController::class, 'update'])->name('crews.guides.update');
+Route::delete('/crews/guides/{guide}', [CrewGuideController::class, 'destroy'])->name('crews.guides.destroy');
+Route::put('/crews/guides/{guide}/roles/{role}', [CrewGuideController::class, 'updateRole'])
+    ->whereIn('role', array_keys((array) config('wargaming.crew_roles')))
+    ->name('crews.guides.role');
 
 // WOT Hub : News
 Route::prefix('news')->group(function () {

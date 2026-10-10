@@ -213,6 +213,88 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Crew perks
+    |--------------------------------------------------------------------------
+    |
+    | Every skill and perk a tanker can train, and which roles can train it —
+    | taken from encyclopedia/crewskills and encyclopedia/crewroles on
+    | 2026-10-10 and kept here rather than fetched: it changes with a patch,
+    | not with a player, and the Guide tab only needs to name and draw them.
+    | Each one's icon is public/images/crew-perks/{key}.png, the API's own
+    | 52px "big" icon mirrored locally because its URL carries a version
+    | (static/2.77.0/…) that stops resolving on a later deploy.
+    |
+    | The descriptions are not the API's, which run to a few words each and
+    | are missing for eleven perks. They are the wording of Wargaming's own
+    | article "Crew Rework Complete: New Perks and Final Improvements"
+    | (worldoftanks.com/news/general-news/crew-perks-expansion-2026/), read
+    | 2026-10-10, with every figure "for perks trained to 100%" as it says.
+    | Sixth Sense is the one perk that article does not describe, so it keeps
+    | the API's sentence. Firefighting's name is also not the API's, which
+    | gives none.
+    |
+    | crew_role_perks is in the order the encyclopedia lists them for the
+    | role, which puts the three or four every role shares first.
+    |
+    */
+
+    'crew_perks' => [
+        'repair' => ['name' => 'Repairs', 'description' => 'When fully trained for all crew members, increases the repair speed of the vehicle\'s damaged modules by 80%.'],
+        'camouflage' => ['name' => 'Concealment', 'description' => 'When fully trained for all crew members, increases vehicle concealment by 80%.'],
+        'brotherhood' => ['name' => 'Brothers in Arms', 'description' => 'When fully trained for all crew members, increases the crew efficiency bonus of the entire crew by 5%.'],
+        'commander_tutor' => ['name' => 'Mentor', 'description' => 'Increases the amount of XP earned by 20% for all crew members. Enables the Commander to replace knocked-out members with 65% effectiveness.'],
+        'commander_eagleEye' => ['name' => 'Recon', 'description' => 'Increases view range by 2% and reduces the penalty to damaged observation devices by 20%.'],
+        'commander_sixthSense' => ['name' => 'Sixth Sense', 'description' => 'Enables the Commander to identify whether their vehicle has been spotted by the enemy.'],
+        'commander_enemyShotPredictor' => ['name' => 'Sound Detection', 'description' => 'Issues an alert about enemy SPG fire with a 0.1 s delay and identifies the direction of the shot. Decreases the negative effect of stunning by 10%.'],
+        'commander_practical' => ['name' => 'Practicality', 'description' => 'Decreases consumable cooldown time by 15%.'],
+        'commander_emergency' => ['name' => 'Emergency', 'description' => 'Increases the crew efficiency bonus by 5% for 15 s after taking enemy damage. The effect does not stack up.'],
+        'commander_coordination' => ['name' => 'Coordination', 'description' => 'Increases aiming speed by 12.5% for 15 s after you spot an enemy vehicle. The effect does not stack up.'],
+        'commander_holdLine' => ['name' => 'Hold the Line', 'description' => 'Increases the crew efficiency bonus by 5% while the enemy team has at least three more vehicles in battle than yours.'],
+        'commander_staySharp' => ['name' => 'Stay Sharp', 'description' => 'Increases the crew efficiency bonus by 5% for 15 s after using a First Aid Kit. Allows a First Aid Kit to be used even if no crew members are injured.'],
+        'gunner_sniper' => ['name' => 'Deadeye', 'description' => 'Increases the chance of critically damaging enemy vehicle modules and injuring enemy crew members with all types of shells by 3%.'],
+        'gunner_smoothTurret' => ['name' => 'Snap Shot', 'description' => 'Decreases gun dispersion during turret rotation by 7.5%.'],
+        'gunner_rancorous' => ['name' => 'Designated Target', 'description' => 'Increases the time before an enemy vehicle is no longer visible inside the Gunner\'s viewing area by 2 s. Enables identification of damaged modules with a 0.5 s delay.'],
+        'gunner_focus' => ['name' => 'Concentration', 'description' => 'Decreases the gun dispersion of a stationary vehicle by 3.5%. The effect starts 3 s after the vehicle stops.'],
+        'gunner_quickAiming' => ['name' => 'Quick Aiming', 'description' => 'Increases aiming speed and turret rotation speed by 2.5%.'],
+        'gunner_armorer' => ['name' => 'Armorer', 'description' => 'Reduces the range of potential damage and penetration to ±5%. Decreases gun dispersion by 1.5%.'],
+        'gunner_pointBlast' => ['name' => 'Point Blank', 'description' => 'Increases maximum potential penetration by 5% when firing at enemy vehicles less than 50 m away.'],
+        'gunner_loneWolf' => ['name' => 'Lone Wolf', 'description' => 'Decreases gun dispersion and increases aiming speed by 5% while there are no allied vehicles within a 300 m radius.'],
+        'driver_virtuoso' => ['name' => 'Clutch Braking', 'description' => 'Increases hull traverse speed by 5%.'],
+        'driver_smoothDriving' => ['name' => 'Smooth Ride', 'description' => 'Decreases gun dispersion when firing on the move by 4%.'],
+        'driver_badRoadsKing' => ['name' => 'Off-Road Driving', 'description' => 'Reduces speed loss on moderately soft terrain by 5% and makes speed loss on soft terrain equal to 100% of the resulting value.'],
+        'driver_rammingMaster' => ['name' => 'Controlled Impact', 'description' => 'Increases ramming damage to enemy vehicles by 20%. Reduces ramming damage to your vehicle by 25% and to your suspension by 50%.'],
+        'driver_motorExpert' => ['name' => 'Engineer', 'description' => 'Increases the top forward and reverse speed of your vehicle by 1 km/h. Reduces the penalty to a damaged engine by 20%.'],
+        'driver_reliablePlacement' => ['name' => 'Reliable Placement', 'description' => 'Increases HE shell damage absorption by 15%. Reduces the chance of engine fire by 15% and damage to your suspension by 15%.'],
+        'driver_suspensionRepair' => ['name' => 'Field Support', 'description' => 'Increases suspension repair speed by 15% at distances of less than 50 m from an allied vehicle.'],
+        'driver_bulletproof' => ['name' => 'Bulletproof', 'description' => 'Increases the crew efficiency bonus by 5% if the amount of damage you block exceeds your vehicle\'s initial hit points.'],
+        'fireFighting' => ['name' => 'Firefighting', 'description' => 'Increases fire extinguishing speed by 80%.'],
+        'radioman_finder' => ['name' => 'Situational Awareness', 'description' => 'Increases view range by 3%.'],
+        'radioman_interference' => ['name' => 'Jamming', 'description' => 'Decreases the time your vehicle remains spotted by the enemy by 1 s.'],
+        'radioman_signalInterception' => ['name' => 'Signal Interception', 'description' => 'Decreases the time to determine whether your vehicle has been spotted by the enemy by 0.75 s.'],
+        'radioman_sideBySide' => ['name' => 'Side By Side', 'description' => 'Increases the crew efficiency bonus by 2.5% at distances of 50 m or less from an allied vehicle of the same type.'],
+        'radioman_expert' => ['name' => 'Communications Expert', 'description' => 'Increases the crew efficiency bonus by 2.5% if the amount of damage you assist exceeds your vehicle\'s initial hit points.'],
+        'radioman_battleTempered' => ['name' => 'Battle Tempered', 'description' => 'Each time the vehicle\'s crew is stunned, decreases the negative effect of stunning by 7.5%, up to a maximum of 30%.'],
+        'radioman_threatSearch' => ['name' => 'Threat Search', 'description' => 'Increases view range by 2% for 5 s after receiving the Sixth Sense alert.'],
+        'loader_pedant' => ['name' => 'Safe Stowage', 'description' => 'Increases ammo rack durability by 25%.'],
+        'loader_desperado' => ['name' => 'Adrenaline Rush', 'description' => 'Decreases gun loading time by 5% if your vehicle has under 25% of its hit points left.'],
+        'loader_intuition' => ['name' => 'Intuition', 'description' => 'Decreases the time of changing shell types in a loaded gun by 60%.'],
+        'loader_perfectCharge' => ['name' => 'Perfect Charge', 'description' => 'Increases shell velocity by 10%.'],
+        'loader_ammunitionImprove' => ['name' => 'Ammo Tuning', 'description' => 'Increases minimum potential damage and minimum potential penetration by 2%.'],
+        'loader_melee' => ['name' => 'Close Combat', 'description' => 'Decreases gun loading time by 2.5% at distances of 50 m or less from the enemy vehicle.'],
+        'loader_magMastery' => ['name' => 'Mag Mastery', 'description' => 'Decreases magazine reload time by 2.5%.'],
+        'loader_secondChance' => ['name' => 'Second Chance', 'description' => 'Reduces gun loading time by 2.5% for the next shell if the previous shot did not cause damage to an enemy vehicle.'],
+    ],
+
+    'crew_role_perks' => [
+        'commander' => ['repair', 'camouflage', 'brotherhood', 'commander_tutor', 'commander_eagleEye', 'commander_sixthSense', 'commander_enemyShotPredictor', 'commander_practical', 'commander_emergency', 'commander_coordination', 'commander_holdLine', 'commander_staySharp'],
+        'gunner' => ['repair', 'camouflage', 'brotherhood', 'gunner_sniper', 'gunner_smoothTurret', 'gunner_rancorous', 'gunner_focus', 'gunner_quickAiming', 'gunner_armorer', 'gunner_pointBlast', 'gunner_loneWolf'],
+        'driver' => ['repair', 'camouflage', 'brotherhood', 'driver_virtuoso', 'driver_smoothDriving', 'driver_badRoadsKing', 'driver_rammingMaster', 'driver_motorExpert', 'driver_reliablePlacement', 'driver_suspensionRepair', 'driver_bulletproof'],
+        'radioman' => ['repair', 'fireFighting', 'camouflage', 'brotherhood', 'radioman_finder', 'radioman_interference', 'radioman_signalInterception', 'radioman_sideBySide', 'radioman_expert', 'radioman_battleTempered', 'radioman_threatSearch'],
+        'loader' => ['repair', 'camouflage', 'brotherhood', 'loader_pedant', 'loader_desperado', 'loader_intuition', 'loader_perfectCharge', 'loader_ammunitionImprove', 'loader_melee', 'loader_magMastery', 'loader_secondChance'],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Blueprint fragment costs
     |--------------------------------------------------------------------------
     |

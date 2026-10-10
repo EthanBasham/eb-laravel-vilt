@@ -120,4 +120,10 @@ class WotAccount extends Model
     {
         return $this->hasMany(WotBattlePassCrew::class);
     }
+
+    /** @return HasMany<WotCrewGuide, $this> */
+    public function crewGuides(): HasMany
+    {
+        return $this->hasMany(WotCrewGuide::class);
+    }
 }

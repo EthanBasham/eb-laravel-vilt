@@ -30,3 +30,8 @@ Wargaming publishes crew roles and the skills attached to them (`encyclopedia/cr
 
 ## Board filters all live on wot_grind_settings
 Every tech-tree board's filter row is a column on that one table, the Crews board's included, merged through `WotGrindSetting::mergeFilters()`. A new board adds a column and a value to `BoardFiltersRequest`'s `board` rule — not a table, and not a second copy of the merge.
+
+## A crew guide stores only the included perks, and perk descriptions come from Wargaming's own text
+`wot_crew_guide_roles.included` is the ordered list of perks to train; the excluded bucket is never stored. It is whatever else `config('wargaming.crew_role_perks')` lists for the role, worked out in PerkOrganizer.vue, so a perk a patch adds lands in excluded without a row being touched and CrewGuideBoard drops a stored perk the role can no longer train. A role with nothing saved has no row. Do not add an `excluded` column or a third "undecided" state.
+
+The descriptions in `config('wargaming.crew_perks')` are Wargaming's own wording, copied from the article named in that file's header, not the API's (which is terse and missing for eleven perks). When a patch changes or adds a perk, take the new text from an official Wargaming page and say which; do not write game effects in from memory, and leave a description null (the tooltip handles it) where no such source exists.

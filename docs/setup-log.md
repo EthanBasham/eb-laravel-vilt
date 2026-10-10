@@ -5183,3 +5183,46 @@ the one account is id 1 on both sides, which is what made a plain data load safe
 - No backup of production was taken before the finance load, for the reason above; the script
   refused to run unless the finance tables were empty, and loaded in one transaction.
 - `users`, `sessions`, `cache`, `jobs` and `migrations` are not copied in either direction.
+
+## 2026-10-10 — Crews: the Guide tab, and where the perks come from
+
+The fourth Crews tab, empty since 2026-09-12, now holds crew guides: named sets saying, for
+each of the five roles, which perks to train and in what order, with a line of notes per role.
+
+- **Tables:** `wot_crew_guides` (a name, per account) and `wot_crew_guide_roles` (one row per
+  guide and role: `included` as an ordered JSON list of perk keys, and `notes`). Two tables
+  rather than a JSON document on the guide because a role is saved the moment a perk is dropped
+  or a note is left, and two such writes must not overwrite each other. Only the included perks
+  are stored; the excluded bucket is whatever else the role can train, worked out on the page.
+- **The perk catalogue is config, not a table:** `wargaming.crew_perks` (44, name and
+  description) and `wargaming.crew_role_perks` (what each role can train, in the encyclopedia's
+  order), generated from `encyclopedia/crewskills` and `encyclopedia/crewroles` on this date.
+  It changes with a patch, not with a player. To refresh it, fetch both endpoints again and
+  regenerate the two arrays.
+- **Icons are mirrored** to `public/images/crew-perks/{key}.png` — the API's 52px `big_icon`.
+  Its URL carries a version (`static/2.77.0/…`) and its `small_icon` URLs already answer with
+  an HTML error page, so neither is linked to directly.
+- **Eleven perks have no description in the API** (Deadeye, Armorer, Off-Road Driving, Reliable
+  Placement, Field Support, Bulletproof, Firefighting, Signal Interception, Battle Tempered,
+  Threat Search, Perfect Charge), and Firefighting has no name there either. The descriptions
+  are left `null` and the tooltip says so; they were not written in from memory. Seven more
+  began with `@`, an unedited-string marker, which is dropped and the wording kept.
+- **Drag and drop is the browser's own** (`draggable`, `dragover`, `drop`) — no library, per
+  the no-new-dependencies rule. It does nothing on a touch screen, so every icon is also a
+  button: arrow keys move it along and across, and Enter, Space or a double click sends it to
+  the other bucket.
+
+## 2026-10-10 — Crews: perk descriptions taken from Wargaming's article instead of the API
+
+Later the same day, at the owner's request for lengthier descriptions. The API has nothing
+longer — `encyclopedia/crewskills` returns the same five fields on the NA, EU and Asia servers,
+its longest description is 144 characters, and the same eleven are missing on all three.
+
+`wargaming.crew_perks` now carries the wording of Wargaming's article "Crew Rework Complete: New
+Perks and Final Improvements" (`worldoftanks.com/news/general-news/crew-perks-expansion-2026/`)
+for 43 of the 44 perks, with its percentages and conditions; the figures are "for perks trained
+to 100%". **Sixth Sense is not described there** and keeps the API's sentence. This replaces the
+"left null" decision in the entry above: nothing is null now. The game guide's own full list
+(`/content/guide/crew/all-skills-perks/`), which the Crew 103 article links to, answered 404.
+
+The article also marks seventeen perks as "with a situational effect"; that label is not stored.
