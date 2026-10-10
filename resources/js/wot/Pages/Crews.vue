@@ -1,6 +1,7 @@
 <script setup>
 import { Head } from '@inertiajs/vue3';
 import { ref } from 'vue';
+import { IconCheck, IconPencil } from '@tabler/icons-vue';
 import AppShell from '../Components/AppShell.vue';
 import EmptyState from '../Components/EmptyState.vue';
 import PageHeader from '../Components/PageHeader.vue';
@@ -33,6 +34,10 @@ const views = [
     { key: 'guide', label: 'Guide' },
 ];
 const view = ref('crews');
+
+// The Battle Pass roster opens as cards to read; this swaps them for the table
+// it is kept up to date in. Held here because the button sits beside the tabs.
+const editingBattlePass = ref(false);
 </script>
 
 <template>
@@ -48,7 +53,22 @@ const view = ref('crews');
             <StatTile dense label="Banked crew XP" :value="short(crews.totals.banked_xp)" />
         </dl>
 
-        <ViewTabs v-model="view" :views="views" label="Crew views" />
+        <ViewTabs v-model="view" :views="views" label="Crew views">
+            <template v-if="view === 'battle-pass'" #aside>
+                <button
+                    type="button"
+                    class="inline-flex items-center gap-1.5 border px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors"
+                    :class="editingBattlePass
+                        ? 'border-wot-gold text-wot-gold'
+                        : 'border-wot-border text-wot-dim hover:text-wot-text'"
+                    :aria-pressed="editingBattlePass"
+                    @click="editingBattlePass = !editingBattlePass"
+                >
+                    <component :is="editingBattlePass ? IconCheck : IconPencil" :size="14" stroke-width="2.25" />
+                    {{ editingBattlePass ? 'Done' : 'Edit' }}
+                </button>
+            </template>
+        </ViewTabs>
 
         <CrewBoard
             v-if="view === 'crews'"
@@ -82,6 +102,7 @@ const view = ref('crews');
         <BattlePassTab
             v-else-if="view === 'battle-pass'"
             :crews="battle_pass"
+            :editing="editingBattlePass"
             :roles="roles"
             :statuses="statuses"
             :genders="genders"

@@ -547,6 +547,31 @@ it('keeps the posting while the tanker is still in the tank', function () {
     expect($crew->fresh())->name->toBe('Eleanor')->tank_id->toBe(100)->crew_role->toBe('gunner');
 });
 
+/**
+ * The cards post someone straight from the barracks: one write carrying the new
+ * status and the tank together. Sent as two, the tank would arrive while they
+ * were still in the barracks and be cleared.
+ */
+it('posts a tanker from the barracks to a tank in one write', function () {
+    [$user, $account] = crewUser();
+    crewLine();
+    $crew = WotBattlePassCrew::create(['wot_account_id' => $account->id, 'name' => 'Ellie', 'status' => 'in_barracks']);
+
+    $this->actingAs($user)->patch(route('wot.crews.battle-pass.update', $crew), ['status' => 'in_tank', 'tank_id' => 100]);
+
+    expect($crew->fresh())->status->toBe('in_tank')->tank_id->toBe(100);
+});
+
+it('sets the role of a tanker in a tank on its own', function () {
+    [$user, $account] = crewUser();
+    crewLine();
+    $crew = WotBattlePassCrew::create(['wot_account_id' => $account->id, 'name' => 'Ellie', 'status' => 'in_tank', 'tank_id' => 100]);
+
+    $this->actingAs($user)->patch(route('wot.crews.battle-pass.update', $crew), ['crew_role' => 'driver']);
+
+    expect($crew->fresh())->crew_role->toBe('driver')->tank_id->toBe(100);
+});
+
 it('rejects a posting to a tank the encyclopedia has never heard of', function () {
     [$user, $account] = crewUser();
     $crew = WotBattlePassCrew::create(['wot_account_id' => $account->id, 'name' => 'Ellie', 'status' => 'in_tank']);

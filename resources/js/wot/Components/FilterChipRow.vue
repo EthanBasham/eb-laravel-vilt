@@ -44,6 +44,12 @@ const props = defineProps({
     // Shown on hover as well as read out, where the chip is a bare figure whose
     // meaning is only obvious from the row it is in.
     titled: { type: Boolean, default: false },
+    /*
+     * The label column's width, as a class. Every row in one panel takes the
+     * same one so their chips start in line; a panel whose labels run longer
+     * than "Nation" and "Tier" asks for a wider column.
+     */
+    labelWidth: { type: String, default: 'w-12' },
 });
 
 defineEmits(['toggle', 'clear']);
@@ -92,7 +98,7 @@ const isRadio = computed(() => props.mode === 'single');
         :role="isRadio ? 'radiogroup' : undefined"
         :aria-label="isRadio ? label : undefined"
     >
-        <span class="w-12 shrink-0 text-xs font-bold uppercase tracking-wider text-wot-dim">{{ label }}</span>
+        <span class="shrink-0 text-xs font-bold uppercase tracking-wider text-wot-dim" :class="labelWidth">{{ label }}</span>
 
         <button
             v-for="item in items"

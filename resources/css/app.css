@@ -92,6 +92,10 @@
     --color-wot-blue-light: #3d9eb3;
     --color-wot-blue-deep: #1e4e66;
 
+    /* The Battle Pass avatars, which are told apart by colour as well as by
+       shape: blue-light for him, this for her. Nothing else uses it. */
+    --color-wot-pink: #e07aa5;
+
     --color-wot-good: #49c7a5;
     --color-wot-bad: #cc4933;
 
