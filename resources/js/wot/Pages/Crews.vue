@@ -11,7 +11,7 @@ import BattlePassTab from '../Components/Crews/BattlePassTab.vue';
 import BooksTable from '../Components/Crews/BooksTable.vue';
 import CrewBoard from '../Components/Crews/CrewBoard.vue';
 import RecruitsPanel from '../Components/Crews/RecruitsPanel.vue';
-import { n, short } from '../lib/format';
+import { n } from '../lib/format';
 
 defineProps({
     crews: { type: Object, required: true },
@@ -50,7 +50,7 @@ const editingBattlePass = ref(false);
             <StatTile dense label="Crews recorded" :value="n(crews.totals.crews)" />
             <StatTile dense tone="good" label="All zero-skill" :value="n(crews.totals.zero_skill_crews)" />
             <StatTile dense tone="gold" label="Maxed crews" :value="n(crews.totals.max_crews)" />
-            <StatTile dense label="Banked crew XP" :value="short(crews.totals.banked_xp)" />
+            <StatTile dense label="Recruits" :value="n(recruits.total)" />
         </dl>
 
         <ViewTabs v-model="view" :views="views" label="Crew views">
