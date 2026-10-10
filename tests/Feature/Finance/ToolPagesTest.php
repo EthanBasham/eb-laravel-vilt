@@ -56,6 +56,15 @@ it('keeps the finance island off the World of Tanks root view', function () {
         ->assertViewIs('finance');
 });
 
+it('names the tab Financial Fleet whatever the app is called', function () {
+    config(['app.name' => 'Something Else']);
+
+    $this->actingAs(User::factory()->create())
+        ->get(route('finance.overview'))
+        ->assertSee('<title inertia>Financial Fleet</title>', escape: false)
+        ->assertDontSee('Something Else');
+});
+
 // Overview
 
 it('summarises the fleet on the overview', function () {

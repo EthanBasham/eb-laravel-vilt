@@ -6,7 +6,11 @@ import { createInertiaApp } from '@inertiajs/vue3';
 // alongside this one — resources/views/wot.blade.php pulls in this file, and
 // layouts/app.blade.php pulls in the other.
 createInertiaApp({
-    title: (title) => (title ? `${title} · ${import.meta.env.VITE_APP_NAME}` : import.meta.env.VITE_APP_NAME),
+    // The area's own name, written here rather than read from APP_NAME: the
+    // site is called something else, and this tab belongs to the sub-project.
+    // resources/views/wot.blade.php carries the same name for the moment before
+    // this script runs.
+    title: (title) => (title ? `${title} | WOT Hub` : 'WOT Hub'),
 
     // eager: true so every page component is in the bundle rather than
     // code-split. There are only a handful of them, and eager resolution keeps

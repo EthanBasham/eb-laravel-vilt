@@ -17,6 +17,20 @@ it('serves the tank icons on wot pages', function () {
         ->assertSee('/images/wot/favicon/apple-touch-icon.png', escape: false);
 });
 
+/**
+ * The tab is named for the sub-project, not for the site: what the root view
+ * prints is what shows until the page's own title arrives, and it must not
+ * follow APP_NAME.
+ */
+it('names the tab WOT Hub whatever the app is called', function () {
+    config(['app.name' => 'Something Else']);
+
+    $this->actingAs(User::factory()->create())
+        ->get(route('wot.dashboard'))
+        ->assertSee('<title inertia>WOT Hub</title>', escape: false)
+        ->assertDontSee('Something Else');
+});
+
 it('leaves the base site on the default icon', function () {
     $this->get('/')
         ->assertOk()

@@ -13,7 +13,7 @@
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
 
-        <title inertia>{{ config('app.name') }}</title>
+        <title inertia>Financial Fleet</title>
 
         @fonts
         @vite(['resources/css/app.css', 'resources/js/finance/app.js'])

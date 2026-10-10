@@ -6,7 +6,10 @@ import { createInertiaApp } from '@inertiajs/vue3';
 // its own root view (resources/views/finance.blade.php), so neither island's
 // bundle ships on the other's pages.
 createInertiaApp({
-    title: (title) => (title ? `${title} · Financial Fleet` : 'Financial Fleet'),
+    // The area's own name rather than APP_NAME, as in the World of Tanks
+    // entrypoint. resources/views/finance.blade.php carries the same name for
+    // the moment before this script runs.
+    title: (title) => (title ? `${title} | Financial Fleet` : 'Financial Fleet'),
 
     resolve: (name) => {
         const pages = import.meta.glob('./Pages/**/*.vue', { eager: true });

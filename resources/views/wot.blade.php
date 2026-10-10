@@ -13,7 +13,7 @@
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
 
-        <title inertia>{{ config('app.name') }}</title>
+        <title inertia>WOT Hub</title>
 
         {{--
             Scoped to this sub-project on purpose. The base site has no <link
