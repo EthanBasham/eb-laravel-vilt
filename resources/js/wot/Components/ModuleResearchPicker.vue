@@ -1,6 +1,7 @@
 <script setup>
 import { router } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
+import CellPopover from './CellPopover.vue';
 import { n } from '../lib/format';
 
 /**
@@ -24,6 +25,10 @@ const props = defineProps({
 });
 
 const open = ref(false);
+
+// What the panel hangs from; it is drawn outside the table, so it has to be
+// told where the button is.
+const trigger = ref(null);
 const busy = ref(null);
 
 const done = computed(() => props.cell.modules.filter((m) => m.is_researched).length);
@@ -64,13 +69,14 @@ const researchAll = () => {
 </script>
 
 <template>
-    <div class="relative inline-block text-right">
+    <div class="inline-block text-right">
         <!-- Stock-only vehicle: nothing to research, which is a real state and
              not the same as having researched everything. -->
         <span v-if="!cell.modules.length" class="text-wot-muted">—</span>
 
         <button
             v-else
+            ref="trigger"
             type="button"
             class="tabular-nums transition-colors"
             :class="cell.module_xp ? 'text-wot-text hover:text-wot-gold' : 'text-wot-dim/50 hover:text-wot-text'"
@@ -83,13 +89,11 @@ const researchAll = () => {
         </button>
 
         <!--
-            Anchored to the cell so opening it doesn't reflow the row. z-30
-            clears both sticky columns, which sit at z-20.
+            A popover rather than a box positioned in the cell, so opening it
+            neither reflows the row nor is clipped by the table's scrolling
+            wrapper — see CellPopover.
         -->
-        <div
-            v-if="open && cell.modules.length"
-            class="absolute right-0 z-30 mt-1 w-72 border border-wot-border bg-wot-panel-solid p-2 text-left shadow-lg"
-        >
+        <CellPopover v-if="open && cell.modules.length" :anchor="trigger" @close="open = false">
             <p class="px-1 pb-2 text-xs uppercase tracking-wider text-wot-dim">
                 {{ cell.name }} — tick what is researched
             </p>
@@ -137,6 +141,6 @@ const researchAll = () => {
                     Close
                 </button>
             </div>
-        </div>
+        </CellPopover>
     </div>
 </template>
