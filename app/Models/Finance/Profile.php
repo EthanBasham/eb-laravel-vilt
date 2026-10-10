@@ -13,12 +13,14 @@ use App\Models\User;
  * @property-read int $age
  * @property-read int $birth_year
  * @property-read int $retirement_year
+ * @property-read float $qcd_limit_in_force
+ * @property-read int $qcd_start_age
  * @property-read int $rmd_start_age
  * @property-read bool $has_state_tax
  * @property-read ?string $state_label
  * @property-read array<string, mixed> $props
  */
-#[Fillable(['user_id', 'birth_date', 'filing_status', 'retirement_age', 'life_expectancy', 'inflation_rate', 'state', 'state_deduction', 'state_brackets', 'local_name', 'local_deduction', 'local_brackets', 'standard_deduction', 'se_tax_rate', 'ltcg_brackets', 'ss_monthly_benefit', 'spouse_birth_date', 'spouse_ss_monthly_benefit', 'spouse_life_expectancy'])]
+#[Fillable(['user_id', 'birth_date', 'filing_status', 'retirement_age', 'life_expectancy', 'inflation_rate', 'state', 'state_deduction', 'state_brackets', 'local_name', 'local_deduction', 'local_brackets', 'standard_deduction', 'qcd_limit', 'se_tax_rate', 'ltcg_brackets', 'ss_monthly_benefit', 'spouse_birth_date', 'spouse_ss_monthly_benefit', 'spouse_life_expectancy'])]
 class Profile extends OwnedModel
 {
     protected $table = 'fin_profiles';
@@ -55,6 +57,7 @@ class Profile extends OwnedModel
             'local_deduction' => 'float',
             'local_brackets' => 'array',
             'standard_deduction' => 'float',
+            'qcd_limit' => 'float',
             'se_tax_rate' => 'float',
             'ltcg_brackets' => 'array',
             'ss_monthly_benefit' => 'float',
@@ -116,6 +119,23 @@ class Profile extends OwnedModel
         ));
     }
 
+    /** The year's limit on qualified charitable distributions, in today's dollars: the profile's own, or the built-in one. */
+    protected function qcdLimitInForce(): Attribute
+    {
+        return Attribute::get(fn (): float => $this->qcd_limit ?? (float) config('finance.qcd.limit'));
+    }
+
+    /**
+     * The age, counted as the year turned, a qualified charitable
+     * distribution can first be made at: 70½, which a birthday in the second
+     * half of the year puts in the year after turning 70. No birth date is
+     * taken as the later of the two.
+     */
+    protected function qcdStartAge(): Attribute
+    {
+        return Attribute::get(fn (): int => (int) config('finance.qcd.age') + (($this->birth_date?->month ?? 12) > 6 ? 1 : 0));
+    }
+
     /** Whether any state or local bracket is saved, so there is tax to add. */
     protected function hasStateTax(): Attribute
     {
@@ -149,6 +169,8 @@ class Profile extends OwnedModel
             'has_state_tax' => $this->has_state_tax,
             // Null on either means the built-in figure for the filing status.
             'standard_deduction' => $this->standard_deduction,
+            // Null means the built-in limit.
+            'qcd_limit' => $this->qcd_limit,
             'ltcg_brackets' => $this->ltcg_brackets,
             'se_tax_rate' => $this->se_tax_rate,
         ]);

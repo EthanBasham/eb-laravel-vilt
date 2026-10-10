@@ -145,23 +145,30 @@ const successTone = (rate) => {
                             <template v-if="resultFor(strategy).beats_baseline === null">—</template>
                             <template v-else>
                                 {{ resultFor(strategy).beats_baseline }}%
-                                <span class="block text-[11px] text-fin-grey-500">of markets, on what is left</span>
+                                <span class="block text-[11px] text-fin-grey-500">of markets, on what can be inherited</span>
                             </template>
                         </td>
                     </tr>
                     <tr v-for="outcome in outcomeRows" :key="outcome.key" class="border-b border-fin-grey-100" :class="{ 'bg-fin-cream-50/60': outcome.strong }">
                         <th scope="row" class="sticky left-0 whitespace-nowrap bg-fin-white px-5 py-2.5 text-left" :class="outcome.strong ? 'font-semibold text-fin-black' : 'font-medium text-fin-charcoal'">
-                            Left after heirs' tax <span class="font-normal text-fin-grey-500">· {{ outcome.label.toLowerCase() }}</span>
+                            Est. Inheritable Amount <span class="font-normal text-fin-grey-500">· {{ outcome.label.toLowerCase() }}</span>
                         </th>
-                        <td v-for="strategy in covered" :key="strategy.id" class="px-3 py-2.5 text-right text-fin-black" :class="{ 'font-semibold': outcome.strong }" :title="money(resultFor(strategy).ending_after_heir_tax[outcome.key])">
-                            {{ moneyBrief(resultFor(strategy).ending_after_heir_tax[outcome.key]) }}
+                        <td v-for="strategy in covered" :key="strategy.id" class="px-3 py-2.5 text-right text-fin-black" :class="{ 'font-semibold': outcome.strong }" :title="money(resultFor(strategy).inheritable[outcome.key])">
+                            {{ moneyBrief(resultFor(strategy).inheritable[outcome.key]) }}
                         </td>
                     </tr>
                     <tr class="border-b border-fin-grey-100">
-                        <th scope="row" class="sticky left-0 bg-fin-white px-5 py-2.5 text-left font-medium text-fin-charcoal">Tax and IRMAA, yours and theirs</th>
+                        <th scope="row" class="sticky left-0 bg-fin-white px-5 py-2.5 text-left font-medium text-fin-charcoal">Est. Leftover Taxes</th>
                         <td v-for="strategy in covered" :key="strategy.id" class="px-3 py-2.5 text-right text-fin-black">
-                            {{ moneyBrief(resultFor(strategy).tax_with_heirs.p50) }}
-                            <span class="block text-[11px] text-fin-grey-500">{{ moneyBrief(resultFor(strategy).tax_with_heirs.p10) }} – {{ moneyBrief(resultFor(strategy).tax_with_heirs.p90) }}</span>
+                            {{ moneyBrief(resultFor(strategy).leftover_tax.p50) }}
+                            <span class="block text-[11px] text-fin-grey-500">{{ moneyBrief(resultFor(strategy).leftover_tax.p10) }} – {{ moneyBrief(resultFor(strategy).leftover_tax.p90) }}</span>
+                        </td>
+                    </tr>
+                    <tr class="border-b border-fin-grey-100">
+                        <th scope="row" class="sticky left-0 bg-fin-white px-5 py-2.5 text-left font-medium text-fin-charcoal">Tax you pay</th>
+                        <td v-for="strategy in covered" :key="strategy.id" class="px-3 py-2.5 text-right text-fin-black">
+                            {{ moneyBrief(resultFor(strategy).lifetime_tax.p50) }}
+                            <span class="block text-[11px] text-fin-grey-500">{{ moneyBrief(resultFor(strategy).lifetime_tax.p10) }} – {{ moneyBrief(resultFor(strategy).lifetime_tax.p90) }}</span>
                         </td>
                     </tr>
                     <tr>

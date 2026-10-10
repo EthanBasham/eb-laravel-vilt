@@ -52,6 +52,7 @@ it('saves a profile\'s own deduction, capital gains brackets and self-employment
 
     $this->actingAs($user)->put(route('finance.settings.update'), profilePayload([
         'standard_deduction' => 20000,
+        'qcd_limit' => 50000,
         'se_tax_rate' => 14.2,
         'ltcg_brackets' => [['rate' => 0, 'up_to' => 60000], ['rate' => 18, 'up_to' => null]],
     ]))->assertSessionHasNoErrors();
@@ -59,6 +60,9 @@ it('saves a profile\'s own deduction, capital gains brackets and self-employment
     $this->actingAs($user)->get(route('finance.settings'))
         ->assertInertia(fn ($page) => $page
             ->where('profile.standard_deduction', 20000)
+            ->where('profile.qcd_limit', 50000)
+            ->where('tax.qcd_limit', 50000)
+            ->where('tax.built_in_qcd_limit', 111000)
             ->where('profile.se_tax_rate', 14.2)
             ->where('tax.deduction', 20000)
             ->where('tax.fica_rate', 7.1)
@@ -77,9 +81,18 @@ it('falls back to the built-in deduction and capital gains brackets for the fili
     $this->actingAs($user)->get(route('finance.settings'))
         ->assertInertia(fn ($page) => $page
             ->where('profile.standard_deduction', null)
+            ->where('profile.qcd_limit', null)
+            ->where('tax.qcd_limit', 111000)
+            // Born in January, so 70½ comes in the year of turning 70.
+            ->where('tax.qcd_start_age', 70)
             ->where('profile.se_tax_rate', 15.3)
             ->where('tax.deduction', 32200)
             ->where('tax.capital_gains_brackets', [[0, 98900], [15, 613700], [20, null]]));
+});
+
+it('refuses a charitable distribution limit below nothing', function () {
+    $this->actingAs(User::factory()->create())->put(route('finance.settings.update'), profilePayload(['qcd_limit' => -1]))
+        ->assertSessionHasErrors('qcd_limit');
 });
 
 it('refuses capital gains brackets that are out of order', function () {
@@ -173,9 +186,9 @@ it('counts state tax in the retirement strategizer', function () {
     Holding::factory()->ofType('brokerage')->create(['user_id' => $user->id, 'balance' => 100_000, 'annual_rate' => 0]);
 
     // Withheld from the conversion: there is no income to pay it from.
-    ConversionStrategy::factory()->ofKind('fill_bracket', ['growth_rate' => 0, 'tax_payment' => 'conversion'])->create(['user_id' => $user->id]);
+    ConversionStrategy::factory()->reported()->ofKind('fill_bracket', ['growth_rate' => 0, 'tax_payment' => 'conversion'])->create(['user_id' => $user->id]);
 
-    $filled = fn (): array => app(ConversionBoard::class)->for($user)['strategies'][0];
+    $filled = fn (): array => app(ConversionBoard::class)->for($user)['report'][0];
 
     $without = $filled();
 

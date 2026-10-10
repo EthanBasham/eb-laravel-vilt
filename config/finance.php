@@ -410,6 +410,16 @@ return [
     |
     */
 
+    /*
+     * Qualified charitable distributions: money given straight from a
+     * traditional IRA to a charity, which is not income. `limit` is the most
+     * one person may give that way in the tax year above, and rises with
+     * inflation; a profile may set its own. `age` is the year a person
+     * reaches 70½ in when born in the first half of a year; born in the
+     * second, it is the year after.
+     */
+    'qcd' => ['limit' => 111000, 'age' => 70],
+
     'rmd' => [
         'start_age' => ['before_1960' => 73, 'from_1960' => 75],
 
@@ -453,11 +463,11 @@ return [
     'conversion_fill_rates' => [10, 12, 22, 24, 32, 35],
 
     /*
-     * How many strategies are set side by side. Only compared strategies are
-     * simulated when the page loads; the rest wait in the holding area.
-     * `default` is how many are compared before a newly made one goes to the
-     * holding area instead; `max` is the most the comparison will take when
-     * strategies are added to it by hand.
+     * How many columns the Roth report holds, each a strategy run on one
+     * projection. Only the report is simulated when the page loads; a
+     * strategy in no column costs it nothing. `default` is where the report
+     * stops filling by itself when starter strategies are added in bulk;
+     * `max` is the most it will take when columns are added by hand.
      */
     'conversion_comparison' => ['default' => 6, 'max' => 12],
 

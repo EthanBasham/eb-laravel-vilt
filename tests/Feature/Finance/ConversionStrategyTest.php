@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Finance\ConversionReportEntry;
 use App\Models\Finance\ConversionStrategy;
 use App\Models\Finance\Flow;
 use App\Models\Finance\Holding;
@@ -39,16 +40,17 @@ function conversionRetiree(float $brokerage = 2_000_000, float $spare = 1_000_00
 }
 
 /**
- * The strategy as the page receives it: its settings, rows and summary.
+ * A strategy's column of the report as the page receives it: its settings,
+ * rows and summary, run on the projection given or on the flows as entered.
  *
  * @param  array<string, mixed>  $settings
  * @return array<string, mixed>
  */
-function runStrategy(User $user, string $kind, array $settings = []): array
+function runStrategy(User $user, string $kind, array $settings = [], ?Scenario $on = null): array
 {
-    $strategy = ConversionStrategy::factory()->ofKind($kind, ['growth_rate' => 0, ...$settings])->create(['user_id' => $user->id]);
+    $strategy = ConversionStrategy::factory()->reported($on)->ofKind($kind, ['growth_rate' => 0, ...$settings])->create(['user_id' => $user->id]);
 
-    return collect(app(ConversionBoard::class)->for($user)['strategies'])->firstWhere('id', $strategy->id);
+    return collect(app(ConversionBoard::class)->for($user)['report'])->firstWhere('strategy_id', $strategy->id);
 }
 
 /** The row for an age: the plan opens at 68. */
@@ -592,13 +594,13 @@ it('leaves heirs nothing to pay on money that was all converted', function () {
 
 // What a strategy is run on
 
-it('builds on the projection it names, and on the flows as entered when it names none', function () {
+it('builds on the projection its column names, and on the flows as entered when that names none', function () {
     $user = conversionRetiree();
     $pension = Flow::factory()->income('pension')->create(['user_id' => $user->id, 'amount' => 60_000, 'frequency' => 'annual']);
     $scenario = Scenario::factory()->create(['user_id' => $user->id, 'name' => 'Optimistic']);
     ScenarioFlow::factory()->create(['scenario_id' => $scenario->id, 'flow_id' => $pension->id, 'overrides' => [2026 => 100_000]]);
 
-    $onScenario = runStrategy($user, 'none', ['scenario_id' => $scenario->id]);
+    $onScenario = runStrategy($user, 'none', on: $scenario);
 
     expect(atAge(runStrategy($user, 'none'), 68)['bracket_income'])->toEqual(60_000)
         ->and(atAge($onScenario, 68)['bracket_income'])->toEqual(100_000)
@@ -610,8 +612,8 @@ it('takes its inflation rate from the strategy, then the projection, then the pr
     $user = conversionRetiree();
     $scenario = Scenario::factory()->create(['user_id' => $user->id, 'bracket_inflation_rate' => 3]);
 
-    expect(runStrategy($user, 'none', ['scenario_id' => $scenario->id, 'inflation_rate' => 4])['assumptions']['inflation_rate'])->toEqual(4)
-        ->and(runStrategy($user, 'none', ['scenario_id' => $scenario->id])['assumptions']['inflation_rate'])->toEqual(3)
+    expect(runStrategy($user, 'none', ['inflation_rate' => 4], $scenario)['assumptions']['inflation_rate'])->toEqual(4)
+        ->and(runStrategy($user, 'none', on: $scenario)['assumptions']['inflation_rate'])->toEqual(3)
         ->and(runStrategy($user, 'none')['assumptions']['inflation_rate'])->toEqual(0);
 });
 
@@ -636,11 +638,11 @@ it('reports each year in its own dollars, against bracket lines that rise with i
  */
 it('reports today\'s dollars when asked, so the same bracket is filled to the same line every year', function () {
     $user = conversionRetiree();
-    $strategy = ConversionStrategy::factory()->ofKind('fill_bracket', ['growth_rate' => 0, 'fill_rate' => 12, 'inflation_rate' => 5])->create(['user_id' => $user->id]);
+    $strategy = ConversionStrategy::factory()->reported()->ofKind('fill_bracket', ['growth_rate' => 0, 'fill_rate' => 12, 'inflation_rate' => 5])->create(['user_id' => $user->id]);
 
     $board = app(ConversionBoard::class);
     ['world' => $world, 'years' => $years] = $board->context($user);
-    $rows = collect($board->simulate($strategy, $world, $years[$strategy->id], inTodaysDollars: true)['rows'])->keyBy('age');
+    $rows = collect($board->simulate($strategy, $world, $years[$strategy->reportEntries()->sole()->id], inTodaysDollars: true)['rows'])->keyBy('age');
 
     expect($rows[68]['bracket_income'])->toEqual(68_550)
         ->and($rows[72]['bracket_income'])->toEqual(68_550)
@@ -648,13 +650,39 @@ it('reports today\'s dollars when asked, so the same bracket is filled to the sa
         ->and($rows[72]['bracket_lines'][1])->toEqual(50_400);
 });
 
+/**
+ * The retiree was born in March, so 70½ falls in the year of turning 70; a
+ * birthday in the second half of the year puts it in the year after.
+ */
+it('carries the charitable distribution limit beside each year from 70½, rising with inflation', function (string $born, int $from) {
+    $user = conversionRetiree();
+    Profile::query()->onlyOwnedBy($user)->sole()->update(['birth_date' => $born]);
+
+    $strategy = runStrategy($user, 'none', ['inflation_rate' => 10]);
+
+    expect(atAge($strategy, $from - 1)['qcd_limit'])->toBeNull()
+        // $111,000 today, two years or three on at 10%.
+        ->and(atAge($strategy, $from)['qcd_limit'])->toEqual(round(111_000 * 1.1 ** ($from - 68)))
+        ->and(atAge(['rows' => $strategy['today']['rows']], $from)['qcd_limit'])->toEqual(111_000);
+})->with([
+    'born in March' => ['1958-03-01', 70],
+    'born in September' => ['1958-09-01', 71],
+]);
+
+it('carries the profile\'s own charitable distribution limit when it has one', function () {
+    $user = conversionRetiree();
+    Profile::query()->onlyOwnedBy($user)->sole()->update(['qcd_limit' => 40_000]);
+
+    expect(atAge(runStrategy($user, 'none'), 75)['qcd_limit'])->toEqual(40_000);
+});
+
 it('grows the balances at the fleet\'s own rate unless the strategy names one', function () {
     $user = conversionRetiree();
     Holding::query()->onlyOwnedBy($user)->update(['annual_rate' => 6]);
 
-    $own = ConversionStrategy::factory()->create(['user_id' => $user->id]);
+    $own = ConversionStrategy::factory()->reported()->create(['user_id' => $user->id]);
 
-    expect(collect(app(ConversionBoard::class)->for($user)['strategies'])->firstWhere('id', $own->id)['assumptions']['growth_rate'])->toEqual(6)
+    expect(collect(app(ConversionBoard::class)->for($user)['report'])->firstWhere('strategy_id', $own->id)['assumptions']['growth_rate'])->toEqual(6)
         ->and(runStrategy($user, 'none', ['growth_rate' => 2])['assumptions']['growth_rate'])->toEqual(2);
 });
 
@@ -679,22 +707,44 @@ it('says at what age the money runs out', function () {
         ->and(runStrategy(conversionRetiree(), 'none')['summary']['short_at_age'])->toBeNull();
 });
 
-it('falls back to the flows as entered when its projection is removed', function () {
+it('runs one strategy on each projection it is reported on, as a column each', function () {
+    $user = conversionRetiree();
+    $pension = Flow::factory()->income('pension')->create(['user_id' => $user->id, 'amount' => 60_000, 'frequency' => 'annual']);
+    $scenario = Scenario::factory()->create(['user_id' => $user->id, 'name' => 'Optimistic']);
+    ScenarioFlow::factory()->create(['scenario_id' => $scenario->id, 'flow_id' => $pension->id, 'overrides' => [2026 => 100_000]]);
+    $strategy = ConversionStrategy::factory()->reported()->reported($scenario)->create(['user_id' => $user->id, 'name' => 'Leave it']);
+
+    $this->actingAs($user)->get(route('finance.retirement'))
+        ->assertInertia(fn ($page) => $page
+            ->has('report', 2)
+            ->where('report.0.label', 'Leave it · As entered')
+            ->where('report.0.strategy_id', $strategy->id)
+            ->where('report.0.scenario_id', null)
+            ->where('report.0.rows.0.bracket_income', 60_000)
+            ->where('report.1.label', 'Leave it · Optimistic')
+            ->where('report.1.strategy_id', $strategy->id)
+            ->where('report.1.scenario_id', $scenario->id)
+            ->where('report.1.rows.0.bracket_income', 100_000)
+            ->has('strategies', 1)
+            ->where('strategies.0.projections', [null, $scenario->id]));
+});
+
+it('takes a strategy\'s column out of the report when its projection is removed, and keeps the strategy', function () {
     $user = conversionRetiree();
     $scenario = Scenario::factory()->create(['user_id' => $user->id]);
-    $strategy = ConversionStrategy::factory()->create(['user_id' => $user->id, 'scenario_id' => $scenario->id]);
+    $strategy = ConversionStrategy::factory()->reported()->reported($scenario)->create(['user_id' => $user->id]);
 
     $scenario->delete();
 
-    expect($strategy->fresh()->scenario_id)->toBeNull();
+    expect($strategy->fresh()->reportEntries()->pluck('scenario_id')->all())->toBe([null]);
 });
 
 // The page
 
 it('gives the page the lines a year is charted against, and each strategy run', function () {
     $user = conversionRetiree();
-    ConversionStrategy::factory()->ofKind('even')->create(['user_id' => $user->id, 'name' => 'Even']);
-    ConversionStrategy::factory()->create(['name' => 'Somebody else\'s']);
+    ConversionStrategy::factory()->reported()->ofKind('even')->create(['user_id' => $user->id, 'name' => 'Even']);
+    ConversionStrategy::factory()->reported()->create(['name' => 'Somebody else\'s']);
 
     $this->actingAs($user)->get(route('finance.retirement'))
         ->assertOk()
@@ -708,13 +758,13 @@ it('gives the page the lines a year is charted against, and each strategy run', 
             ->where('defaults.even', [68, 72])
             ->where('defaults.fill_bracket_irmaa', [68, 80])
             ->where('defaults.none', null)
-            ->has('strategies', 1)
-            ->where('strategies.0.name', 'Even')
-            ->where('strategies.0.kind_label', 'Even conversions before RMDs')
-            ->has('strategies.0.rows', 13)
-            ->has('strategies.0.today.rows', 13)
-            ->has('strategies.0.today.summary.tax_with_heirs')
-            ->has('strategies.0.summary.tax_with_heirs'));
+            ->has('report', 1)
+            ->where('report.0.name', 'Even')
+            ->where('report.0.kind_label', 'Even conversions before RMDs')
+            ->has('report.0.rows', 13)
+            ->has('report.0.today.rows', 13)
+            ->has('report.0.today.summary.tax_with_heirs')
+            ->has('report.0.summary.tax_with_heirs'));
 });
 
 it('has a tab for each retirement tool, and no others', function (string $tab, string $component) {
@@ -740,7 +790,6 @@ function strategyPayload(array $overrides = []): array
     return [
         'name' => 'Fill the 22%',
         'kind' => 'fill_bracket',
-        'scenario_id' => null,
         'convert_from_age' => null,
         'convert_until_age' => null,
         'fill_rate' => 22,
@@ -782,19 +831,16 @@ it('saves a strategy without a name, and copies it without one', function () {
     expect(ConversionStrategy::query()->onlyOwnedBy($user)->pluck('name')->all())->toBe([null, null]);
 });
 
-it('calls a strategy by its name, or by its projection and its kind when it has none', function () {
+it('calls a strategy by its name, or by its kind when it has none', function () {
     $user = conversionRetiree();
-    $scenario = Scenario::factory()->create(['user_id' => $user->id, 'name' => 'Lean years']);
     ConversionStrategy::factory()->ofKind('even')->create(['user_id' => $user->id]);
-    ConversionStrategy::factory()->ofKind('even')->held()->create(['user_id' => $user->id, 'scenario_id' => $scenario->id]);
-    ConversionStrategy::factory()->ofKind('even')->held()->create(['user_id' => $user->id, 'scenario_id' => $scenario->id, 'name' => 'My pick']);
+    ConversionStrategy::factory()->ofKind('even')->create(['user_id' => $user->id, 'name' => 'My pick']);
 
     $this->actingAs($user)->get(route('finance.retirement'))
         ->assertInertia(fn ($page) => $page
             ->where('strategies.0.name', null)
-            ->where('strategies.0.label', 'As entered · Even conversions before RMDs')
-            ->where('held.0.label', 'Lean years · Even conversions before RMDs')
-            ->where('held.1.label', 'My pick'));
+            ->where('strategies.0.label', 'Even conversions before RMDs')
+            ->where('strategies.1.label', 'My pick'));
 });
 
 it('adds one strategy of each kind to start from', function () {
@@ -825,14 +871,8 @@ it('refuses a strategy it could not run', function (array $overrides, string $fi
     'more than all of the tax from outside' => [['tax_payment' => 'percent', 'tax_outside_amount' => 150], 'tax_outside_amount'],
 ]);
 
-it('will not build on someone else\'s projection', function () {
-    $this->actingAs(conversionRetiree())
-        ->post(route('finance.retirement.strategies.store'), strategyPayload(['scenario_id' => Scenario::factory()->create()->id]))
-        ->assertSessionHasErrors('scenario_id');
-});
-
 it('hides another user\'s strategy behind a 404', function (string $method, string $route) {
-    $strategy = ConversionStrategy::factory()->create(['name' => 'Theirs']);
+    $strategy = ConversionStrategy::factory()->reported()->create(['name' => 'Theirs']);
 
     $this->actingAs(conversionRetiree())->{$method}(route($route, $strategy), strategyPayload())->assertNotFound();
 
@@ -904,22 +944,22 @@ it('takes the tax set by hand out of the converted money, and no more than the t
 it('marks an unnamed strategy with a year set by hand, and leaves a name alone', function () {
     $user = conversionRetiree();
     $overrides = [2028 => ['conversion' => 50_000, 'withheld' => null]];
-    ConversionStrategy::factory()->ofKind('even')->create(['user_id' => $user->id, 'overrides' => $overrides]);
-    ConversionStrategy::factory()->ofKind('even')->create(['user_id' => $user->id, 'overrides' => $overrides, 'name' => 'My pick']);
-    ConversionStrategy::factory()->ofKind('even')->create(['user_id' => $user->id]);
+    ConversionStrategy::factory()->reported()->ofKind('even')->create(['user_id' => $user->id, 'overrides' => $overrides]);
+    ConversionStrategy::factory()->reported()->ofKind('even')->create(['user_id' => $user->id, 'overrides' => $overrides, 'name' => 'My pick']);
+    ConversionStrategy::factory()->reported()->ofKind('even')->create(['user_id' => $user->id]);
 
     $this->actingAs($user)->get(route('finance.retirement'))
         ->assertInertia(fn ($page) => $page
-            ->where('strategies.0.label', 'As entered · Even conversions before RMDs [C]')
+            ->where('strategies.0.label', 'Even conversions before RMDs [C]')
             ->where('strategies.0.is_customized', true)
             ->where('strategies.1.label', 'My pick')
-            ->where('strategies.2.label', 'As entered · Even conversions before RMDs')
+            ->where('strategies.2.label', 'Even conversions before RMDs')
             ->where('strategies.2.is_customized', false));
 });
 
 it('keeps the years set by hand, dropping any with nothing set', function () {
     $user = conversionRetiree();
-    $strategy = ConversionStrategy::factory()->ofKind('even')->create(['user_id' => $user->id]);
+    $strategy = ConversionStrategy::factory()->reported()->ofKind('even')->create(['user_id' => $user->id]);
 
     $this->actingAs($user)->patch(route('finance.retirement.strategies.update', $strategy), strategyPayload(['overrides' => [
         2028 => ['conversion' => 50_000, 'withheld' => null],
@@ -964,6 +1004,21 @@ it('previews what settings would convert each year, in today\'s dollars, without
         ->and(ConversionStrategy::query()->count())->toBe(0);
 });
 
+it('previews on the projection asked for', function () {
+    $user = conversionRetiree(spare: 0);
+    $pension = Flow::factory()->income('pension')->create(['user_id' => $user->id, 'amount' => 20_000, 'frequency' => 'annual']);
+    $scenario = Scenario::factory()->create(['user_id' => $user->id]);
+    ScenarioFlow::factory()->create(['scenario_id' => $scenario->id, 'flow_id' => $pension->id, 'overrides' => [2026 => 60_000]]);
+
+    $converted = fn (?int $scenarioId): float => $this->actingAs($user)
+        ->postJson(route('finance.retirement.strategies.preview'), strategyPayload(['tax_payment' => 'conversion', 'growth_rate' => 0, 'scenario_id' => $scenarioId]))
+        ->assertOk()
+        ->json('rows.0.conversion');
+
+    // The same bracket has $40,000 less room in it on the projection.
+    expect($converted(null) - $converted($scenario->id))->toEqual(40_000);
+});
+
 it('will not preview settings it could not save', function (array $overrides, string $field) {
     $this->actingAs(conversionRetiree())
         ->postJson(route('finance.retirement.strategies.preview'), strategyPayload($overrides))
@@ -978,197 +1033,241 @@ it('asks a guest to sign in before previewing', function () {
     $this->postJson(route('finance.retirement.strategies.preview'), strategyPayload())->assertUnauthorized();
 });
 
-// The holding area
+// The report
 
-it('runs only the strategies being compared, and lists the rest as settings alone', function () {
+it('runs only what is in the report, and lists every strategy as settings alone', function () {
     $user = conversionRetiree();
     $scenario = Scenario::factory()->create(['user_id' => $user->id, 'name' => 'Lean years']);
-    ConversionStrategy::factory()->ofKind('even')->create(['user_id' => $user->id, 'name' => 'Compared']);
-    ConversionStrategy::factory()->ofKind('lump')->held()->create(['user_id' => $user->id, 'name' => 'Waiting', 'scenario_id' => $scenario->id]);
+    ConversionStrategy::factory()->reported($scenario)->ofKind('even')->create(['user_id' => $user->id, 'name' => 'Reported']);
+    ConversionStrategy::factory()->ofKind('lump')->create(['user_id' => $user->id, 'name' => 'Waiting']);
 
     $this->actingAs($user)->get(route('finance.retirement'))
         ->assertInertia(fn ($page) => $page
-            ->has('strategies', 1)
-            ->where('strategies.0.name', 'Compared')
-            ->has('strategies.0.rows')
-            ->has('held', 1)
-            ->where('held.0.name', 'Waiting')
-            ->where('held.0.kind_label', 'One large conversion')
-            ->where('held.0.scenario_name', 'Lean years')
-            ->missing('held.0.rows')
-            ->missing('held.0.summary')
+            ->has('report', 1)
+            ->where('report.0.name', 'Reported')
+            ->where('report.0.assumptions.scenario_name', 'Lean years')
+            ->has('report.0.rows')
+            ->has('strategies', 2)
+            ->where('strategies.0.projections', [$scenario->id])
+            ->where('strategies.1.name', 'Waiting')
+            ->where('strategies.1.kind_label', 'One large conversion')
+            ->where('strategies.1.projections', [])
+            ->missing('strategies.0.rows')
+            ->missing('strategies.1.summary')
             ->where('comparison', ['count' => 1, 'default' => 6, 'max' => 12]));
 });
 
-it('leaves held strategies out of the Monte Carlo runs', function () {
+it('leaves a strategy in no report out of the Monte Carlo runs', function () {
     $user = conversionRetiree();
-    ConversionStrategy::factory()->ofKind('even')->create(['user_id' => $user->id]);
-    $held = ConversionStrategy::factory()->ofKind('lump')->held()->create(['user_id' => $user->id]);
+    ConversionStrategy::factory()->reported()->ofKind('even')->create(['user_id' => $user->id]);
+    ConversionStrategy::factory()->ofKind('lump')->create(['user_id' => $user->id]);
 
     $monteCarlo = app(ConversionMonteCarlo::class)->for($user);
 
     expect($monteCarlo['simulations'])->toBe(MonteCarloRun::for($user)->runs)
-        ->and($monteCarlo['results']['strategies'])->not->toHaveKey($held->id);
+        ->and($monteCarlo['results']['strategies'])->toHaveCount(1);
 });
 
-it('compares a new strategy while there is room, and holds it once there are six', function (int $compared, bool $joins) {
+it('keeps a new strategy out of the report until it is added', function () {
     $user = User::factory()->create();
-    ConversionStrategy::factory()->count($compared)->create(['user_id' => $user->id]);
-    // Held ones take up no room.
-    ConversionStrategy::factory()->held()->create(['user_id' => $user->id]);
 
-    $this->actingAs($user)->post(route('finance.retirement.strategies.store'), strategyPayload(['name' => 'Newest']))->assertSessionHasNoErrors();
+    $this->actingAs($user)->post(route('finance.retirement.strategies.store'), strategyPayload())->assertSessionHasNoErrors();
 
-    expect(ConversionStrategy::query()->where('name', 'Newest')->sole()->is_compared)->toBe($joins);
-})->with([
-    'five compared' => [5, true],
-    'six compared' => [6, false],
-]);
+    expect(ConversionStrategy::query()->onlyOwnedBy($user)->sole()->reportEntries()->count())->toBe(0);
+});
 
-it('puts a copy where it was copied from, and flashes it to be opened', function (int $compared, bool $fromReport, bool $joins) {
+it('leaves a strategy where it is in the report when it is edited', function () {
     $user = User::factory()->create();
-    ConversionStrategy::factory()->count($compared)->create(['user_id' => $user->id]);
-    $strategy = ConversionStrategy::factory()->create(['user_id' => $user->id, 'is_compared' => $fromReport]);
+    $strategy = ConversionStrategy::factory()->reported()->create(['user_id' => $user->id]);
+
+    $this->actingAs($user)->patch(route('finance.retirement.strategies.update', $strategy), strategyPayload(['name' => 'Renamed']))->assertSessionHasNoErrors();
+
+    expect($strategy->fresh()->name)->toBe('Renamed')
+        ->and($strategy->reportEntries()->count())->toBe(1);
+});
+
+it('copies a strategy onto the same projections, and flashes the copy to be opened', function () {
+    $user = User::factory()->create();
+    $scenario = Scenario::factory()->create(['user_id' => $user->id]);
+    $strategy = ConversionStrategy::factory()->reported()->reported($scenario)->create(['user_id' => $user->id]);
 
     $response = $this->actingAs($user)->post(route('finance.retirement.strategies.duplicate', $strategy));
 
     $copy = ConversionStrategy::query()->latest('id')->first();
     $response->assertSessionHas('copied', $copy->id);
-    expect($copy->is_compared)->toBe($joins);
+    expect($copy->reportEntries()->pluck('scenario_id')->all())->toBe([null, $scenario->id]);
+});
+
+it('copies a strategy into only as much of the report as there is room for', function () {
+    $user = User::factory()->create();
+    ConversionStrategy::factory()->count(11)->reported()->create(['user_id' => $user->id]);
+    $strategy = ConversionStrategy::query()->onlyOwnedBy($user)->first();
+
+    $this->actingAs($user)->post(route('finance.retirement.strategies.duplicate', $strategy));
+    $this->actingAs($user)->post(route('finance.retirement.strategies.duplicate', $strategy))
+        ->assertSessionHas('success', 'No conversion made from No conversion. The report is full, so not every column of it was copied.');
+
+    expect(ConversionReportEntry::query()->onlyOwnedBy($user)->count())->toBe(12)
+        ->and(ConversionStrategy::query()->onlyOwnedBy($user)->count())->toBe(13);
+});
+
+it('adds a strategy to the report on the projections named, once each', function () {
+    $user = User::factory()->create();
+    $scenario = Scenario::factory()->create(['user_id' => $user->id]);
+    $strategy = ConversionStrategy::factory()->reported()->create(['user_id' => $user->id]);
+
+    $this->actingAs($user)->post(route('finance.retirement.report.store'), ['strategy_id' => $strategy->id, 'projections' => [null, $scenario->id]])->assertSessionHasNoErrors();
+
+    expect($strategy->reportEntries()->pluck('scenario_id')->all())->toBe([null, $scenario->id]);
+});
+
+it('will not add a thirteenth column to the report', function () {
+    $user = User::factory()->create();
+    ConversionStrategy::factory()->count(12)->reported()->create(['user_id' => $user->id]);
+    $strategy = ConversionStrategy::factory()->create(['user_id' => $user->id]);
+
+    $this->actingAs($user)->post(route('finance.retirement.report.store'), ['strategy_id' => $strategy->id, 'projections' => [null]])
+        ->assertSessionHas('error', 'No more than 12 can be in the report at once. Take some out first.');
+
+    expect($strategy->reportEntries()->count())->toBe(0);
+});
+
+it('refuses to add to the report what is not the user\'s own', function (Closure $payload, string $field) {
+    $user = User::factory()->create();
+
+    $this->actingAs($user)->post(route('finance.retirement.report.store'), $payload($user))->assertSessionHasErrors($field);
+
+    expect(ConversionReportEntry::query()->count())->toBe(0);
 })->with([
-    'from the holding area, with room in the report' => [0, false, false],
-    'from the report, past the six a new strategy stops at' => [6, true, true],
-    'from a report already at its twelve' => [11, true, false],
+    'another user\'s strategy' => [fn () => ['strategy_id' => ConversionStrategy::factory()->create()->id, 'projections' => [null]], 'strategy_id'],
+    'another user\'s projection' => [fn (User $user) => ['strategy_id' => ConversionStrategy::factory()->create(['user_id' => $user->id])->id, 'projections' => [Scenario::factory()->create()->id]], 'projections.0'],
+    'no projection at all' => [fn (User $user) => ['strategy_id' => ConversionStrategy::factory()->create(['user_id' => $user->id])->id, 'projections' => []], 'projections'],
 ]);
 
-it('keeps a strategy where it is when it is edited', function () {
+it('takes one column out of the report and leaves its strategy and its other columns', function () {
     $user = User::factory()->create();
-    $strategy = ConversionStrategy::factory()->held()->create(['user_id' => $user->id]);
+    $scenario = Scenario::factory()->create(['user_id' => $user->id]);
+    $strategy = ConversionStrategy::factory()->reported()->reported($scenario)->create(['user_id' => $user->id]);
 
-    $this->actingAs($user)->patch(route('finance.retirement.strategies.update', $strategy), strategyPayload(['name' => 'Renamed']))->assertSessionHasNoErrors();
+    $this->actingAs($user)->delete(route('finance.retirement.report.destroy', $strategy->reportEntries()->whereNull('scenario_id')->sole()))->assertRedirect();
 
-    expect($strategy->fresh()->only(['name', 'is_compared']))->toBe(['name' => 'Renamed', 'is_compared' => false]);
+    expect($strategy->fresh()->reportEntries()->pluck('scenario_id')->all())->toBe([$scenario->id]);
 });
 
-it('brings a strategy into the comparison and sends it back to the holding area', function () {
-    $user = User::factory()->create();
-    $strategy = ConversionStrategy::factory()->held()->create(['user_id' => $user->id]);
+it('hides another user\'s column of the report behind a 404', function () {
+    $theirs = ConversionReportEntry::factory()->create();
 
-    $this->actingAs($user)->post(route('finance.retirement.strategies.compare', $strategy))->assertRedirect();
+    $this->actingAs(User::factory()->create())->delete(route('finance.retirement.report.destroy', $theirs))->assertNotFound();
 
-    expect($strategy->fresh()->is_compared)->toBeTrue();
-
-    $this->actingAs($user)->delete(route('finance.retirement.strategies.hold', $strategy))->assertRedirect();
-
-    expect($strategy->fresh()->is_compared)->toBeFalse();
+    expect($theirs->fresh())->not->toBeNull();
 });
 
-it('will not bring a thirteenth strategy into the comparison', function () {
+it('replaces the report with each strategy named on each projection named', function () {
     $user = User::factory()->create();
-    ConversionStrategy::factory()->count(12)->create(['user_id' => $user->id]);
-    $strategy = ConversionStrategy::factory()->held()->create(['user_id' => $user->id]);
+    $scenario = Scenario::factory()->create(['user_id' => $user->id]);
+    $leaves = ConversionStrategy::factory()->reported()->create(['user_id' => $user->id]);
+    [$first, $second] = ConversionStrategy::factory()->count(2)->create(['user_id' => $user->id])->all();
+    $theirs = ConversionReportEntry::factory()->create();
 
-    $this->actingAs($user)->post(route('finance.retirement.strategies.compare', $strategy))
-        ->assertSessionHas('error', 'No more than 12 strategies can be in the report at once. Move one to the holding area first.');
+    $this->actingAs($user)->put(route('finance.retirement.report.replace'), ['strategies' => [$first->id, $second->id], 'projections' => [null, $scenario->id]])->assertSessionHasNoErrors();
 
-    expect($strategy->fresh()->is_compared)->toBeFalse();
+    expect(ConversionReportEntry::query()->onlyOwnedBy($user)->inDefaultOrder()->get()->map->only(['conversion_strategy_id', 'scenario_id'])->all())->toBe([
+        ['conversion_strategy_id' => $first->id, 'scenario_id' => null],
+        ['conversion_strategy_id' => $second->id, 'scenario_id' => null],
+        ['conversion_strategy_id' => $first->id, 'scenario_id' => $scenario->id],
+        ['conversion_strategy_id' => $second->id, 'scenario_id' => $scenario->id],
+    ])
+        ->and($leaves->fresh())->not->toBeNull()
+        // Another user's report is not theirs to empty.
+        ->and($theirs->fresh())->not->toBeNull();
 });
 
-it('replaces the comparison with the strategies named, holding every other one', function () {
+it('clears the report without removing a strategy', function () {
     $user = User::factory()->create();
-    $wasCompared = ConversionStrategy::factory()->create(['user_id' => $user->id]);
-    $wasHeld = ConversionStrategy::factory()->held()->create(['user_id' => $user->id]);
-    $stays = ConversionStrategy::factory()->create(['user_id' => $user->id]);
-    $theirs = ConversionStrategy::factory()->create();
+    ConversionStrategy::factory()->count(2)->reported()->create(['user_id' => $user->id]);
+    $theirs = ConversionReportEntry::factory()->create();
 
-    $this->actingAs($user)->put(route('finance.retirement.strategies.comparison'), ['strategies' => [$wasHeld->id, $stays->id]])->assertSessionHasNoErrors();
+    $this->actingAs($user)->delete(route('finance.retirement.report.clear'))->assertRedirect();
 
-    expect($wasCompared->fresh()->is_compared)->toBeFalse()
-        ->and($wasHeld->fresh()->is_compared)->toBeTrue()
-        ->and($stays->fresh()->is_compared)->toBeTrue()
-        // Another user's comparison is not theirs to empty.
-        ->and($theirs->fresh()->is_compared)->toBeTrue();
+    expect(ConversionReportEntry::query()->onlyOwnedBy($user)->count())->toBe(0)
+        ->and(ConversionStrategy::query()->onlyOwnedBy($user)->count())->toBe(2)
+        // Another user's report is left as it was.
+        ->and($theirs->fresh())->not->toBeNull();
 });
 
-it('clears the comparison into the holding area without removing anything', function () {
+it('refuses a report it cannot make', function (Closure $payload, string $field, string $message) {
     $user = User::factory()->create();
-    ConversionStrategy::factory()->count(2)->create(['user_id' => $user->id]);
-    $theirs = ConversionStrategy::factory()->create();
+    ConversionStrategy::factory()->reported()->create(['user_id' => $user->id]);
 
-    $this->actingAs($user)->delete(route('finance.retirement.strategies.comparison.clear'))->assertRedirect();
-
-    expect(ConversionStrategy::query()->onlyOwnedBy($user)->pluck('is_compared')->all())->toBe([false, false])
-        // Another user's comparison is left as it was.
-        ->and($theirs->fresh()->is_compared)->toBeTrue();
-});
-
-it('refuses a comparison it cannot make', function (Closure $strategies, string $field, string $message) {
-    $user = User::factory()->create();
-    $compared = ConversionStrategy::factory()->create(['user_id' => $user->id]);
-
-    $this->actingAs($user)->put(route('finance.retirement.strategies.comparison'), ['strategies' => $strategies($user)])
+    $this->actingAs($user)->put(route('finance.retirement.report.replace'), $payload($user))
         ->assertSessionHasErrors([$field => $message]);
 
-    expect($compared->fresh()->is_compared)->toBeTrue();
+    expect(ConversionReportEntry::query()->onlyOwnedBy($user)->count())->toBe(1);
 })->with([
-    'of nothing' => [fn () => [], 'strategies', 'Pick at least one strategy for the report.'],
-    'of more than twelve' => [fn (User $user) => ConversionStrategy::factory()->held()->count(13)->create(['user_id' => $user->id])->modelKeys(), 'strategies', 'No more than 12 strategies can be in the report at once.'],
-    'of another user\'s strategy' => [fn () => [ConversionStrategy::factory()->create()->id], 'strategies.0', 'The selected strategies.0 is invalid.'],
-]);
-
-it('will not move another user\'s strategy in or out of the comparison', function (string $method, string $route, bool $startsCompared) {
-    $strategy = ConversionStrategy::factory()->create(['is_compared' => $startsCompared]);
-
-    $this->actingAs(User::factory()->create())->{$method}(route($route, $strategy))->assertNotFound();
-
-    expect($strategy->fresh()->is_compared)->toBe($startsCompared);
-})->with([
-    ['post', 'finance.retirement.strategies.compare', false],
-    ['delete', 'finance.retirement.strategies.hold', true],
+    'of no strategy' => [fn () => ['strategies' => [], 'projections' => [null]], 'strategies', 'Pick at least one strategy for the report.'],
+    'on no projection' => [fn (User $user) => ['strategies' => ConversionStrategy::query()->onlyOwnedBy($user)->pluck('id')->all(), 'projections' => []], 'projections', 'Pick at least one projection to run them on.'],
+    'of more than twelve columns' => [
+        fn (User $user) => [
+            'strategies' => ConversionStrategy::factory()->count(7)->create(['user_id' => $user->id])->modelKeys(),
+            'projections' => [null, Scenario::factory()->create(['user_id' => $user->id])->id],
+        ],
+        'strategies', 'No more than 12 can be in the report at once: 7 strategies on 2 projections is 14.',
+    ],
+    'of another user\'s strategy' => [fn () => ['strategies' => [ConversionStrategy::factory()->create()->id], 'projections' => [null]], 'strategies.0', 'The selected strategies.0 is invalid.'],
+    'on another user\'s projection' => [fn (User $user) => ['strategies' => ConversionStrategy::query()->onlyOwnedBy($user)->pluck('id')->all(), 'projections' => [Scenario::factory()->create()->id]], 'projections.0', 'The selected projections.0 is invalid.'],
 ]);
 
 // Starting with one of each kind
 
-it('makes one of each kind for the projection named, each unnamed and so called after it', function () {
+it('puts one of each kind in the report on the projection named, each unnamed', function () {
     $user = User::factory()->create();
     $scenario = Scenario::factory()->create(['user_id' => $user->id, 'name' => 'Lean years']);
 
     $this->actingAs($user)->post(route('finance.retirement.strategies.starters'), ['scenario_id' => $scenario->id])
-        ->assertSessionHas('success', 'One strategy of each kind added on Lean years.');
+        ->assertSessionHas('success', 'One strategy of each kind is in the report on Lean years.');
 
     $made = ConversionStrategy::query()->onlyOwnedBy($user)->orderBy('id')->get();
     expect($made->pluck('kind')->all())->toBe(['none', 'lump', 'even', 'fixed', 'fill_bracket', 'fill_bracket_irmaa'])
-        ->and($made->pluck('scenario_id')->unique()->all())->toBe([$scenario->id])
         ->and($made->pluck('name')->unique()->all())->toBe([null])
-        ->and($made->first()->label)->toBe('Lean years · No conversion')
-        ->and($made->where('is_compared', true))->toHaveCount(6);
+        ->and($made->first()->label)->toBe('No conversion')
+        ->and(ConversionReportEntry::query()->onlyOwnedBy($user)->pluck('scenario_id')->all())->toBe(array_fill(0, 6, $scenario->id));
 });
 
-it('makes a set for every saved projection, comparing the first six and holding the rest', function () {
+it('uses the starters already made when asked for them on another projection, and makes again only one that was changed', function () {
+    $user = User::factory()->create();
+    $scenario = Scenario::factory()->create(['user_id' => $user->id]);
+    $this->actingAs($user)->post(route('finance.retirement.strategies.starters'));
+    ConversionReportEntry::query()->onlyOwnedBy($user)->delete();
+    ConversionStrategy::query()->onlyOwnedBy($user)->where('kind', 'even')->sole()->update(['convert_from_age' => 70]);
+
+    $this->actingAs($user)->post(route('finance.retirement.strategies.starters'), ['scenario_id' => $scenario->id]);
+
+    expect(ConversionStrategy::query()->onlyOwnedBy($user)->count())->toBe(7)
+        ->and(ConversionStrategy::query()->onlyOwnedBy($user)->where('kind', 'even')->count())->toBe(2)
+        ->and(ConversionReportEntry::query()->onlyOwnedBy($user)->count())->toBe(6);
+});
+
+it('puts the one set on every saved projection, filling the report to six and no further', function () {
     $user = User::factory()->create();
     $first = Scenario::factory()->create(['user_id' => $user->id, 'name' => 'A cautious']);
-    $second = Scenario::factory()->create(['user_id' => $user->id, 'name' => 'B hopeful']);
+    Scenario::factory()->create(['user_id' => $user->id, 'name' => 'B hopeful']);
     Scenario::factory()->create(['name' => 'Somebody else\'s']);
 
     $this->actingAs($user)->post(route('finance.retirement.strategies.starters'), ['every_projection' => true])
-        ->assertSessionHas('success', '12 strategies added: one of each kind for each of your 2 projections. 6 of them are in the holding area, as the report is full.');
+        ->assertSessionHas('success', 'One strategy of each kind is ready. 6 of the 12 it comes to on each of your 2 projections joined the report, which fills no further by itself; add the rest from the strategies above it.');
 
-    $made = ConversionStrategy::query()->onlyOwnedBy($user)->orderBy('id')->get();
-    expect($made)->toHaveCount(12)
-        ->and($made->where('scenario_id', $first->id)->pluck('is_compared')->unique()->all())->toBe([true])
-        ->and($made->where('scenario_id', $second->id)->pluck('is_compared')->unique()->values()->all())->toBe([false])
-        ->and($made->last()->label)->toBe('B hopeful · Fill the tax or IRMAA bracket');
+    expect(ConversionStrategy::query()->onlyOwnedBy($user)->count())->toBe(6)
+        ->and(ConversionReportEntry::query()->onlyOwnedBy($user)->pluck('scenario_id')->all())->toBe(array_fill(0, 6, $first->id));
 });
 
-it('makes one set on the income and expenses as entered when no projection is saved', function () {
+it('puts the set on the income and expenses as entered when no projection is saved', function () {
     $user = User::factory()->create();
 
-    $this->actingAs($user)->post(route('finance.retirement.strategies.starters'), ['every_projection' => true])->assertSessionHas('success');
+    $this->actingAs($user)->post(route('finance.retirement.strategies.starters'), ['every_projection' => true])
+        ->assertSessionHas('success', 'One strategy of each kind is in the report.');
 
-    $made = ConversionStrategy::query()->onlyOwnedBy($user)->get();
-    expect($made)->toHaveCount(6)
-        ->and($made->pluck('scenario_id')->unique()->all())->toBe([null])
-        ->and($made->first()->label)->toBe('As entered · No conversion');
+    expect(ConversionStrategy::query()->onlyOwnedBy($user)->count())->toBe(6)
+        ->and(ConversionReportEntry::query()->onlyOwnedBy($user)->pluck('scenario_id')->all())->toBe(array_fill(0, 6, null));
 });
 
 it('will not make a set on another user\'s projection', function () {

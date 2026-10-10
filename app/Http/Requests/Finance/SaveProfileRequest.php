@@ -38,6 +38,9 @@ class SaveProfileRequest extends FinanceRequest
             // Null on the deduction or the capital gains brackets hands them
             // back to the built-in figures for the filing status.
             'standard_deduction' => ['nullable', 'numeric', 'min:0', 'max:999999999'],
+            // Null hands the limit on charitable distributions back to the
+            // built-in one.
+            'qcd_limit' => ['nullable', 'numeric', 'min:0', 'max:999999999'],
             'se_tax_rate' => ['sometimes', 'required', 'numeric', 'between:0,50'],
             ...$this->bracketRules('ltcg_brackets'),
             'ltcg_brackets' => ['nullable', 'array', 'min:1', 'max:'.self::MAX_BRACKETS],

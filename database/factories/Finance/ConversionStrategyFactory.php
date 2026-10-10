@@ -3,7 +3,9 @@
 namespace Database\Factories\Finance;
 
 use Illuminate\Database\Eloquent\Factories\Factory;
+use App\Models\Finance\ConversionReportEntry;
 use App\Models\Finance\ConversionStrategy;
+use App\Models\Finance\Scenario;
 use App\Models\User;
 
 /**
@@ -22,7 +24,6 @@ class ConversionStrategyFactory extends Factory
     {
         return [
             'user_id' => User::factory(),
-            'scenario_id' => null,
             'name' => null,
             'kind' => 'none',
             'tax_payment' => 'outside',
@@ -33,16 +34,19 @@ class ConversionStrategyFactory extends Factory
     }
 
     /**
+     * In the report: on the projection given, or on the income and expenses
+     * as entered. A strategy is in no report until it is put in one.
+     */
+    public function reported(?Scenario $scenario = null): static
+    {
+        return $this->has(ConversionReportEntry::factory()->state(['scenario_id' => $scenario?->id]), 'reportEntries');
+    }
+
+    /**
      * A kind of strategy, with whatever settings it takes.
      *
      * @param  array<string, mixed>  $settings
      */
-    /** Waiting in the holding area rather than being compared. */
-    public function held(): static
-    {
-        return $this->state(['is_compared' => false]);
-    }
-
     public function ofKind(string $kind, array $settings = []): static
     {
         return $this->state(['kind' => $kind, ...$settings]);

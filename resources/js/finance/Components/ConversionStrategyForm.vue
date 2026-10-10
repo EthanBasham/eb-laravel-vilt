@@ -14,12 +14,17 @@ import { numberOrNull } from '../lib/input';
  * projection", "use the usual window" — so each shows what it falls back to
  * as its placeholder rather than making the fallback up as a value.
  *
+ * A strategy does not name the projection it is run on: that is chosen where
+ * it is put in the report, which is not this form's business.
+ *
  * A strategy being edited can also be customised: the settings give way to
  * a table of every year of the plan, where a year's conversion, and how much
  * of its tax comes out of the converted money, can be set by hand. The
  * settings still decide every year left alone. The table is filled by asking
  * the server what the settings as they stand would do, each time a year is
- * changed, so the years after it follow.
+ * changed, so the years after it follow. The years set belong to the
+ * strategy, so they hold on every projection; the table shows them on one at
+ * a time.
  */
 const props = defineProps({
     open: { type: Boolean, default: false },
@@ -47,7 +52,6 @@ const dialog = ref(null);
 const blank = {
     name: '',
     kind: 'fill_bracket',
-    scenario_id: null,
     convert_from_age: null,
     convert_until_age: null,
     fill_rate: 22,
@@ -75,7 +79,11 @@ const customizing = ref(false);
 const years = ref([]);
 const preview = useHttp({});
 
-preview.transform(() => sent(form.data()));
+// The projection the table shows the years on. Null is the income and
+// expenses as entered.
+const previewOn = ref(null);
+
+preview.transform(() => ({ ...sent(form.data()), scenario_id: previewOn.value }));
 
 const customized = computed(() => Object.keys(form.overrides).length);
 
@@ -133,6 +141,8 @@ watch(() => props.open, (open) => {
     // A copy, so that a year set here and then cancelled is not left on the
     // page's own strategy.
     form.overrides = Object.fromEntries(Object.entries(props.strategy?.overrides ?? {}).map(([year, row]) => [year, { ...row }]));
+    // The first projection it is reported on, if it is on any.
+    previewOn.value = props.strategy?.projections[0] ?? null;
 
 }, { immediate: true });
 
@@ -152,10 +162,11 @@ const onKindChange = () => {
     }
 };
 
-const projectionRate = computed(() => props.scenarios.find((scenario) => scenario.id === form.scenario_id)?.bracket_inflation_rate ?? props.profile.inflation_rate);
+// The projections to choose from: none first, then as listed.
+const projections = computed(() => [{ id: null, name: 'No projection' }, ...props.scenarios]);
 
-// What an unnamed strategy is shown as: its projection and its kind.
-const unnamed = computed(() => `${props.scenarios.find((scenario) => scenario.id === form.scenario_id)?.name ?? 'As entered'} · ${kind.value.label}${customized.value ? ' [C]' : ''}`);
+// What an unnamed strategy is shown as: its kind.
+const unnamed = computed(() => `${kind.value.label}${customized.value ? ' [C]' : ''}`);
 
 const save = () => {
     const options = { preserveScroll: true, onSuccess: () => dialog.value?.close() };
@@ -185,6 +196,13 @@ const save = () => {
                 <p v-if="preview.hasErrors || overridesError" class="text-xs text-fin-red-600">
                     {{ overridesError || 'These settings cannot be run as they stand. Go back to the settings and correct them.' }}
                 </p>
+
+                <label v-if="scenarios.length" class="flex items-center gap-2 text-xs font-medium text-fin-grey-600">
+                    Shown on
+                    <select v-model="previewOn" class="!w-56" @change="refresh">
+                        <option v-for="projection in projections" :key="projection.id ?? 'none'" :value="projection.id">{{ projection.name }}</option>
+                    </select>
+                </label>
 
                 <div class="max-h-[26rem] overflow-auto rounded-xl border border-fin-grey-200" :class="{ 'opacity-60': preview.processing }" :aria-busy="preview.processing">
                     <table class="w-full text-sm">
@@ -229,7 +247,7 @@ const save = () => {
                 </div>
 
                 <div class="flex items-start justify-between gap-3">
-                    <p class="text-xs text-fin-grey-500">In today's dollars. A blank field follows the strategy and shows what it comes to; an amount typed in sets that year by hand, whatever its age range. The years after it are worked out again each time.</p>
+                    <p class="text-xs text-fin-grey-500">In today's dollars. A blank field follows the strategy and shows what it comes to; an amount typed in sets that year by hand, whatever its age range{{ scenarios.length ? ', on every projection the strategy is run on' : '' }}. The years after it are worked out again each time.</p>
                     <button v-if="customized" type="button" class="fin-btn fin-btn-quiet shrink-0" @click="unpinAll">Clear all</button>
                 </div>
             </div>
@@ -297,16 +315,10 @@ const save = () => {
                 </div>
 
                 <fieldset>
-                    <legend class="mb-3 text-[11px] font-semibold uppercase tracking-wider text-fin-grey-400">Run it on</legend>
-                    <div class="grid gap-4 sm:grid-cols-3">
-                        <Field label="Projection" :error="form.errors.scenario_id">
-                            <select v-model="form.scenario_id">
-                                <option :value="null">No projection</option>
-                                <option v-for="scenario in scenarios" :key="scenario.id" :value="scenario.id">{{ scenario.name }}</option>
-                            </select>
-                        </Field>
-                        <Field label="Inflation" suffix="% / yr" hint="Adjusts brackets and IRMAA tiers" :error="form.errors.inflation_rate">
-                            <input v-model.number="form.inflation_rate" type="number" min="-5" max="15" step="0.1" :placeholder="String(projectionRate)">
+                    <legend class="mb-3 text-[11px] font-semibold uppercase tracking-wider text-fin-grey-400">Assume</legend>
+                    <div class="grid gap-4 sm:grid-cols-2">
+                        <Field label="Inflation" suffix="% / yr" hint="Adjusts brackets and IRMAA tiers. Blank follows each projection it is run on." :error="form.errors.inflation_rate">
+                            <input v-model.number="form.inflation_rate" type="number" min="-5" max="15" step="0.1" :placeholder="String(profile.inflation_rate)">
                         </Field>
                         <Field label="Growth" suffix="% / yr" hint="Override projected rates" :error="form.errors.growth_rate">
                             <input v-model.number="form.growth_rate" type="number" min="-10" max="20" step="0.1" :placeholder="String(growthRate)">

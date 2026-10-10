@@ -5,15 +5,16 @@ namespace App\Services\Finance;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use App\Jobs\Finance\RunConversionMonteCarlo;
-use App\Models\Finance\ConversionStrategy;
+use App\Models\Finance\ConversionReportEntry;
 use App\Models\Finance\MonteCarloRun;
 use App\Models\User;
 use Random\Engine\Mt19937;
 use Random\Randomizer;
 
 /**
- * The conversion strategies run through many random markets instead of one
- * steady one: how often each lasts, and the spread of what it leaves.
+ * The Roth report's columns — each a conversion strategy on a projection —
+ * run through many random markets instead of one steady one: how often each
+ * lasts, and the spread of what it leaves.
  *
  * Each market is a path of yearly returns and yearly inflation. A strategy's
  * own growth and inflation rates are the averages; the user's two volatility
@@ -38,7 +39,7 @@ class ConversionMonteCarlo
     private const WORST_INFLATION = -5.0;
 
     /** The figures of a run's summary that describe() reports on. */
-    private const REPORTED = ['short_at_age', 'ending_after_heir_tax', 'tax_with_heirs', 'lifetime_tax', 'irmaa', 'converted'];
+    private const REPORTED = ['short_at_age', 'inheritable', 'leftover_tax', 'lifetime_tax', 'irmaa', 'converted'];
 
     /** The outcomes reported for each figure: a bad, a typical and a good one. */
     private const PERCENTILES = ['p10' => 10, 'p50' => 50, 'p90' => 90];
@@ -55,7 +56,7 @@ class ConversionMonteCarlo
     {
         $settings = MonteCarloRun::for($user);
         $context = $this->board->context($user);
-        $simulations = $settings->runs * $context['strategies']->count();
+        $simulations = $settings->runs * $context['entries']->count();
         $limit = (int) config('finance.monte_carlo.page_limit');
 
         $state = [
@@ -92,7 +93,7 @@ class ConversionMonteCarlo
      */
     public function needsBackground(User $user, MonteCarloRun $settings): bool
     {
-        return $settings->runs * ConversionStrategy::query()->onlyOwnedBy($user)->onlyCompared()->count() > (int) config('finance.monte_carlo.page_limit');
+        return $settings->runs * ConversionReportEntry::query()->onlyOwnedBy($user)->count() > (int) config('finance.monte_carlo.page_limit');
     }
 
     /**
@@ -143,26 +144,26 @@ class ConversionMonteCarlo
     }
 
     /**
-     * Every strategy through the same markets.
+     * Every column of the report through the same markets, keyed by entry id.
      *
-     * @param  array{world: array<string, mixed>, strategies: Collection<int, ConversionStrategy>, years: array<int, array<int, array<string, mixed>>>}  $context
-     * @return array{runs: int, baseline_id: int|null, strategies: array<int, array<string, mixed>>}
+     * "Beats no conversion" is measured against the first column on the same
+     * projection whose strategy does not convert, if there is one: against
+     * another projection's it would measure the projection, not the strategy.
+     *
+     * @param  array{world: array<string, mixed>, entries: Collection<int, ConversionReportEntry>, years: array<int, array<int, array<string, mixed>>>}  $context
+     * @return array{runs: int, strategies: array<int, array<string, mixed>>}
      */
     public function run(array $context, MonteCarloRun $settings): array
     {
-        ['world' => $world, 'strategies' => $strategies, 'years' => $years] = $context;
+        ['world' => $world, 'entries' => $entries, 'years' => $years] = $context;
 
         $steps = $world['ages']['last'] - $world['ages']['now'] + 1;
         $draws = $this->draws($settings->runs, $steps, $settings->seed);
 
-        // What "beats no conversion" is measured against: the first strategy
-        // that does not convert, if there is one.
-        $baselineId = $strategies->firstWhere('kind', 'none')?->id;
-
         $outcomes = [];
 
-        foreach ($strategies as $strategy) {
-            $inflation = $this->board->inflationRate($strategy, $world);
+        foreach ($entries as $entry) {
+            $inflation = $this->board->inflationRate($entry->strategy, $world, $entry->scenario);
 
             foreach ($draws as $run => [$returnScores, $inflationScores]) {
                 $path = [
@@ -173,12 +174,12 @@ class ConversionMonteCarlo
 
                 // In today's dollars: each market has its own inflation, so
                 // only one year's prices let them be ranked against each other.
-                ['rows' => $rows, 'summary' => $summary] = $this->board->simulate($strategy, $world, $years[$strategy->id], $path, inTodaysDollars: true);
+                ['rows' => $rows, 'summary' => $summary] = $this->board->simulate($entry->strategy, $world, $years[$entry->id], $path, inTodaysDollars: true, scenario: $entry->scenario);
 
                 // Only the figures describe() reads: a full summary for every
-                // run of every strategy is hundreds of megabytes at the most
+                // run of every column is hundreds of megabytes at the most
                 // the settings allow.
-                $outcomes[$strategy->id][$run] = [
+                $outcomes[$entry->id][$run] = [
                     'summary' => Arr::only($summary, self::REPORTED),
                     'balances' => array_column($rows, 'total_balance'),
                 ];
@@ -189,8 +190,11 @@ class ConversionMonteCarlo
 
         return [
             'runs' => $settings->runs,
-            'baseline_id' => $baselineId,
-            'strategies' => collect($outcomes)->map(fn (array $runs, int $id): array => $this->describe($runs, $id === $baselineId ? null : ($outcomes[$baselineId] ?? null), $ages))->all(),
+            'strategies' => $entries->mapWithKeys(function (ConversionReportEntry $entry) use ($entries, $outcomes, $ages): array {
+                $baseline = $entries->first(fn (ConversionReportEntry $other): bool => $other->strategy->kind === 'none' && $other->scenario_id === $entry->scenario_id);
+
+                return [$entry->id => $this->describe($outcomes[$entry->id], $baseline === null || $baseline->is($entry) ? null : $outcomes[$baseline->id], $ages)];
+            })->all(),
         ];
     }
 
@@ -198,7 +202,7 @@ class ConversionMonteCarlo
      * One strategy's runs, reduced to what the page shows.
      *
      * @param  list<array{summary: array<string, mixed>, balances: list<float>}>  $runs
-     * @param  list<array{summary: array<string, mixed>, balances: list<float>}>|null  $baseline  The no-conversion strategy's runs, market for market.
+     * @param  list<array{summary: array<string, mixed>, balances: list<float>}>|null  $baseline  The runs of not converting on the same projection, market for market.
      * @param  list<int>  $ages
      * @return array<string, mixed>
      */
@@ -209,8 +213,10 @@ class ConversionMonteCarlo
 
         $beats = null;
 
+        // Measured on what can be inherited, the report's own bottom line:
+        // the balance less the heirs' tax and the tax on the savings' gains.
         if ($baseline !== null) {
-            $wins = count(array_filter(array_keys($runs), fn (int $run): bool => $runs[$run]['summary']['ending_after_heir_tax'] > $baseline[$run]['summary']['ending_after_heir_tax']));
+            $wins = count(array_filter(array_keys($runs), fn (int $run): bool => $runs[$run]['summary']['inheritable'] > $baseline[$run]['summary']['inheritable']));
             $beats = round($wins / count($runs) * 100, 1);
         }
 
@@ -222,8 +228,8 @@ class ConversionMonteCarlo
             // short, when any do.
             'typical_short_age' => $shortAges === [] ? null : (int) round($this->percentile(array_values($shortAges), 50)),
             'beats_baseline' => $beats,
-            'ending_after_heir_tax' => $figure('ending_after_heir_tax'),
-            'tax_with_heirs' => $figure('tax_with_heirs'),
+            'inheritable' => $figure('inheritable'),
+            'leftover_tax' => $figure('leftover_tax'),
             'lifetime_tax' => $figure('lifetime_tax'),
             'irmaa' => $figure('irmaa'),
             'converted' => $figure('converted'),
@@ -296,20 +302,20 @@ class ConversionMonteCarlo
 
     /**
      * A fingerprint of everything a run reads: the settings, the household,
-     * the strategies and their projections. Stored results whose fingerprint
-     * no longer matches are out of date.
+     * the report's columns and their projections. Stored results whose
+     * fingerprint no longer matches are out of date.
      *
-     * @param  array{world: array<string, mixed>, strategies: Collection<int, ConversionStrategy>, years: array<int, array<int, array<string, mixed>>>}  $context
+     * @param  array{world: array<string, mixed>, entries: Collection<int, ConversionReportEntry>, years: array<int, array<int, array<string, mixed>>>}  $context
      */
     private function hash(array $context, MonteCarloRun $settings): string
     {
-        ['world' => $world, 'strategies' => $strategies, 'years' => $years] = $context;
+        ['world' => $world, 'entries' => $entries, 'years' => $years] = $context;
 
         return hash('sha256', json_encode([
             $settings->only(['runs', 'return_volatility', 'inflation_volatility', 'seed']),
             collect($world)->except(['profile', 'federal', 'tax_on'])->all(),
             collect($world['profile']->getAttributes())->except(['id', 'created_at', 'updated_at'])->all(),
-            $strategies->map(fn (ConversionStrategy $strategy): array => [...$strategy->props, 'inflation' => $this->board->inflationRate($strategy, $world)])->all(),
+            $entries->map(fn (ConversionReportEntry $entry): array => [...$entry->strategy->props, 'entry' => $entry->id, 'inflation' => $this->board->inflationRate($entry->strategy, $world, $entry->scenario)])->all(),
             $years,
             now()->year,
         ]));

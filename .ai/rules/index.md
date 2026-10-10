@@ -13,6 +13,6 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Services/Finance/** | .ai/rules/finance.md |
 | app/Http/Controllers/Wot/GrindController.php, app/Services/Wargaming/FreeXpBoard.php, app/Models/WotTank*.php, resources/js/wot/Components/Module*.vue | .ai/rules/grinding.md |
 | resources/js/wot/** | .ai/rules/js-wot.md |
-| app/Models/Finance/*.php | .ai/rules/models-finance.md |
+| app/Models/Finance/*.php, app/Models/Finance/Conversion*.php | .ai/rules/models-finance.md |
 | app/Http/Requests/Finance/** | .ai/rules/requests-finance.md |
 | tests/Feature/Wot/** | .ai/rules/wot.md |

@@ -1,6 +1,6 @@
 <script setup>
 import { Deferred, router, usePage } from '@inertiajs/vue3';
-import { IconArchive, IconCopy, IconFileTypePdf, IconPencil, IconPlus, IconSparkles } from '@tabler/icons-vue';
+import { IconCopy, IconFileTypePdf, IconPencil, IconPlus, IconSparkles, IconTableMinus, IconX } from '@tabler/icons-vue';
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import Card from '../Components/Card.vue';
 import ConversionStrategyForm from '../Components/ConversionStrategyForm.vue';
@@ -11,20 +11,21 @@ import LineChart from '../Components/LineChart.vue';
 import MonteCarloCard from '../Components/MonteCarloCard.vue';
 import RetirementTabs from '../Components/RetirementTabs.vue';
 import StatTile from '../Components/StatTile.vue';
-import StrategyHoldingArea from '../Components/StrategyHoldingArea.vue';
+import StrategyLibrary from '../Components/StrategyLibrary.vue';
 import StrategyPicker from '../Components/StrategyPicker.vue';
 import ThresholdChart from '../Components/ThresholdChart.vue';
 import { age, bucketLines, useStrategyBoard } from '../composables/useStrategyBoard';
 import { colorOf, money, moneyBrief } from '../lib/format';
 
 /**
- * The Roth conversion tab: strategies built by the user and run by the
- * server over the same lifetime. Those in the report are shown: one alone as
- * a report on that strategy, several set side by side.
+ * The Roth conversion tab: strategies built by the user, and a report whose
+ * columns are each one of them run on one projection. One column alone is a
+ * report on it; several are set side by side — the same strategy across
+ * projections, several strategies on the same one, or both.
  *
- * Nothing here calculates. Each strategy arrives with its year-by-year rows
+ * Nothing here calculates. Each column arrives with its year-by-year rows
  * and its summary already worked out (ConversionBoard); the page chooses what
- * to show and which strategy to look at closely.
+ * to show and which column to look at closely.
  */
 const props = defineProps({
     profile: Object,
@@ -40,48 +41,55 @@ const props = defineProps({
     scenarios: Array,
     brackets: Array,
     irmaa_tiers: Array,
+    // The report's columns, worked out. Each has its strategy's settings, but
+    // its `id` and `label` are the column's own; the strategy is `strategy_id`.
+    report: Array,
+    // Every strategy, in the report or not, as settings alone.
     strategies: Array,
-    // The holding area: strategies not in the report, as settings alone.
-    held: Array,
-    // { count, default, max }: how many are in the report, and how many can be.
+    // { count, default, max }: how many columns the report has, and can have.
     comparison: Object,
     // Deferred: undefined until the follow-up request brings it.
     monte_carlo: Object,
 });
 
 
-// One of each kind for every saved projection — or, with none saved, one set
-// on the income and expenses as entered.
+// One of each kind, in the report on every saved projection — or, with none
+// saved, on the income and expenses as entered.
 const addStarters = () => router.post('/finance/retirement/strategies/starters', { every_projection: true }, { preserveScroll: true });
 
-// One of each kind on the projection chosen; `null` is the income and
-// expenses as entered.
+// One of each kind, in the report on the projection chosen; `null` is the
+// income and expenses as entered.
 const setFor = ref(null);
 const addSet = () => router.post('/finance/retirement/strategies/starters', { scenario_id: setFor.value }, { preserveScroll: true });
 
-const hold = (strategy) => router.delete(`/finance/retirement/strategies/${strategy.id}/compare`, { preserveScroll: true });
-// Sends everything in the report to the holding area. Nothing is removed.
-const clearComparison = () => {
-    if (window.confirm(`Clear the report? The ${props.strategies.length} in it move to the holding area; none is removed.`)) {
-        router.delete('/finance/retirement/strategies/comparison', { preserveScroll: true });
+// The strategy a column of the report is a run of.
+const strategyOf = (column) => props.strategies.find((strategy) => strategy.id === column.strategy_id);
+
+// Takes one column out of the report. Its strategy stays.
+const takeOut = (column) => router.delete(`/finance/retirement/report/${column.id}`, { preserveScroll: true });
+
+// Empties the report. No strategy is removed.
+const clearReport = () => {
+    if (window.confirm(`Clear the report? The ${props.report.length} in it leave it; no strategy is removed.`)) {
+        router.delete('/finance/retirement/report', { preserveScroll: true });
     }
 };
 
-const duplicate = (strategy) => router.post(`/finance/retirement/strategies/${strategy.id}/duplicate`, {}, { preserveScroll: true });
+const duplicate = (column) => router.post(`/finance/retirement/strategies/${column.strategy_id}/duplicate`, {}, { preserveScroll: true });
 
-// A copy is made to be changed, so it opens for editing as soon as it lands,
-// wherever it was copied from. The server flashes its id.
+// A copy is made to be changed, so it opens for editing as soon as it lands.
+// The server flashes its id.
 const page = usePage();
 
 watch(() => page.props.flash?.copied, (id) => {
-    const copy = [...props.strategies, ...props.held].find((strategy) => strategy.id === id);
+    const copy = props.strategies.find((strategy) => strategy.id === id);
 
     if (copy) edit(copy);
 });
 
-const colorOfStrategy = (strategy) => colorOf(props.strategies.findIndex((candidate) => candidate.id === strategy.id));
+const colorOfColumn = (column) => colorOf(props.report.findIndex((candidate) => candidate.id === column.id));
 
-// The selected strategy's spread across the Monte Carlo markets, beside its
+// The selected column's spread across the Monte Carlo markets, beside its
 // steady-market line, when there are results for it.
 const fan = computed(() => {
     const result = props.monte_carlo?.results?.strategies?.[selectedId.value];
@@ -96,8 +104,8 @@ const fan = computed(() => {
     };
 });
 
-// One strategy in the report is reported on alone, with nothing to compare.
-const isSingle = computed(() => props.strategies.length === 1);
+// One column in the report is reported on alone, with nothing to compare.
+const isSingle = computed(() => props.report.length === 1);
 
 /*
  * The report as a PDF, by way of the browser's own print dialog. The page
@@ -119,7 +127,7 @@ const printReport = async () => {
     };
 
     root.classList.add('fin-printing');
-    document.title = `Roth conversion report · ${isSingle.value ? selected.value.label : `${props.strategies.length} strategies`}`;
+    document.title = `Roth conversion report · ${isSingle.value ? selected.value.label : `${props.report.length} compared`}`;
     window.addEventListener('afterprint', restore);
 
     await new Promise((resolve) => { requestAnimationFrame(() => requestAnimationFrame(resolve)); });
@@ -131,7 +139,7 @@ const printReport = async () => {
 
 /*
  * Which dollars the report is in: each year's own, or all of them brought
- * back to today's prices. Every strategy arrives worked out both ways, so
+ * back to today's prices. Every column arrives worked out both ways, so
  * this only picks; the choice is remembered in this browser.
  */
 const DOLLARS_KEY = 'finance.roth.dollars';
@@ -157,8 +165,8 @@ const showDollars = (today) => {
 
 const dollars = computed(() => (inTodaysDollars.value ? 'in today\'s dollars' : 'in the dollars of each year, not today\'s'));
 
-// The strategies with the figures of whichever dollars are being shown.
-const reported = computed(() => props.strategies.map((strategy) => (inTodaysDollars.value ? { ...strategy, ...strategy.today } : strategy)));
+// The columns with the figures of whichever dollars are being shown.
+const reported = computed(() => props.report.map((strategy) => (inTodaysDollars.value ? { ...strategy, ...strategy.today } : strategy)));
 
 const { form, build, edit, selectedId, selectedIndex, selected, lines } = useStrategyBoard(() => reported.value, { label: (strategy) => strategy.label });
 
@@ -216,7 +224,7 @@ const figures = [
 ];
 
 const bestOf = (figure) => {
-    if (!figure.best || props.strategies.length < 2) return null;
+    if (!figure.best || props.report.length < 2) return null;
 
     const values = reported.value.map((strategy) => strategy.summary[figure.key]);
 
@@ -242,7 +250,7 @@ const convertsWhen = (strategy) => {
 <template>
     <FinShell title="Retirement strategizer" subtitle="Build strategies for moving traditional money to Roth, then report on one, or compare several, by what each does to your tax, your Medicare premiums and what is left.">
         <template #actions>
-            <div v-if="strategies.length" class="flex gap-1.5" role="group" aria-label="Dollars the report is in">
+            <div v-if="report.length" class="flex gap-1.5" role="group" aria-label="Dollars the report is in">
                 <button
                     v-for="choice in [{ today: true, label: 'Today\'s dollars' }, { today: false, label: 'Each year\'s dollars' }]" :key="choice.label" type="button"
                     class="fin-pill" :aria-pressed="choice.today === inTodaysDollars" @click="showDollars(choice.today)"
@@ -250,7 +258,7 @@ const convertsWhen = (strategy) => {
                     {{ choice.label }}
                 </button>
             </div>
-            <span v-if="strategies.length" class="h-6 w-px bg-fin-grey-300" aria-hidden="true" />
+            <span v-if="report.length" class="h-6 w-px bg-fin-grey-300" aria-hidden="true" />
             <button type="button" class="fin-btn fin-btn-primary" @click="build"><IconPlus :size="16" /> Strategy</button>
             <span class="h-6 w-px bg-fin-grey-300" aria-hidden="true" />
             <form class="flex flex-wrap items-center gap-2" @submit.prevent="addSet">
@@ -283,27 +291,27 @@ const convertsWhen = (strategy) => {
                 There is no traditional balance in your fleet, so there is nothing to convert and every strategy will come out the same.
             </p>
 
-            <EmptyState v-if="!strategies.length && !held.length" title="No strategies yet" :body="`A strategy is a way of converting, the projection it runs on, an inflation rate, and who inherits. Put one in the report to look at it alone, or several to set them side by side.${scenarios.length > 1 ? ' Starting with a set for each projection puts the first six in the report and the rest in the holding area.' : ''}`">
-                <button type="button" class="fin-btn fin-btn-primary" @click="addStarters"><IconSparkles :size="16" /> {{ scenarios.length ? `Start with one of each kind for each projection (${scenarios.length})` : 'Start with one of each kind' }}</button>
+            <EmptyState v-if="!strategies.length" title="No strategies yet" :body="`A strategy is a way of converting, an inflation rate, and who inherits. Put it in the report on a projection to look at it alone, on several to see how it holds up across them, or beside other strategies to compare them.${scenarios.length > 1 ? ` Starting with one of each kind puts them in the report on your first projection; add them on the others from there.` : ''}`">
+                <button type="button" class="fin-btn fin-btn-primary" @click="addStarters"><IconSparkles :size="16" /> Start with one of each kind</button>
                 <button type="button" class="fin-btn fin-btn-quiet" @click="build"><IconPlus :size="16" /> Build one</button>
             </EmptyState>
 
             <template v-else>
-                <StrategyHoldingArea class="printing:hidden" :held="held" :kinds="kinds" :scenarios="scenarios" :comparison="comparison" @build="build" @edit="edit" />
+                <StrategyLibrary class="printing:hidden" :strategies="strategies" :kinds="kinds" :scenarios="scenarios" :comparison="comparison" @edit="edit" />
 
-                <p v-if="!strategies.length" class="rounded-xl border border-fin-gold-300 bg-fin-gold-100 px-4 py-3 text-sm text-fin-charcoal">
-                    Nothing is in the report. Add one strategy from the holding area above for a report on it alone, or several to compare them.
+                <p v-if="!report.length" class="rounded-xl border border-fin-gold-300 bg-fin-gold-100 px-4 py-3 text-sm text-fin-charcoal">
+                    Nothing is in the report. Add a strategy above on one projection for a report on it alone, or on several — or several strategies — to compare them.
                 </p>
             </template>
 
-            <template v-if="strategies.length">
-                <!-- One strategy: its figures as tiles, with nothing to be best of. -->
-                <Card v-if="isSingle" :title="selected.label" :subtitle="`${[selected.kind_label, convertsWhen(selected)].filter(Boolean).join(' ')} · ${assumptions(selected)}. Over the whole plan, ${dollars}.`">
+            <template v-if="report.length">
+                <!-- One column: its figures as tiles, with nothing to be best of. -->
+                <Card v-if="isSingle" :title="selected.label" :subtitle="`${[selected.name ? selected.kind_label : '', convertsWhen(selected)].filter(Boolean).join(' ')} · ${assumptions(selected)}. Over the whole plan, ${dollars}.`">
                     <template #actions>
                         <button type="button" class="fin-btn fin-btn-quiet" @click="printReport"><IconFileTypePdf :size="16" /> Export PDF</button>
-                        <button type="button" class="fin-btn fin-btn-quiet" @click="edit(selected)"><IconPencil :size="16" /> Edit</button>
+                        <button type="button" class="fin-btn fin-btn-quiet" @click="edit(strategyOf(selected))"><IconPencil :size="16" /> Edit</button>
                         <button type="button" class="fin-icon-btn" :aria-label="`Copy ${selected.label}`" title="Copy" @click="duplicate(selected)"><IconCopy :size="15" /></button>
-                        <button type="button" class="fin-icon-btn" :aria-label="`Move ${selected.label} to the holding area`" title="Move to the holding area" @click="hold(selected)"><IconArchive :size="15" /></button>
+                        <button type="button" class="fin-icon-btn" :aria-label="`Take ${selected.label} out of the report`" title="Take out of the report" @click="takeOut(selected)"><IconX :size="15" /></button>
                     </template>
 
                     <dl class="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-4 printing:grid-cols-4">
@@ -330,7 +338,7 @@ const convertsWhen = (strategy) => {
                     </template>
                     <template #actions>
                         <button type="button" class="fin-btn fin-btn-quiet" @click="printReport"><IconFileTypePdf :size="16" /> Export PDF</button>
-                        <button type="button" class="fin-btn fin-btn-quiet" @click="clearComparison"><IconArchive :size="16" /> Clear Report</button>
+                        <button type="button" class="fin-btn fin-btn-quiet" @click="clearReport"><IconTableMinus :size="16" /> Clear Report</button>
                     </template>
 
                     <div class="overflow-x-auto">
@@ -338,18 +346,18 @@ const convertsWhen = (strategy) => {
                             <thead>
                                 <tr class="border-y border-fin-grey-200 bg-fin-cream-50 text-left align-top text-xs text-fin-grey-500">
                                     <th class="sticky left-0 bg-fin-cream-50 px-5 py-2.5 font-medium">&nbsp;</th>
-                                    <th v-for="(strategy, index) in strategies" :key="strategy.id" class="min-w-44 px-3 py-2.5 text-right font-normal">
+                                    <th v-for="(strategy, index) in report" :key="strategy.id" class="min-w-44 px-3 py-2.5 text-right font-normal">
                                         <span class="flex items-center justify-end gap-1.5 text-sm font-semibold text-fin-black">
                                             <span class="h-2.5 w-2.5 shrink-0 rounded-full" :style="{ backgroundColor: colorOf(index) }" aria-hidden="true" />
-                                            {{ strategy.label }}
+                                            {{ strategy.strategy_label }}
                                         </span>
-                                        <span class="mt-0.5 block">{{ strategy.kind_label }} {{ convertsWhen(strategy) }}</span>
+                                        <span class="mt-0.5 block">{{ strategy.name ? strategy.kind_label : '' }} {{ convertsWhen(strategy) }}</span>
                                         <span v-if="kinds[strategy.kind]?.amount" class="block">{{ moneyBrief(strategy.conversion_amount) }} a year</span>
                                         <span class="block">{{ assumptions(strategy) }}</span>
                                         <span class="mt-1 flex justify-end">
-                                            <button type="button" class="fin-icon-btn" :aria-label="`Edit ${strategy.label}`" @click="edit(strategy)"><IconPencil :size="15" /></button>
-                                            <button type="button" class="fin-icon-btn" :aria-label="`Copy ${strategy.label}`" @click="duplicate(strategy)"><IconCopy :size="15" /></button>
-                                            <button type="button" class="fin-icon-btn" :aria-label="`Move ${strategy.label} to the holding area`" title="Move to the holding area" @click="hold(strategy)"><IconArchive :size="15" /></button>
+                                            <button type="button" class="fin-icon-btn" :aria-label="`Edit ${strategy.strategy_label}`" :title="`Edit, in every column of ${strategy.strategy_label}`" @click="edit(strategyOf(strategy))"><IconPencil :size="15" /></button>
+                                            <button type="button" class="fin-icon-btn" :aria-label="`Copy ${strategy.strategy_label}`" title="Copy the strategy" @click="duplicate(strategy)"><IconCopy :size="15" /></button>
+                                            <button type="button" class="fin-icon-btn" :aria-label="`Take ${strategy.label} out of the report`" title="Take out of the report" @click="takeOut(strategy)"><IconX :size="15" /></button>
                                         </span>
                                     </th>
                                 </tr>
@@ -391,10 +399,10 @@ const convertsWhen = (strategy) => {
                         </div>
                     </template>
 
-                    <MonteCarloCard :monte-carlo="monte_carlo" :strategies="strategies" :color-of="colorOfStrategy" />
+                    <MonteCarloCard :monte-carlo="monte_carlo" :strategies="report" :color-of="colorOfColumn" />
                 </Deferred>
 
-                <div v-if="strategies.length > 1" class="grid gap-5 xl:grid-cols-2 printing:grid-cols-2">
+                <div v-if="report.length > 1" class="grid gap-5 xl:grid-cols-2 printing:grid-cols-2">
                     <Card title="Tax and IRMAA each year" subtitle="What each strategy costs, year by year.">
                         <LineChart :series="lines('tax_and_irmaa')" :height="240" :format-x="age" :x-ticks="6" />
                     </Card>
@@ -404,8 +412,8 @@ const convertsWhen = (strategy) => {
                 </div>
 
                 <Card v-if="selected" class="fin-card-splits" :title="isSingle ? 'Year by year' : 'A closer look'" :subtitle="isSingle ? 'Against the lines that matter: the tops of the tax brackets, and the IRMAA tiers.' : 'One strategy against the lines that matter: the tops of the tax brackets, and the IRMAA tiers.'">
-                    <template v-if="strategies.length > 1" #actions>
-                        <StrategyPicker v-model="selectedId" :strategies="strategies" :color-of="colorOf" :label="(strategy) => strategy.label" />
+                    <template v-if="report.length > 1" #actions>
+                        <StrategyPicker v-model="selectedId" :strategies="report" :color-of="colorOf" :label="(strategy) => strategy.label" />
                     </template>
 
                     <div class="flex flex-col gap-7 printing:block printing:space-y-7">
@@ -451,6 +459,7 @@ const convertsWhen = (strategy) => {
                                             <th class="px-4 py-2.5 font-medium">Age</th>
                                             <th class="px-3 py-2.5 text-right font-medium" title="What your projection brings in, before tax">Income</th>
                                             <th class="px-3 py-2.5 text-right font-medium">RMD</th>
+                                            <th class="px-3 py-2.5 text-right font-medium" title="The most a qualified charitable distribution could come to that year, from 70½. Set in Profile &amp; settings; the plan makes none.">QCD limit</th>
                                             <th class="px-3 py-2.5 text-right font-medium">Converted</th>
                                             <th class="px-3 py-2.5 text-right font-medium" title="Taken from traditional to pay for spending or tax">Withdrawn</th>
                                             <th class="px-3 py-2.5 text-right font-medium" title="Ordinary income less the standard deduction: what the tax brackets are read against">Taxable income</th>
@@ -466,6 +475,7 @@ const convertsWhen = (strategy) => {
                                             <td class="px-4 py-2 font-medium text-fin-black">{{ row.age }} <span class="font-normal text-fin-grey-500">· {{ row.year }}</span></td>
                                             <td class="px-3 py-2 text-right text-fin-charcoal">{{ money(row.income) }}</td>
                                             <td class="px-3 py-2 text-right text-fin-charcoal">{{ row.rmd ? money(row.rmd) : '—' }}</td>
+                                            <td class="px-3 py-2 text-right" :class="row.qcd_limit === null ? 'text-fin-grey-400' : 'text-fin-charcoal'">{{ row.qcd_limit === null ? '—' : money(row.qcd_limit) }}</td>
                                             <td class="px-3 py-2 text-right font-medium" :class="row.conversion ? 'text-fin-gold-600' : 'text-fin-grey-400'">{{ row.conversion ? money(row.conversion) : '—' }}</td>
                                             <td class="px-3 py-2 text-right" :class="row.withdrawal ? 'text-fin-charcoal' : 'text-fin-grey-400'">{{ row.withdrawal ? money(row.withdrawal) : '—' }}</td>
                                             <td class="px-3 py-2 text-right font-medium text-fin-black" :title="`${money(row.bracket_income)} before the deduction`">{{ money(row.taxable_income) }}</td>

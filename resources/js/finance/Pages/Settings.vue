@@ -32,6 +32,7 @@ const form = useForm({
     local_brackets: props.profile.local_brackets.map((bracket) => ({ ...bracket })),
     // Null on either of these two means the built-in figure for the filing status.
     standard_deduction: props.profile.standard_deduction,
+    qcd_limit: props.profile.qcd_limit,
     ltcg_brackets: props.profile.ltcg_brackets?.map((bracket) => ({ ...bracket })) ?? null,
     se_tax_rate: props.profile.se_tax_rate,
 });
@@ -42,7 +43,7 @@ const asRows = (pairs) => pairs.map(([rate, upTo]) => ({ rate, up_to: upTo }));
 
 const TAX_FIELDS = ['state', 'state_deduction', 'state_brackets', 'local_name', 'local_deduction', 'local_brackets'];
 
-const FEDERAL_FIELDS = ['standard_deduction', 'ltcg_brackets', 'se_tax_rate'];
+const FEDERAL_FIELDS = ['standard_deduction', 'qcd_limit', 'ltcg_brackets', 'se_tax_rate'];
 
 // The two tax cards on the right read as plain tables until Edit is pressed.
 const editingTax = ref(false);
@@ -73,6 +74,11 @@ const cancelFederal = () => {
 // An emptied deduction is "use the built-in one", not zero.
 const setDeduction = (event) => {
     form.standard_deduction = event.target.value === '' ? null : Number(event.target.value);
+};
+
+// And an emptied limit is the built-in one.
+const setQcdLimit = (event) => {
+    form.qcd_limit = event.target.value === '' ? null : Number(event.target.value);
 };
 
 // Ticked, the capital gains brackets follow the filing status; unticked, they
@@ -267,6 +273,10 @@ const clear = () => {
                             <input :value="form.standard_deduction" type="number" min="0" step="1" :placeholder="String(tax.built_in_deduction)" @input="setDeduction">
                         </Field>
 
+                        <Field label="Qualified charitable distribution limit" prefix="$" :hint="`The most given straight from a traditional IRA to charity in a year, from 70½. Blank uses the built-in ${money(tax.built_in_qcd_limit)} for ${tax.year}. Shown beside each year of the Roth report.`" :error="form.errors.qcd_limit">
+                            <input :value="form.qcd_limit" type="number" min="0" step="1" :placeholder="String(tax.built_in_qcd_limit)" @input="setQcdLimit">
+                        </Field>
+
                         <Field label="Self-employment tax" suffix="%" hint="Charged in full on self-employed income. W-2 wages pay half of it, as FICA." :error="form.errors.se_tax_rate">
                             <input v-model.number="form.se_tax_rate" type="number" min="0" max="50" step="0.01" required>
                         </Field>
@@ -300,6 +310,13 @@ const clear = () => {
                                 <dd class="text-right text-fin-charcoal">
                                     {{ money(tax.deduction) }} <span class="text-xs text-fin-grey-500">{{ profile.standard_deduction === null ? 'built in' : 'yours' }}</span>
                                     <span class="block text-xs text-fin-grey-500">plus {{ money(tax.additional_deduction) }} from 65</span>
+                                </dd>
+                            </div>
+                            <div class="flex items-baseline justify-between gap-4 border-b border-fin-grey-100 px-5 py-2">
+                                <dt class="font-medium text-fin-black">Qualified charitable distribution limit</dt>
+                                <dd class="text-right text-fin-charcoal">
+                                    {{ money(tax.qcd_limit) }} <span class="text-xs text-fin-grey-500">{{ profile.qcd_limit === null ? 'built in' : 'yours' }}</span>
+                                    <span class="block text-xs text-fin-grey-500">a year, from 70½ (the year you turn {{ tax.qcd_start_age }})</span>
                                 </dd>
                             </div>
                             <div class="flex items-baseline justify-between gap-4 border-b border-fin-grey-100 px-5 py-2">

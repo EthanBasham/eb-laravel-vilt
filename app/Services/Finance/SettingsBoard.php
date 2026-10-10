@@ -36,6 +36,11 @@ class SettingsBoard
                 // status — the same thing until the profile sets its own.
                 'deduction' => $this->tax->forProfile($profile)->deduction($status),
                 'built_in_deduction' => $this->tax->deduction($status),
+                // The same pair for the limit on charitable distributions,
+                // and the age it applies from.
+                'qcd_limit' => $profile->qcd_limit_in_force,
+                'built_in_qcd_limit' => (float) config('finance.qcd.limit'),
+                'qcd_start_age' => $profile->qcd_start_age,
                 // Added on top from 65, whichever deduction is in force.
                 'additional_deduction' => (float) config("finance.tax.additional_deduction.{$status}"),
                 'brackets' => $this->tax->brackets($status),

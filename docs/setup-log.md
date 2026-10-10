@@ -5097,3 +5097,71 @@ money, can be typed in; a blank follows the strategy.
   years after a change follow it.
 - `ConversionStrategy::label` adds ` [C]` to the default projection-and-kind name when
   `is_customized`. A name the user gave is left alone.
+
+## 2026-10-08 — Finance: a conversion strategy no longer owns its projection
+
+A Roth strategy used to name the projection it ran on, so the same strategy on five projections was
+five rows to keep alike by hand. The report is now a list of **strategy + projection pairs**, and a
+strategy is settings alone.
+
+- New table `fin_conversion_report_entries` (`ConversionReportEntry`): `conversion_strategy_id`,
+  nullable `scenario_id` (null is the income and expenses as entered). Both cascade — a column goes
+  with its strategy and with its projection. `scenario_id` and `is_compared` are dropped from
+  `fin_conversion_strategies`; "in the report" is now "has an entry".
+- The migration carries rows over: each compared strategy becomes an entry on its old projection,
+  and a user's strategies that differ in nothing but projection are folded into the first. Locally
+  that took 31 strategies to 12, with the same six columns in the report. `down()` cannot bring the
+  folded rows back.
+- The cap (`finance.conversion_comparison.max`, 12) now counts columns, not strategies. `default`
+  (6) is only where starters added in bulk stop joining the report.
+- Years set by hand stay on the strategy, so they apply on every projection it is reported on. The
+  Customize table previews one projection at a time (`scenario_id` on the preview request only).
+- Starters are found before they are made: asking for "one of each type" on a second projection
+  reuses the six still on every default and adds columns, rather than making six more.
+- Monte Carlo results are keyed by entry id, and "beats not converting" is measured against the
+  no-conversion column **on the same projection** — it used to be the first one anywhere, which
+  across projections measured the projection rather than the strategy. `baseline_id` is gone from
+  the results.
+- Routes: `retirement.report.{store,replace,clear,destroy}` (`ConversionReportController`) replace
+  `retirement.strategies.{compare,hold,comparison,comparison.clear}`. The strategy form has no
+  say in the report: a new strategy is in none until added from the Strategies section, and an
+  edit never moves one. (For an hour it had "In the report on" checkboxes; they were taken out the
+  same day, as they put the projection back inside the strategy.)
+- Page props: `report` is the columns (worked out; `id` and `label` are the column's, the strategy
+  is `strategy_id`), `strategies` is every strategy as settings with `projections`. `held` is gone,
+  and `StrategyHoldingArea.vue` became `StrategyLibrary.vue`, which lists every strategy and has a
+  "Run on" projection picker that Add and Replace apply to.
+- Default label is the kind alone now ("Fill a tax bracket each year"), not "Projection · Kind"; a
+  column is "Strategy · Projection".
+
+## 2026-10-08 — Finance: a qualified charitable distribution limit
+
+`fin_profiles.qcd_limit` (nullable; null is config `finance.qcd.limit`, $111,000 for 2026), set in
+Profile & settings beside the standard deduction. The Roth report's year-by-year table shows it in
+a "QCD limit" column from 70½ — the year of turning 70 for a birthday in the first half of the
+year, 71 otherwise (`Profile::qcd_start_age`) — raised each year by the column's inflation rate as
+the brackets are. **It is shown only**: `ConversionBoard::simulate()` makes no charitable
+distribution, and the figure is one person's limit, not doubled on a joint return.
+
+## 2026-10-08 — Finance: the Monte Carlo card reports the inheritable amount
+
+At the user's request, after they noticed the card's "Left after heirs' tax" and the Side by side
+table's "Est. Inheritable Amount" disagreed. They did by construction: the card was left on
+`ending_after_heir_tax` when `inheritable` was added on 2026-10-03 (see that entry — "were not
+asked to change"), so it never took the tax on the savings' gains off.
+
+- `ConversionMonteCarlo` now keeps `inheritable` and `leftover_tax` from each run in place of
+  `ending_after_heir_tax` and `tax_with_heirs`, and **"Beats not converting" is measured on
+  `inheritable`** too.
+- The card's rows take the Side by side table's labels: "Est. Inheritable Amount" (bad / typical /
+  good market), "Est. Leftover Taxes", "Tax you pay" (`lifetime_tax`, which the runs already
+  kept but the card never showed) and "IRMAA surcharges". "Tax and IRMAA, yours and theirs" is
+  gone, as it went from the table on 2026-10-03.
+- Stored background results had the old keys, so a migration
+  (`clear_stored_fin_monte_carlo_results`) nulls `results`, `inputs_hash` and `ran_at`; the card
+  then says nothing has been run yet and offers the run. Settings are kept.
+- The two figures still differ where they should: the card is always in today's dollars, and its
+  "typical" is the median of random markets rather than the steady plan. With no volatility they
+  agree exactly (`MonteCarloTest`, "agrees with the steady plan").
+- `ConversionBoard::simulate()` still returns `ending_after_heir_tax` and `tax_with_heirs`; nothing
+  on the page reads them now, only `ConversionStrategyTest`.

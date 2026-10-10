@@ -4,6 +4,7 @@ namespace App\Services\Finance;
 
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
+use App\Models\Finance\ConversionReportEntry;
 use App\Models\Finance\ConversionStrategy;
 use App\Models\Finance\Holding;
 use App\Models\Finance\Profile;
@@ -12,16 +13,18 @@ use App\Models\User;
 use Closure;
 
 /**
- * The Retirement Strategizer's conversion tab: every saved strategy for moving
+ * The Retirement Strategizer's conversion tab: strategies for moving
  * traditional money to Roth, run over the same lifetime so they can be set
  * side by side.
  *
- * Only the strategies being compared are run. The rest sit in the holding
- * area as settings alone (`held`), so building many costs the page nothing.
+ * Only the report's columns are run (`report`): each a strategy on one
+ * projection of income and expenses (ConversionReportEntry). Every strategy
+ * is also listed as settings alone (`strategies`), so building many costs the
+ * page nothing.
  *
- * A strategy chooses four things: how to convert (ConversionStrategy::kind),
- * which projection of income and expenses to build on, how fast prices and the
- * tax tables rise, and who inherits. Everything else is the household's own.
+ * A strategy chooses three things: how to convert (ConversionStrategy::kind),
+ * how fast prices and the tax tables rise, and who inherits. The projection
+ * is the column's, and everything else is the household's own.
  *
  * The model, and so its limits:
  *
@@ -57,6 +60,9 @@ use Closure;
  *    the untaxed part of Social Security is not added back. A strategy that
  *    stays inside an IRMAA tier does so for the conversion alone: a traditional
  *    withdrawal made later that year to cover spending can still cross it.
+ *  - No qualified charitable distribution is made. Each year from 70½ only
+ *    carries the limit on one (`qcd_limit`), raised with inflation, to be
+ *    read beside its RMD.
  *  - Heirs are taken to draw an inherited traditional balance in ten equal
  *    parts on top of their own income, as a single filer on the federal
  *    tables. No growth inside those ten years, no state tax. A charity pays
@@ -117,7 +123,7 @@ class ConversionBoard
      */
     public function for(User $user): array
     {
-        ['world' => $world, 'strategies' => $strategies, 'years' => $years] = $this->context($user);
+        ['world' => $world, 'entries' => $entries, 'years' => $years] = $this->context($user);
         $profile = $world['profile'];
         $status = $world['status'];
 
@@ -148,41 +154,56 @@ class ConversionBoard
             'scenarios' => Scenario::query()->onlyOwnedBy($user)->inDefaultOrder()->get()->map->only(['id', 'name', 'bracket_inflation_rate'])->values(),
             'brackets' => $this->bracketLines($world),
             'irmaa_tiers' => $this->irmaaLines($world),
-            'strategies' => $strategies->map(fn (ConversionStrategy $strategy): array => [
-                ...$strategy->props,
-                ...$this->simulate($strategy, $world, $years[$strategy->id]),
+            // The report's columns. Each has its strategy's settings, with
+            // the column's own `id` and `label` over the strategy's: the
+            // strategy is `strategy_id`.
+            'report' => $entries->map(fn (ConversionReportEntry $entry): array => [
+                ...$entry->strategy->props,
+                ...$this->simulate($entry->strategy, $world, $years[$entry->id], scenario: $entry->scenario),
                 // The same run in today's dollars, for the page's switch
                 // between the two.
-                'today' => Arr::only($this->simulate($strategy, $world, $years[$strategy->id], inTodaysDollars: true), ['rows', 'summary']),
+                'today' => Arr::only($this->simulate($entry->strategy, $world, $years[$entry->id], inTodaysDollars: true, scenario: $entry->scenario), ['rows', 'summary']),
+                'id' => $entry->id,
+                'label' => $entry->label,
+                'strategy_id' => $entry->conversion_strategy_id,
+                'strategy_label' => $entry->strategy->label,
+                'scenario_id' => $entry->scenario_id,
             ])->values(),
-            // The holding area: settings only, nothing worked out.
-            'held' => ConversionStrategy::query()->onlyOwnedBy($user)->notCompared()->inDefaultOrder()->with('scenario')->get()
-                ->map(fn (ConversionStrategy $strategy): array => [...$strategy->props, 'scenario_name' => $strategy->scenario?->name])
+            // Every strategy, in the report or not: settings only, nothing
+            // worked out.
+            'strategies' => ConversionStrategy::query()->onlyOwnedBy($user)->inDefaultOrder()->get()
+                ->map(fn (ConversionStrategy $strategy): array => [
+                    ...$strategy->props,
+                    // The projections it is reported on, null being the
+                    // income and expenses as entered.
+                    'projections' => $entries->where('conversion_strategy_id', $strategy->id)->pluck('scenario_id')->values(),
+                ])
                 ->values(),
             'comparison' => [
-                'count' => $strategies->count(),
+                'count' => $entries->count(),
                 ...config('finance.conversion_comparison'),
             ],
         ];
     }
 
     /**
-     * One strategy's conversions year by year, in today's dollars, saved or
-     * not: what the form's table of years set by hand is filled from, so it
-     * can show what the settings being edited would do before they are kept.
+     * One strategy's conversions year by year on one projection, in today's
+     * dollars, saved or not: what the form's table of years set by hand is
+     * filled from, so it can show what the settings being edited would do
+     * before they are kept.
      *
      * @return list<array{year: int, age: int, conversion: float, conversion_tax: float, conversion_tax_withheld: float, traditional: float}>
      */
-    public function preview(User $user, ConversionStrategy $strategy): array
+    public function preview(User $user, ConversionStrategy $strategy, ?Scenario $scenario = null): array
     {
         $world = $this->world($user);
         $years = $this->scenarios->yearly(
-            $this->scenarios->rows($this->fleet->flows($user), $strategy->scenario?->scenarioFlows ?? collect(), $world['profile']),
+            $this->scenarios->rows($this->fleet->flows($user), $scenario?->scenarioFlows ?? collect(), $world['profile']),
         );
 
         return array_map(
             fn (array $row): array => Arr::only($row, ['year', 'age', 'conversion', 'conversion_tax', 'conversion_tax_withheld', 'traditional']),
-            $this->simulate($strategy, $world, $years, inTodaysDollars: true)['rows'],
+            $this->simulate($strategy, $world, $years, inTodaysDollars: true, scenario: $scenario)['rows'],
         );
     }
 
@@ -232,6 +253,7 @@ class ConversionBoard
                 'last' => max($profile->age, $profile->life_expectancy),
                 'retirement' => $profile->retirement_age,
                 'rmd_start' => $profile->rmd_start_age,
+                'qcd_start' => $profile->qcd_start_age,
                 'birth_year' => $profile->birth_year,
                 'birth_month' => $profile->birth_date?->month,
             ],
@@ -254,6 +276,9 @@ class ConversionBoard
             'federal' => $federal,
             'tax_on' => $this->tax->flowTaxFor($profile),
             'divisors' => config('finance.rmd.divisors'),
+            // The most a year's charitable distributions may come to, in
+            // today's dollars. Shown beside each year; nothing is given.
+            'qcd_limit' => $profile->qcd_limit_in_force,
             'irmaa' => config("finance.irmaa.tiers.{$status}") ?? config('finance.irmaa.tiers.single'),
             'persons' => $status === 'married_joint' ? 2 : 1,
         ];
@@ -261,13 +286,13 @@ class ConversionBoard
 
     /**
      * Everything a run needs that no strategy changes, worked out once: the
-     * household (`world`), the user's strategies, and the projection each
-     * builds on (`years`, keyed by strategy id).
+     * household (`world`), the report's columns (`entries`), and the
+     * projection each is run on (`years`, keyed by entry id).
      *
-     * Public for the Monte Carlo runs, which simulate each strategy many
+     * Public for the Monte Carlo runs, which simulate each column many
      * times over the same context.
      *
-     * @return array{world: array<string, mixed>, strategies: Collection<int, ConversionStrategy>, years: array<int, array<int, array<string, mixed>>>}
+     * @return array{world: array<string, mixed>, entries: Collection<int, ConversionReportEntry>, years: array<int, array<int, array<string, mixed>>>}
      */
     public function context(User $user): array
     {
@@ -275,41 +300,42 @@ class ConversionBoard
         $profile = $world['profile'];
         $flows = $this->fleet->flows($user);
 
-        // Only the strategies being compared: the ones in the holding area
-        // are never simulated, which is what lets there be many of them.
-        $strategies = ConversionStrategy::query()->onlyOwnedBy($user)->onlyCompared()->inDefaultOrder()->with('scenario.scenarioFlows')->get();
+        // Only what is in the report: a strategy in none is never
+        // simulated, which is what lets there be many of them.
+        $entries = ConversionReportEntry::query()->onlyOwnedBy($user)->inDefaultOrder()->with(['strategy', 'scenario.scenarioFlows'])->get();
 
-        // Each projection is worked out once, however many strategies build
+        // Each projection is worked out once, however many columns are run
         // on it. 0 is the flows as entered.
         $projections = [];
 
-        foreach ($strategies as $strategy) {
-            $projections[$strategy->scenario_id ?? 0] ??= $this->scenarios->yearly(
-                $this->scenarios->rows($flows, $strategy->scenario?->scenarioFlows ?? collect(), $profile),
+        foreach ($entries as $entry) {
+            $projections[$entry->scenario_id ?? 0] ??= $this->scenarios->yearly(
+                $this->scenarios->rows($flows, $entry->scenario?->scenarioFlows ?? collect(), $profile),
             );
         }
 
         return [
             'world' => $world,
-            'strategies' => $strategies,
-            'years' => $strategies->mapWithKeys(fn (ConversionStrategy $strategy): array => [$strategy->id => $projections[$strategy->scenario_id ?? 0]])->all(),
+            'entries' => $entries,
+            'years' => $entries->mapWithKeys(fn (ConversionReportEntry $entry): array => [$entry->id => $projections[$entry->scenario_id ?? 0]])->all(),
         ];
     }
 
     /**
-     * One strategy, year by year.
+     * One strategy, year by year, on one projection.
      *
      * @param  array<string, mixed>  $world  What for() worked out once: the profile, ages, opening balances, contributions and tax tables.
      * @param  array<int, array{year: int, age: int, income: float, expenses: float, taxed: array<string, float>}>  $years  The projection, keyed by year.
      * @param  array{shocks: list<float>, inflation: list<float>}|null  $path  One market: for each year of the plan, in order, how many points the return lands above or below each bucket's average, and the inflation rate (percent). Null is the steady market the strategy's own rates describe.
      * @param  bool  $inTodaysDollars  Deflate every figure to today's prices, rather than leave each in its own year's.
+     * @param  Scenario|null  $scenario  The projection `$years` came from, for its name and its inflation rate. Null is the flows as entered.
      * @return array{assumptions: array<string, mixed>, rows: list<array<string, float|int|null>>, summary: array<string, float|int|null>}
      */
-    public function simulate(ConversionStrategy $strategy, array $world, array $years, ?array $path = null, bool $inTodaysDollars = false): array
+    public function simulate(ConversionStrategy $strategy, array $world, array $years, ?array $path = null, bool $inTodaysDollars = false, ?Scenario $scenario = null): array
     {
         ['status' => $status, 'ages' => $ages, 'federal' => $federal, 'tax_on' => $taxOn, 'divisors' => $divisors] = $world;
 
-        $inflationRate = $this->inflationRate($strategy, $world);
+        $inflationRate = $this->inflationRate($strategy, $world, $scenario);
         $growthRates = $this->bucketRates($strategy, $world);
         $window = $this->window($strategy->kind, $strategy->convert_from_age, $strategy->convert_until_age, $ages);
         // Read once: the cast decodes it afresh each time it is asked for.
@@ -571,6 +597,10 @@ class ConversionBoard
                 'income' => round($cashIncome / $level),
                 'expenses' => round($expenses / $level),
                 'rmd' => round($rmd / $level),
+                // The year's limit on charitable distributions, raised with
+                // prices as the brackets are; null before 70½. For reading
+                // beside the RMD: the plan makes no such distribution.
+                'qcd_limit' => $age >= $ages['qcd_start'] ? round($world['qcd_limit'] * $index / $level) : null,
                 'conversion' => round($conversion / $level),
                 'withdrawal' => round($fromTraditional / $level),
                 // Ordinary income before the deduction, and taxable income
@@ -639,7 +669,7 @@ class ConversionBoard
             'assumptions' => [
                 'inflation_rate' => $inflationRate,
                 'growth_rate' => $this->growthRate($strategy, $world),
-                'scenario_name' => $strategy->scenario?->name,
+                'scenario_name' => $scenario?->name,
                 'convert_from_age' => $window[0] ?? null,
                 'convert_until_age' => $window[1] ?? null,
             ],
@@ -745,9 +775,9 @@ class ConversionBoard
      *
      * @param  array<string, mixed>  $world
      */
-    public function inflationRate(ConversionStrategy $strategy, array $world): float
+    public function inflationRate(ConversionStrategy $strategy, array $world, ?Scenario $scenario = null): float
     {
-        return $strategy->inflation_rate ?? $strategy->scenario?->bracket_inflation_rate ?? $world['profile']->inflation_rate;
+        return $strategy->inflation_rate ?? $scenario?->bracket_inflation_rate ?? $world['profile']->inflation_rate;
     }
 
     /**

@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Finance\ArmadaController;
 use App\Http\Controllers\Finance\BudgetController;
 use App\Http\Controllers\Finance\CalculatorController;
+use App\Http\Controllers\Finance\ConversionReportController;
 use App\Http\Controllers\Finance\ConversionStrategyController;
 use App\Http\Controllers\Finance\FleetController;
 use App\Http\Controllers\Finance\FlowController;
@@ -112,14 +113,13 @@ Route::delete('/retirement/withdrawals/strategies/{strategy}', [WithdrawalStrate
 Route::post('/retirement/strategies', [ConversionStrategyController::class, 'store'])->name('retirement.strategies.store');
 Route::post('/retirement/strategies/preview', [ConversionStrategyController::class, 'preview'])->name('retirement.strategies.preview');
 Route::post('/retirement/strategies/starters', [ConversionStrategyController::class, 'storeStarters'])->name('retirement.strategies.starters');
-// Which strategies are set side by side. On the comparison as a whole, PUT
-// replaces it and DELETE empties it; the other two move one strategy in or
-// out. The whole-comparison routes come before the wildcard ones so that
-// "comparison" is not read as a strategy's id.
-Route::put('/retirement/strategies/comparison', [ConversionStrategyController::class, 'replaceComparison'])->name('retirement.strategies.comparison');
-Route::delete('/retirement/strategies/comparison', [ConversionStrategyController::class, 'clearComparison'])->name('retirement.strategies.comparison.clear');
-Route::post('/retirement/strategies/{strategy}/compare', [ConversionStrategyController::class, 'compare'])->name('retirement.strategies.compare');
-Route::delete('/retirement/strategies/{strategy}/compare', [ConversionStrategyController::class, 'hold'])->name('retirement.strategies.hold');
+// The report's columns, each a strategy on one projection. On the report as
+// a whole, PUT replaces it and DELETE empties it; POST adds a strategy's
+// columns and DELETE with an entry takes one out.
+Route::post('/retirement/report', [ConversionReportController::class, 'store'])->name('retirement.report.store');
+Route::put('/retirement/report', [ConversionReportController::class, 'replace'])->name('retirement.report.replace');
+Route::delete('/retirement/report', [ConversionReportController::class, 'clear'])->name('retirement.report.clear');
+Route::delete('/retirement/report/{entry}', [ConversionReportController::class, 'destroy'])->name('retirement.report.destroy');
 Route::patch('/retirement/strategies/{strategy}', [ConversionStrategyController::class, 'update'])->name('retirement.strategies.update');
 Route::post('/retirement/strategies/{strategy}/duplicate', [ConversionStrategyController::class, 'duplicate'])->name('retirement.strategies.duplicate');
 Route::delete('/retirement/strategies/{strategy}', [ConversionStrategyController::class, 'destroy'])->name('retirement.strategies.destroy');

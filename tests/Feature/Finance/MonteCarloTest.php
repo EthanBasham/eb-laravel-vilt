@@ -7,6 +7,7 @@ use App\Models\Finance\Flow;
 use App\Models\Finance\Holding;
 use App\Models\Finance\MonteCarloRun;
 use App\Models\Finance\Profile;
+use App\Models\Finance\Scenario;
 use App\Models\User;
 use App\Services\Finance\ConversionBoard;
 use App\Services\Finance\ConversionMonteCarlo;
@@ -41,6 +42,12 @@ function monteCarlo(User $user, array $settings = []): array
     return app(ConversionMonteCarlo::class)->run($board->context($user), new MonteCarloRun(['runs' => 40, 'return_volatility' => 12, 'inflation_volatility' => 1, 'seed' => 1, ...$settings]));
 }
 
+/** The id of the one column a strategy has in the report: what its results are keyed by. */
+function columnOf(ConversionStrategy $strategy): int
+{
+    return $strategy->reportEntries()->sole()->id;
+}
+
 // The runs
 
 /**
@@ -51,13 +58,13 @@ function monteCarlo(User $user, array $settings = []): array
 it('moves the projected expenses with a market\'s own inflation', function () {
     $user = monteCarloRetiree();
     Flow::factory()->create(['user_id' => $user->id, 'amount' => 60_000, 'frequency' => 'annual', 'annual_growth_rate' => 2.5]);
-    $strategy = ConversionStrategy::factory()->create(['user_id' => $user->id]);
+    $strategy = ConversionStrategy::factory()->reported()->create(['user_id' => $user->id]);
 
     $board = app(ConversionBoard::class);
     ['world' => $world, 'years' => $years] = $board->context($user);
     $steps = 13;
 
-    $rows = $board->simulate($strategy, $world, $years[$strategy->id], ['shocks' => array_fill(0, $steps, 0.0), 'inflation' => array_fill(0, $steps, 10.0)], inTodaysDollars: true)['rows'];
+    $rows = $board->simulate($strategy, $world, $years[columnOf($strategy)], ['shocks' => array_fill(0, $steps, 0.0), 'inflation' => array_fill(0, $steps, 10.0)], inTodaysDollars: true)['rows'];
 
     expect($rows[1]['expenses'])->toEqual(60_000)
         ->and($rows[5]['expenses'])->toEqual(60_000);
@@ -70,24 +77,24 @@ it('moves the projected expenses with a market\'s own inflation', function () {
  */
 it('agrees with the steady plan when the markets do not vary', function () {
     $user = monteCarloRetiree();
-    $strategy = ConversionStrategy::factory()->ofKind('even')->create(['user_id' => $user->id]);
+    $strategy = ConversionStrategy::factory()->reported()->ofKind('even')->create(['user_id' => $user->id]);
 
     $board = app(ConversionBoard::class);
     ['world' => $world, 'years' => $years] = $board->context($user);
-    $steady = $board->simulate($strategy, $world, $years[$strategy->id], inTodaysDollars: true);
-    $results = monteCarlo($user, ['runs' => 5, 'return_volatility' => 0, 'inflation_volatility' => 0])['strategies'][$strategy->id];
+    $steady = $board->simulate($strategy, $world, $years[columnOf($strategy)], inTodaysDollars: true);
+    $results = monteCarlo($user, ['runs' => 5, 'return_volatility' => 0, 'inflation_volatility' => 0])['strategies'][columnOf($strategy)];
 
     expect($results['success_rate'])->toEqual(100)
-        ->and($results['ending_after_heir_tax'])->toEqual(array_fill_keys(['p10', 'p50', 'p90'], $steady['summary']['ending_after_heir_tax']))
-        ->and($results['tax_with_heirs']['p50'])->toEqual($steady['summary']['tax_with_heirs'])
+        ->and($results['inheritable'])->toEqual(array_fill_keys(['p10', 'p50', 'p90'], $steady['summary']['inheritable']))
+        ->and($results['leftover_tax']['p50'])->toEqual($steady['summary']['leftover_tax'])
         ->and($results['balances'][12])->toEqual(['age' => 80, 'p10' => $steady['rows'][12]['total_balance'], 'p50' => $steady['rows'][12]['total_balance'], 'p90' => $steady['rows'][12]['total_balance']]);
 });
 
 it('spreads the outcomes, worst to best, when the markets do vary', function () {
     $user = monteCarloRetiree();
-    $strategy = ConversionStrategy::factory()->create(['user_id' => $user->id]);
+    $strategy = ConversionStrategy::factory()->reported()->create(['user_id' => $user->id]);
 
-    ['p10' => $bad, 'p50' => $typical, 'p90' => $good] = monteCarlo($user)['strategies'][$strategy->id]['ending_after_heir_tax'];
+    ['p10' => $bad, 'p50' => $typical, 'p90' => $good] = monteCarlo($user)['strategies'][columnOf($strategy)]['inheritable'];
 
     expect($bad)->toBeLessThan($typical)
         ->and($typical)->toBeLessThan($good);
@@ -95,7 +102,7 @@ it('spreads the outcomes, worst to best, when the markets do vary', function () 
 
 it('draws the same markets from the same seed, and different ones from another', function () {
     $user = monteCarloRetiree();
-    ConversionStrategy::factory()->create(['user_id' => $user->id]);
+    ConversionStrategy::factory()->reported()->create(['user_id' => $user->id]);
 
     expect(monteCarlo($user, ['seed' => 7]))->toEqual(monteCarlo($user, ['seed' => 7]))
         ->and(monteCarlo($user, ['seed' => 8]))->not->toEqual(monteCarlo($user, ['seed' => 7]));
@@ -107,45 +114,50 @@ it('draws the same markets from the same seed, and different ones from another',
  */
 it('puts every strategy through the same markets', function () {
     $user = monteCarloRetiree();
-    $first = ConversionStrategy::factory()->create(['user_id' => $user->id]);
-    $twin = ConversionStrategy::factory()->create(['user_id' => $user->id]);
+    $first = ConversionStrategy::factory()->reported()->create(['user_id' => $user->id]);
+    $twin = ConversionStrategy::factory()->reported()->create(['user_id' => $user->id]);
 
     $results = monteCarlo($user);
 
-    expect($results['strategies'][$twin->id]['ending_after_heir_tax'])->toEqual($results['strategies'][$first->id]['ending_after_heir_tax'])
+    expect($results['strategies'][columnOf($twin)]['inheritable'])->toEqual($results['strategies'][columnOf($first)]['inheritable'])
         // A tie is not a win.
-        ->and($results['strategies'][$twin->id]['beats_baseline'])->toEqual(0);
+        ->and($results['strategies'][columnOf($twin)]['beats_baseline'])->toEqual(0);
 });
 
 it('measures how often a strategy beats not converting, against the first that does not', function () {
     $user = monteCarloRetiree();
-    $none = ConversionStrategy::factory()->create(['user_id' => $user->id]);
-    $even = ConversionStrategy::factory()->ofKind('even')->create(['user_id' => $user->id]);
+    $none = ConversionStrategy::factory()->reported()->create(['user_id' => $user->id]);
+    $even = ConversionStrategy::factory()->reported()->ofKind('even')->create(['user_id' => $user->id]);
 
     $results = monteCarlo($user);
 
-    expect($results['baseline_id'])->toBe($none->id)
-        ->and($results['strategies'][$none->id]['beats_baseline'])->toBeNull()
-        ->and($results['strategies'][$even->id]['beats_baseline'])->toBeGreaterThanOrEqual(0)->toBeLessThanOrEqual(100);
+    expect($results['strategies'][columnOf($none)]['beats_baseline'])->toBeNull()
+        ->and($results['strategies'][columnOf($even)]['beats_baseline'])->toBeGreaterThanOrEqual(0)->toBeLessThanOrEqual(100);
 });
 
 it('has nothing to beat when no strategy leaves the money where it is', function () {
     $user = monteCarloRetiree();
-    $even = ConversionStrategy::factory()->ofKind('even')->create(['user_id' => $user->id]);
+    $even = ConversionStrategy::factory()->reported()->ofKind('even')->create(['user_id' => $user->id]);
 
-    $results = monteCarlo($user);
+    expect(monteCarlo($user)['strategies'][columnOf($even)]['beats_baseline'])->toBeNull();
+});
 
-    expect($results['baseline_id'])->toBeNull()
-        ->and($results['strategies'][$even->id]['beats_baseline'])->toBeNull();
+it('measures a strategy only against not converting on its own projection', function () {
+    $user = monteCarloRetiree();
+    $scenario = Scenario::factory()->create(['user_id' => $user->id]);
+    ConversionStrategy::factory()->reported()->create(['user_id' => $user->id]);
+    $elsewhere = ConversionStrategy::factory()->reported($scenario)->ofKind('even')->create(['user_id' => $user->id]);
+
+    expect(monteCarlo($user)['strategies'][columnOf($elsewhere)]['beats_baseline'])->toBeNull();
 });
 
 it('reports how often the money lasts, and when it typically does not', function () {
     $user = monteCarloRetiree();
     // About what the accounts can bear in a steady market, so the bad ones run short.
     Flow::factory()->create(['user_id' => $user->id, 'amount' => 300_000, 'frequency' => 'annual', 'annual_growth_rate' => 2.5]);
-    $strategy = ConversionStrategy::factory()->create(['user_id' => $user->id]);
+    $strategy = ConversionStrategy::factory()->reported()->create(['user_id' => $user->id]);
 
-    $results = monteCarlo($user, ['runs' => 60, 'return_volatility' => 20])['strategies'][$strategy->id];
+    $results = monteCarlo($user, ['runs' => 60, 'return_volatility' => 20])['strategies'][columnOf($strategy)];
 
     expect($results['success_rate'])->toBeGreaterThan(0)->toBeLessThan(100)
         ->and($results['typical_short_age'])->toBeGreaterThan(68)->toBeLessThanOrEqual(80);
@@ -155,7 +167,7 @@ it('reports how often the money lasts, and when it typically does not', function
 
 it('works a small run out after the page loads', function () {
     $user = monteCarloRetiree();
-    $strategy = ConversionStrategy::factory()->create(['user_id' => $user->id]);
+    $strategy = ConversionStrategy::factory()->reported()->create(['user_id' => $user->id]);
 
     $this->actingAs($user)->get(route('finance.retirement'))
         ->assertInertia(fn ($page) => $page
@@ -165,7 +177,7 @@ it('works a small run out after the page loads', function () {
                 ->where('monte_carlo.simulations', 100)
                 ->where('monte_carlo.in_background', false)
                 ->where('monte_carlo.results.runs', 100)
-                ->has("monte_carlo.results.strategies.{$strategy->id}.balances", 13)));
+                ->has('monte_carlo.results.strategies.'.columnOf($strategy).'.balances', 13)));
 
     expect(MonteCarloRun::query()->count())->toBe(0);
 });
@@ -173,7 +185,7 @@ it('works a small run out after the page loads', function () {
 it('leaves a run too big for the page to the background, and works none out on the page', function () {
     config(['finance.monte_carlo.page_limit' => 50]);
     $user = monteCarloRetiree();
-    ConversionStrategy::factory()->create(['user_id' => $user->id]);
+    ConversionStrategy::factory()->reported()->create(['user_id' => $user->id]);
 
     $this->actingAs($user)->get(route('finance.retirement'))
         ->assertInertia(fn ($page) => $page->loadDeferredProps(fn ($reload) => $reload
@@ -184,7 +196,7 @@ it('leaves a run too big for the page to the background, and works none out on t
 
 it('is off at no runs', function () {
     $user = monteCarloRetiree();
-    ConversionStrategy::factory()->create(['user_id' => $user->id]);
+    ConversionStrategy::factory()->reported()->create(['user_id' => $user->id]);
     MonteCarloRun::factory()->create(['user_id' => $user->id, 'runs' => 0]);
 
     $this->actingAs($user)->get(route('finance.retirement'))
@@ -197,7 +209,7 @@ it('saves the settings, and queues a run only when it is too big for the page', 
     Queue::fake();
     config(['finance.monte_carlo.page_limit' => 500]);
     $user = monteCarloRetiree();
-    ConversionStrategy::factory()->count(2)->create(['user_id' => $user->id]);
+    ConversionStrategy::factory()->reported()->count(2)->create(['user_id' => $user->id]);
 
     $this->actingAs($user)->put(route('finance.retirement.monte-carlo.update'), ['runs' => 250, 'return_volatility' => 15, 'inflation_volatility' => 2])->assertSessionHasNoErrors();
     Queue::assertNothingPushed();
@@ -211,7 +223,7 @@ it('saves the settings, and queues a run only when it is too big for the page', 
 it('keeps a background run\'s results, and says when they no longer describe the strategies', function () {
     config(['finance.monte_carlo.page_limit' => 10]);
     $user = monteCarloRetiree();
-    $strategy = ConversionStrategy::factory()->create(['user_id' => $user->id]);
+    $strategy = ConversionStrategy::factory()->reported()->create(['user_id' => $user->id]);
     MonteCarloRun::factory()->create(['user_id' => $user->id, 'runs' => 20]);
 
     // The queue runs jobs inline under test, so the run finishes here.
@@ -222,7 +234,7 @@ it('keeps a background run\'s results, and says when they no longer describe the
             ->where('monte_carlo.status', 'done')
             ->where('monte_carlo.is_current', true)
             ->where('monte_carlo.results.runs', 20)
-            ->has("monte_carlo.results.strategies.{$strategy->id}")));
+            ->has('monte_carlo.results.strategies.'.columnOf($strategy))));
 
     $strategy->update(['kind' => 'even']);
 

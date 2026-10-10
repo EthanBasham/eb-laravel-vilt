@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use App\Models\User;
@@ -14,18 +14,20 @@ use Database\Factories\Finance\ConversionStrategyFactory;
 
 /**
  * One way of moving traditional money to Roth, and the assumptions it is run
- * under. The Retirement Strategizer runs each and sets them side by side.
+ * under — but not the projection it is run on. That is chosen where the
+ * strategy is put in the report (ConversionReportEntry), so one strategy can
+ * be reported on several projections and is still one thing to edit.
  *
- * It holds settings only; the figures are worked out by ConversionBoard —
- * and only for the strategies being compared (`is_compared`). The rest wait
- * in the holding area, costing the page nothing.
+ * It holds settings only; the figures are worked out by ConversionBoard, and
+ * only for the report's columns. A strategy in no report costs the page
+ * nothing.
  *
  * @property-read bool $is_customized
  * @property-read string $kind_label
  * @property-read string $label
  * @property-read array<string, mixed> $props
  */
-#[Fillable(['user_id', 'scenario_id', 'name', 'kind', 'is_compared', 'convert_from_age', 'convert_until_age', 'fill_rate', 'conversion_amount', 'tax_payment', 'tax_outside_amount', 'overrides', 'inflation_rate', 'growth_rate', 'heir_is_charity', 'heir_income'])]
+#[Fillable(['user_id', 'name', 'kind', 'convert_from_age', 'convert_until_age', 'fill_rate', 'conversion_amount', 'tax_payment', 'tax_outside_amount', 'overrides', 'inflation_rate', 'growth_rate', 'heir_is_charity', 'heir_income'])]
 class ConversionStrategy extends OwnedModel
 {
     /** @use HasFactory<ConversionStrategyFactory> */
@@ -40,7 +42,6 @@ class ConversionStrategy extends OwnedModel
      */
     protected $attributes = [
         'tax_payment' => 'outside',
-        'is_compared' => true,
     ];
 
     /**
@@ -51,7 +52,6 @@ class ConversionStrategy extends OwnedModel
     protected function casts(): array
     {
         return [
-            'is_compared' => 'boolean',
             'convert_from_age' => 'integer',
             'convert_until_age' => 'integer',
             'fill_rate' => 'float',
@@ -66,83 +66,80 @@ class ConversionStrategy extends OwnedModel
     }
 
     /**
-     * Whether a user's comparison still has room for a newly made strategy.
-     * Past that it goes to the holding area, to be brought in by hand.
-     */
-    public static function hasRoomToCompare(User $user): bool
-    {
-        return static::query()->onlyOwnedBy($user)->onlyCompared()->count() < (int) config('finance.conversion_comparison.default');
-    }
-
-    /**
-     * Whether a user's report holds as many strategies as it ever can, so
-     * that not even one brought in by hand fits.
-     */
-    public static function comparisonIsFull(User $user): bool
-    {
-        return static::query()->onlyOwnedBy($user)->onlyCompared()->count() >= (int) config('finance.conversion_comparison.max');
-    }
-
-    /**
-     * One strategy of each kind, on every default, for each projection
-     * given — null standing for the income and expenses as entered. Each
-     * joins the comparison while it has room and is held after, like any new
-     * strategy.
+     * One strategy of each kind, on every default, put in the report on each
+     * projection given — null standing for the income and expenses as
+     * entered. A kind's strategy is made only if the user has none still on
+     * every default, so asking again for another projection adds columns
+     * rather than a second set of the same strategies.
+     *
+     * The columns join the report while it is short of where it stops
+     * filling by itself; the rest are left to be added by hand.
      *
      * @param  Collection<int, Scenario|null>  $projections
-     * @return Collection<int, static>
+     * @return Collection<int, ConversionReportEntry> The columns added.
      */
     public static function createStarters(User $user, Collection $projections): Collection
     {
         return DB::transaction(function () use ($user, $projections): Collection {
-            $room = (int) config('finance.conversion_comparison.default') - static::query()->onlyOwnedBy($user)->onlyCompared()->count();
-            $made = collect();
+            $starters = collect(config('finance.conversion_strategies'))->map(fn (array $kind, string $key): static => static::query()->firstOrCreate([
+                'user_id' => $user->id,
+                'kind' => $key,
+                'name' => null,
+                'convert_from_age' => null,
+                'convert_until_age' => null,
+                'fill_rate' => null,
+                'conversion_amount' => ($kind['amount'] ?? false) ? config('finance.defaults.conversion_amount') : null,
+                'tax_payment' => 'outside',
+                'tax_outside_amount' => null,
+                'overrides' => null,
+                'inflation_rate' => null,
+                'growth_rate' => null,
+                'heir_is_charity' => false,
+                'heir_income' => config('finance.defaults.heir_income'),
+            ]));
 
-            foreach ($projections as $scenario) {
-                foreach (config('finance.conversion_strategies') as $key => $kind) {
-                    $made->push(static::query()->create([
-                        'user_id' => $user->id,
-                        'scenario_id' => $scenario?->id,
-                        'kind' => $key,
-                        'is_compared' => $room-- > 0,
-                        'conversion_amount' => ($kind['amount'] ?? false) ? config('finance.defaults.conversion_amount') : null,
-                        'heir_income' => config('finance.defaults.heir_income'),
-                    ]));
-                }
-            }
-
-            return $made;
+            return $projections->flatMap(fn (?Scenario $scenario): Collection => $starters->flatMap(
+                fn (ConversionStrategy $strategy): Collection => $strategy->addToReport([$scenario?->id], 'default'),
+            ))->values();
         });
     }
 
     /**
-     * Makes the strategies named the whole comparison: every other one of
-     * the user's goes to the holding area.
+     * Puts it in the report on each projection named that it is not already
+     * reported on, for as long as the report has room. Null is the income
+     * and expenses as entered.
      *
-     * @param  list<int>  $ids
+     * @param  array<int, int|string|null>  $scenarioIds
+     * @param  string  $limit  Which of the report's two limits is room: see ConversionReportEntry::roomFor().
+     * @return Collection<int, ConversionReportEntry> The columns added.
      */
-    public static function replaceComparison(User $user, array $ids): void
+    public function addToReport(array $scenarioIds, string $limit = 'max'): Collection
     {
-        DB::transaction(function () use ($user, $ids): void {
-            static::query()->onlyOwnedBy($user)->whereKeyNot($ids)->update(['is_compared' => false]);
-            static::query()->onlyOwnedBy($user)->whereKey($ids)->update(['is_compared' => true]);
-        });
+        $room = ConversionReportEntry::roomFor($this->user, $limit);
+        $already = $this->reportEntries()->pluck('scenario_id')->all();
+
+        return collect($scenarioIds)
+            ->map(fn (int|string|null $id): ?int => $id === null ? null : (int) $id)
+            ->unique()
+            ->reject(fn (?int $id): bool => in_array($id, $already, true))
+            ->take($room)
+            ->map(fn (?int $id): ConversionReportEntry => $this->reportEntries()->create(['user_id' => $this->user_id, 'scenario_id' => $id]))
+            ->values();
     }
 
     /**
-     * A saved copy, beside the one it was made from: in the report for one
-     * in the report, held for one held. Only a report already at its most
-     * sends a copy made there to the holding area instead.
+     * A saved copy, reported on the same projections as the one it was made
+     * from for as long as the report has room.
      */
     public function duplicate(): static
     {
-        $copy = $this->replicate()->fill([
-            'name' => static::copyName($this->name),
-            'is_compared' => $this->is_compared && ! static::comparisonIsFull($this->user),
-        ]);
-        $copy->save();
+        return DB::transaction(function (): static {
+            $copy = $this->replicate()->fill(['name' => static::copyName($this->name)]);
+            $copy->save();
+            $copy->addToReport($this->reportEntries()->inDefaultOrder()->pluck('scenario_id')->all());
 
-        return $copy;
+            return $copy;
+        });
     }
 
     /** Whether any year of it has been set by hand, over what its kind would do. */
@@ -157,13 +154,12 @@ class ConversionStrategy extends OwnedModel
     }
 
     /**
-     * What it is called: its own name, or — as a name is optional — the
-     * projection it runs on and its kind, marked `[C]` once any year of it
-     * has been set by hand.
+     * What it is called: its own name, or — as a name is optional — its
+     * kind, marked `[C]` once any year of it has been set by hand.
      */
     protected function label(): Attribute
     {
-        return Attribute::get(fn (): string => $this->name ?? ($this->scenario?->name ?? 'As entered').' · '.$this->kind_label.($this->is_customized ? ' [C]' : ''));
+        return Attribute::get(fn (): string => $this->name ?? $this->kind_label.($this->is_customized ? ' [C]' : ''));
     }
 
     /** The settings as saved, nulls and all: what the edit form is filled from. */
@@ -175,8 +171,6 @@ class ConversionStrategy extends OwnedModel
             'label' => $this->label,
             'kind' => $this->kind,
             'kind_label' => $this->kind_label,
-            'is_compared' => $this->is_compared,
-            'scenario_id' => $this->scenario_id,
             'convert_from_age' => $this->convert_from_age,
             'convert_until_age' => $this->convert_until_age,
             'fill_rate' => $this->fill_rate,
@@ -194,19 +188,7 @@ class ConversionStrategy extends OwnedModel
 
     // Scopes
 
-    /** The strategies set side by side: the only ones the page simulates. */
-    public function scopeOnlyCompared(Builder $query): Builder
-    {
-        return $query->where('is_compared', true);
-    }
-
-    /** The strategies waiting in the holding area. */
-    public function scopeNotCompared(Builder $query): Builder
-    {
-        return $query->where('is_compared', false);
-    }
-
-    /** As added, so a new strategy takes the next column and the next colour. */
+    /** As added. */
     public function scopeInDefaultOrder(Builder $query): Builder
     {
         return $query->orderBy('id');
@@ -214,9 +196,9 @@ class ConversionStrategy extends OwnedModel
 
     // Relationships
 
-    /** @return BelongsTo<Scenario, $this> */
-    public function scenario(): BelongsTo
+    /** @return HasMany<ConversionReportEntry, $this> */
+    public function reportEntries(): HasMany
     {
-        return $this->belongsTo(Scenario::class);
+        return $this->hasMany(ConversionReportEntry::class);
     }
 }
