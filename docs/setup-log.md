@@ -5165,3 +5165,21 @@ asked to change"), so it never took the tax on the savings' gains off.
   agree exactly (`MonteCarloTest`, "agrees with the steady plan").
 - `ConversionBoard::simulate()` still returns `ending_after_heir_tax` and `tax_with_heirs`; nothing
   on the page reads them now, only `ConversionStrategyTest`.
+
+## 2026-10-10 — Moving data between dev and production by hand
+
+The finance data had only ever been entered locally and the World of Tanks data was better in
+production, so each side was copied to the other. Production's `fin_*` tables were all empty and
+the one account is id 1 on both sides, which is what made a plain data load safe.
+
+- **RDS is PostgreSQL 18; `pg_dump` is 16 on this machine and 15 on the server**, and `pg_dump`
+  refuses a server newer than itself. So neither can dump production. `psql` has no such check:
+  both copies go table by table through an SSH tunnel (`ssh -L` via the app server, as RDS is
+  VPC-only), using `pg_dump --data-only -t 'public.fin_*'` locally for dev → prod and `\copy` for
+  prod → dev. A full production dump needs `postgresql-client-18` installed here first.
+- The scripts and the local backup taken beforehand are in `~/backups/eb-laravel-vilt/`
+  (`copy-finance-to-prod.sh`, `copy-prod-to-local.sh`), outside the repo because the dumps hold
+  real data. They read the passwords from `~/secrets/`.
+- No backup of production was taken before the finance load, for the reason above; the script
+  refused to run unless the finance tables were empty, and loaded in one transaction.
+- `users`, `sessions`, `cache`, `jobs` and `migrations` are not copied in either direction.
