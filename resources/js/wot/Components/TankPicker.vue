@@ -176,7 +176,7 @@ const selected = computed(() => all.value.find((v) => v.tank_id === props.select
                     >
                         <NationFlag :nation="vehicle.nation" />
                         {{ vehicle.name }}
-                        <span class="text-wot-dim">{{ ROMAN[vehicle.tier] }}</span>
+                        <span class="text-wot-dim">{{ roman(vehicle.tier) }}</span>
                         <VehicleTypeIcon :type="vehicle.type" class="text-wot-dim" />
                     </button>
                 </li>
