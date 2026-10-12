@@ -16,6 +16,7 @@ use Database\Factories\WotEventFactory;
  * A dated occurrence extracted from an article body.
  *
  * @property-read bool $is_long_running
+ * @property-read bool $spans_days
  * @property-read array{id: int, title: string, type: ?string, source: string, starts_at: string, ends_at: ?string, article: array{title: ?string, url: ?string}} $list_item_props
  */
 #[Fillable(['wot_article_id', 'title', 'starts_at', 'ends_at', 'event_type', 'source', 'metadata'])]
@@ -54,6 +55,15 @@ class WotEvent extends Model
     protected function isLongRunning(): Attribute
     {
         return Attribute::get(fn (): bool => $this->ends_at !== null && $this->starts_at->diffInDays($this->ends_at) > 7);
+    }
+
+    /**
+     * Whether the event runs across more than one calendar day, and so is
+     * drawn as a bar through the grid rather than inside a single square.
+     */
+    protected function spansDays(): Attribute
+    {
+        return Attribute::get(fn (): bool => $this->ends_at !== null && ! $this->starts_at->isSameDay($this->ends_at));
     }
 
     /**
@@ -120,9 +130,7 @@ class WotEvent extends Model
      */
     public function isFinalDayOn(Carbon $day): bool
     {
-        return $this->ends_at !== null
-            && $this->ends_at->isSameDay($day)
-            && ! $this->starts_at->isSameDay($this->ends_at);
+        return $this->spans_days && $this->ends_at->isSameDay($day);
     }
 
     // Event : Ignore

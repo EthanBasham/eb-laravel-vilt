@@ -262,3 +262,50 @@ it('leaves a long campaign unmarked', function () {
         ->and($ongoing[0]['is_final_day'])->toBeFalse()
         ->and(eventsOn($response, '2026-09-30'))->toBeEmpty();
 });
+
+/**
+ * A multi-day event is drawn as a bar through the squares it covers, one per
+ * week row, so its label is written once per line rather than once per day.
+ */
+it('draws a multi-day event as one bar per week it touches', function () {
+    // Thursday the 10th to Tuesday the 15th: the third and fourth week rows.
+    $event = WotEvent::factory()->create([
+        'starts_at' => '2026-09-10 04:00:00',
+        'ends_at' => '2026-09-15 04:00:00',
+    ]);
+
+    $spans = september(User::factory()->create())->viewData('page')['props']['spans'];
+
+    expect($spans)->toHaveCount(2)
+        ->and(collect($spans)->pluck('event.id')->unique()->all())->toBe([$event->id])
+        ->and(collect($spans[0])->only(['week', 'column', 'length', 'continues_before', 'continues_after', 'is_final_day'])->all())
+        ->toBe(['week' => 1, 'column' => 5, 'length' => 3, 'continues_before' => false, 'continues_after' => true, 'is_final_day' => false])
+        ->and(collect($spans[1])->only(['week', 'column', 'length', 'continues_before', 'continues_after', 'is_final_day'])->all())
+        ->toBe(['week' => 2, 'column' => 1, 'length' => 3, 'continues_before' => true, 'continues_after' => false, 'is_final_day' => true]);
+});
+
+it('stacks overlapping bars in lanes and reuses a lane once it is free', function () {
+    $first = WotEvent::factory()->create(['starts_at' => '2026-09-06 04:00:00', 'ends_at' => '2026-09-08 04:00:00']);
+    $overlapping = WotEvent::factory()->create(['starts_at' => '2026-09-07 04:00:00', 'ends_at' => '2026-09-09 04:00:00']);
+    $after = WotEvent::factory()->create(['starts_at' => '2026-09-10 04:00:00', 'ends_at' => '2026-09-11 04:00:00']);
+
+    $lanes = collect(september(User::factory()->create())->viewData('page')['props']['spans'])
+        ->mapWithKeys(fn (array $span): array => [$span['event']['id'] => $span['lane']]);
+
+    expect($lanes->all())->toBe([$first->id => 0, $overlapping->id => 1, $after->id => 0]);
+});
+
+/**
+ * The bar is drawn by the grid, but the day view still lists the event on
+ * every day it covers — flagged, so the square does not draw it a second time.
+ */
+it('keeps a multi-day event on each of its days, flagged as spanning', function () {
+    WotEvent::factory()->create(['starts_at' => '2026-09-10 04:00:00', 'ends_at' => '2026-09-11 04:00:00']);
+    WotEvent::factory()->calendar()->create(['starts_at' => '2026-09-10 11:00:00', 'ends_at' => '2026-09-10 17:59:00']);
+
+    $response = september(User::factory()->create());
+
+    expect(collect(eventsOn($response, '2026-09-10'))->pluck('spans_days')->all())->toBe([true, false])
+        ->and(eventsOn($response, '2026-09-11'))->toHaveCount(1)
+        ->and($response->viewData('page')['props']['spans'])->toHaveCount(1);
+});

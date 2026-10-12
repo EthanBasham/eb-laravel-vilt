@@ -15,6 +15,7 @@ const props = defineProps({
     previousMonth: { type: String, required: true },
     nextMonth: { type: String, required: true },
     days: { type: Array, default: () => [] },
+    spans: { type: Array, default: () => [] },
     ongoing: { type: Array, default: () => [] },
     upcoming: { type: Array, default: () => [] },
 });
@@ -88,13 +89,14 @@ const monthLink = 'border border-wot-border px-3 py-1.5 text-xs font-bold upperc
         <MonthGrid
             class="mt-4"
             :days="days"
+            :spans="spans"
             @select-day="selectedDay = $event"
             @select-event="selectedEvent = $event"
         />
 
         <p class="mt-3 flex flex-wrap gap-4 text-xs text-wot-dim">
-            <span><span class="me-1 inline-block h-2 w-2 bg-wot-gold" />Exact session times from an article's event calendar</span>
-            <span><span class="me-1 inline-block h-2 w-2 bg-wot-blue" />Overall event window (start and end only)</span>
+            <span><span class="me-1 inline-block h-2 w-0.5 bg-wot-gold" />Gold edge: exact session times from an article's event calendar</span>
+            <span><span class="me-1 inline-block h-2 w-0.5 bg-wot-blue" />Blue edge: overall event window (start and end only)</span>
             <span>Campaigns longer than a week are listed above the grid rather than filling every day.</span>
         </p>
 

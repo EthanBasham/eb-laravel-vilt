@@ -1,5 +1,6 @@
 <script setup>
-import DayCell from './DayCell.vue';
+import { computed } from 'vue';
+import WeekRow from './WeekRow.vue';
 
 /**
  * The month, as seven columns of squares.
@@ -12,13 +13,21 @@ import DayCell from './DayCell.vue';
  * Sunday first, and the labels are fixed English rather than localised. The
  * server decides where the week starts; these labels must match it.
  */
-defineProps({
+const props = defineProps({
     days: { type: Array, required: true },
+    // The multi-day bars, each tagged with the week row it is drawn in.
+    spans: { type: Array, default: () => [] },
 });
 
 defineEmits(['selectDay', 'selectEvent']);
 
 const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/** The days in rows of seven, each with the bars drawn across it. */
+const weeks = computed(() => Array.from({ length: Math.ceil(props.days.length / 7) }, (_, week) => ({
+    days: props.days.slice(week * 7, week * 7 + 7),
+    spans: props.spans.filter((span) => span.week === week),
+})));
 </script>
 
 <template>
@@ -34,15 +43,14 @@ const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
                 </div>
             </div>
 
-            <div class="grid grid-cols-7">
-                <DayCell
-                    v-for="day in days"
-                    :key="day.date"
-                    :day="day"
-                    @select-day="$emit('selectDay', $event)"
-                    @select-event="$emit('selectEvent', $event)"
-                />
-            </div>
+            <WeekRow
+                v-for="week in weeks"
+                :key="week.days[0].date"
+                :days="week.days"
+                :spans="week.spans"
+                @select-day="$emit('selectDay', $event)"
+                @select-event="$emit('selectEvent', $event)"
+            />
         </div>
     </div>
 </template>

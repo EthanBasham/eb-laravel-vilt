@@ -1,20 +1,20 @@
 <script setup>
 import { asDayLabel } from '../../lib/format';
-import { eventBarClass } from '../../lib/events';
 
 /**
- * One square of the month grid.
+ * One square of the month grid: its date, and the click that opens its day.
  *
- * The square-wide button sits *behind* the event bars rather than wrapping
- * them: a square that was itself a button could not contain the per-event
- * buttons, which is invalid markup. The overlay fills the square and everything
- * else sits above it, so each bar keeps its own click.
+ * The square only draws the background. Its week row lays the events over it —
+ * the bars that run across several squares and the sessions inside this one —
+ * so this sits under every row of the week, and the square-wide button sits
+ * *behind* the event buttons rather than wrapping them: a square that was
+ * itself a button could not contain them, which is invalid markup.
  */
 const props = defineProps({
     day: { type: Object, required: true },
 });
 
-defineEmits(['selectDay', 'selectEvent']);
+defineEmits(['selectDay']);
 
 /** A square worth opening: an empty day view would say nothing. */
 const hasAnything = (day) => day.events.length > 0 || day.ongoing_ids.length > 0;
@@ -42,28 +42,5 @@ const openable = () => hasAnything(props.day);
         <p class="relative text-xs tabular-nums" :class="day.in_month ? 'text-wot-muted' : 'text-wot-dim'">
             {{ day.day }}
         </p>
-
-        <ul role="list" class="relative mt-1 space-y-1">
-            <li v-for="event in day.events" :key="event.id">
-                <button
-                    type="button"
-                    class="w-full px-1.5 py-0.5 text-left text-xs transition-opacity hover:opacity-80"
-                    :class="eventBarClass(event)"
-                    @click="$emit('selectEvent', event)"
-                >
-                    <span class="block truncate">
-                        <span v-if="event.time" class="font-bold tabular-nums">{{ event.time }}</span>
-                        {{ event.title }}
-                    </span>
-
-                    <!-- Its own line rather than appended to the title, which
-                         truncates — a marker that disappears on the longer
-                         titles would be worse than none. -->
-                    <span v-if="event.is_final_day" class="block font-bold uppercase tracking-wider text-wot-bad">
-                        Final day
-                    </span>
-                </button>
-            </li>
-        </ul>
     </div>
 </template>
