@@ -16,3 +16,6 @@ Formatters live in lib/format.js (n, number, short, inK, roman, asDate…). Do n
 
 ## Article lists share behaviour through composables; the page keeps its data shape
 Any list of articles (/wot/news cards, the dashboard NewsPanel, and any future one) pins through useArticlePin and marks seen through useArticleSeenTracker — never a hand-written router.post/delete to /wot/news/{id}/pin. The composables own the URLs and verbs and know nothing about any page's props. Each page passes only what depends on its own data: `only` (which props to reload) and the `optimistic(pageProps, article, pinning)` callback, since /wot/news holds a paginator at `articles.data` and the dashboard holds `news.latest`/`news.pinned`. Don't move that page-shaped logic into the composable or into ArticleCard: it would break on the other page.
+
+## Shared helpers are named for the thing they take
+An exported helper in lib/ starts with the noun its parameter is: `eventHasExactTimes(event)`, `eventBorderClass(event)`, `eventColorStyle(event)` — not `hasExactTimes`, which leaves the reader guessing what to pass. Define each exported helper once under its public name; don't keep a private function and re-export it under an alias (`export const x = isExact;`), which gives one check two names that nothing connects at the call sites.

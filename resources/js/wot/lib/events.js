@@ -1,5 +1,6 @@
 /**
- * How much an event's dates are trusted, and how that is drawn.
+ * How events are drawn: how much their dates are trusted, and which colour
+ * tells one apart from the next.
  *
  * Two kinds of thing end up on the calendar. A `calendar` event was lifted from
  * an article's own event table, so it carries real session times. A `window`
@@ -7,21 +8,23 @@
  * is on, not when you can play it.
  *
  * The difference in confidence is drawn rather than implied: a gold rule down
- * the side for the exact ones, blue for the spans. Keeping the mapping here is what stops a new panel
- * inventing a third colour, and it is why a window's times are never printed —
- * a start of "00:00" would be a claim nobody made.
+ * the side for the exact ones, blue for the spans. Keeping the mapping here is
+ * what stops a new panel inventing a third colour, and it is why a window's
+ * times are never printed — a start of "00:00" would be a claim nobody made.
  */
-const isExact = (event) => event.source === 'calendar';
+
+/** Whether this event's timestamps are precise enough to print a time from. */
+export const eventHasExactTimes = (event) => event.source === 'calendar';
 
 /** Just the rule down the side, for an event listed as text. */
-export const eventBorderClass = (event) => (isExact(event) ? 'border-wot-gold' : 'border-wot-blue');
+export const eventBorderClass = (event) => (eventHasExactTimes(event) ? 'border-wot-gold' : 'border-wot-blue');
 
 /**
  * Colours for telling events apart in the grid, and nothing more: which one an
  * event gets says nothing about it. There are no golds or yellows here — gold
- * is kept for the events that carry rewards (see eventColorStyle). Neighbours in the list are far apart in
- * hue, because events synced from one article get consecutive ids and are the
- * ones most likely to sit side by side.
+ * is kept for the events that carry rewards (see eventColorStyle). Neighbours
+ * in the list are far apart in hue, because events synced from one article get
+ * consecutive ids and are the ones most likely to sit side by side.
  *
  * Hex in an inline style rather than Tailwind classes: classes built from a
  * list at runtime are not in the source for Tailwind to find.
@@ -55,6 +58,3 @@ export const eventColorStyle = (event) => {
 
     return { backgroundColor: `${colour}26`, color: colour };
 };
-
-/** Whether this event's timestamps are precise enough to print a time from. */
-export const hasExactTimes = isExact;

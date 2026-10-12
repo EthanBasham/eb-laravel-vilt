@@ -145,8 +145,8 @@ it('drops an ignored event from the grid but keeps it in coming up', function ()
     $props = september($user)->viewData('page')['props'];
 
     expect(collect($props['days'])->firstWhere('date', '2026-09-15')['events'])->toBeEmpty()
-        ->and($props['upcoming'])->toHaveCount(1)
-        ->and($props['upcoming'][0]['is_ignored'])->toBeTrue();
+        ->and($props['upcomingEvents'])->toHaveCount(1)
+        ->and($props['upcomingEvents'][0]['is_ignored'])->toBeTrue();
 });
 
 it('drops an ignored campaign from running all month', function () {
@@ -162,7 +162,7 @@ it('drops an ignored campaign from running all month', function () {
 
     $props = september($user)->viewData('page')['props'];
 
-    expect($props['ongoing'])->toBeEmpty()
+    expect($props['ongoingEvents'])->toBeEmpty()
         // And so gone from the day view, which reads the same ids.
         ->and(collect($props['days'])->firstWhere('date', '2026-09-10')['ongoing_ids'])->toBe([]);
 });
@@ -181,7 +181,7 @@ it('restores an event on reconsidering it', function () {
     $props = september($user)->viewData('page')['props'];
 
     expect(collect($props['days'])->firstWhere('date', '2026-09-15')['events'])->toHaveCount(1)
-        ->and($props['upcoming'][0]['is_ignored'])->toBeFalse();
+        ->and($props['upcomingEvents'][0]['is_ignored'])->toBeFalse();
 });
 
 /**
@@ -207,7 +207,7 @@ it('keeps one user\'s ignores out of another\'s calendar', function () {
 /**
  * The day view lists what is running on a square, which includes the long
  * campaigns the grid itself leaves out. Ids rather than copies: the campaigns
- * already travel once in the `ongoing` prop.
+ * already travel once in the `ongoingEvents` prop.
  */
 it('tells each day which long campaigns cover it', function () {
     $user = User::factory()->create();
@@ -235,7 +235,7 @@ it('lists only events longer than a week above the grid', function (string $ends
 
     $response = september(User::factory()->create());
 
-    expect($response->viewData('page')['props']['ongoing'])->toHaveCount($aboveGrid)
+    expect($response->viewData('page')['props']['ongoingEvents'])->toHaveCount($aboveGrid)
         ->and(eventsOn($response, '2026-09-08'))->toHaveCount($inSquare);
 })->with([
     'exactly a week stays in the grid' => ['2026-09-15 04:00:00', 0, 1],
@@ -256,10 +256,10 @@ it('leaves a long campaign unmarked', function () {
     ]);
 
     $response = september($user);
-    $ongoing = $response->viewData('page')['props']['ongoing'];
+    $ongoingEvents = $response->viewData('page')['props']['ongoingEvents'];
 
-    expect($ongoing)->toHaveCount(1)
-        ->and($ongoing[0]['is_final_day'])->toBeFalse()
+    expect($ongoingEvents)->toHaveCount(1)
+        ->and($ongoingEvents[0])->not->toHaveKey('is_final_day')
         ->and(eventsOn($response, '2026-09-30'))->toBeEmpty();
 });
 
@@ -278,10 +278,10 @@ it('draws a multi-day event as one bar per week it touches', function () {
 
     expect($spans)->toHaveCount(2)
         ->and(collect($spans)->pluck('event.id')->unique()->all())->toBe([$event->id])
-        ->and(collect($spans[0])->only(['week', 'column', 'length', 'continues_before', 'continues_after', 'is_final_day'])->all())
-        ->toBe(['week' => 1, 'column' => 5, 'length' => 3, 'continues_before' => false, 'continues_after' => true, 'is_final_day' => false])
-        ->and(collect($spans[1])->only(['week', 'column', 'length', 'continues_before', 'continues_after', 'is_final_day'])->all())
-        ->toBe(['week' => 2, 'column' => 1, 'length' => 3, 'continues_before' => true, 'continues_after' => false, 'is_final_day' => true]);
+        ->and(collect($spans[0])->only(['week', 'column', 'length', 'continues_before', 'continues_after'])->all())
+        ->toBe(['week' => 1, 'column' => 5, 'length' => 3, 'continues_before' => false, 'continues_after' => true])
+        ->and(collect($spans[1])->only(['week', 'column', 'length', 'continues_before', 'continues_after'])->all())
+        ->toBe(['week' => 2, 'column' => 1, 'length' => 3, 'continues_before' => true, 'continues_after' => false]);
 });
 
 it('stacks overlapping bars in lanes and reuses a lane once it is free', function () {

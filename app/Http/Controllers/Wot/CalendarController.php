@@ -22,17 +22,6 @@ class CalendarController extends Controller
             'previousMonth' => $month->copy()->subMonth()->format('Y-m'),
             'nextMonth' => $month->copy()->addMonth()->format('Y-m'),
             ...$board->for($month, $request->user()),
-            'upcoming' => WotEvent::with('article:id,title,url')
-                ->withIgnoredFor($request->user())
-                ->onlyUpcoming()
-                ->inDefaultOrder()
-                ->limit(10)
-                ->get()
-                ->map(fn (WotEvent $event): array => [
-                    ...$event->list_item_props,
-                    'is_ignored' => $event->ignored_at !== null,
-                ])
-                ->all(),
         ]);
     }
 

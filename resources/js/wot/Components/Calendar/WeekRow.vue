@@ -69,9 +69,6 @@ const spanClass = (span) => [
                 <span v-if="span.time" class="font-bold tabular-nums">{{ span.time }}</span>
                 {{ span.event.title }}
             </span>
-
-            <!-- No "Final day" marker for now: a second line made the lanes
-                 uneven. The server still sends span.is_final_day for it. -->
         </button>
 
         <ul

@@ -1,6 +1,7 @@
 <script setup>
 import { Link } from '@inertiajs/vue3';
 import { asShortDate } from '../lib/format';
+import { eventBorderClass, eventHasExactTimes } from '../lib/events';
 
 defineProps({
     upcoming: { type: Object, required: true },
@@ -41,9 +42,7 @@ defineProps({
                             :target="event.article.url ? '_blank' : undefined"
                             :rel="event.article.url ? 'noopener noreferrer' : undefined"
                             class="block border-l-2 ps-2 text-sm transition-opacity hover:opacity-80"
-                            :class="event.source === 'calendar'
-                                ? 'border-wot-gold text-wot-gold'
-                                : 'border-wot-blue text-wot-blue-light'"
+                            :class="[eventBorderClass(event), eventHasExactTimes(event) ? 'text-wot-gold' : 'text-wot-blue-light']"
                         >
                             <span class="flex items-start gap-1">
                                 <span class="truncate">
