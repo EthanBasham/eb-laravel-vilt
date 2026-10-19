@@ -20,6 +20,18 @@ test('users can authenticate using the login screen', function () {
     $response->assertRedirect(route('dashboard', absolute: false));
 });
 
+test('users can authenticate with a plain username in place of an email address', function () {
+    User::factory()->create(['email' => 'guest']);
+
+    $response = $this->post('/login', [
+        'email' => 'guest',
+        'password' => 'password',
+    ]);
+
+    $this->assertAuthenticated();
+    $response->assertRedirect(route('dashboard', absolute: false));
+});
+
 test('users can not authenticate with invalid password', function () {
     $user = User::factory()->create();
 

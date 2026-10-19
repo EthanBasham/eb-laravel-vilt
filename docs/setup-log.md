@@ -5248,3 +5248,44 @@ Verified with `curl`: `http://financialfleet…` → `https://financialfleet…/
 `https://laravel-vilt.ethanbasham.xyz/finance` → `/login` for a signed-out visitor (`/finance`
 is behind auth), ending in 200.
 
+---
+
+## 2026-10-18 — A shared guest account for WOT Hub and Financial Fleet
+
+A sign-in anyone can be given — username `guest` — so both sub-projects can be shown without
+an account of one's own. The owner's choices, asked for at the time: plain-username login, no
+restrictions on what the guest can do, a nightly rebuild, and in Financial Fleet every amount
+×1.5 with every name replaced.
+
+- **`guest:refresh`** (`app/Console/Commands/RefreshGuestAccount.php`) creates or resets the
+  user (`email` = `guest`, verified, password from `GUEST_PASSWORD`) and has each sub-project
+  copy its own tables: `App\Services\Wargaming\GuestGarage` and `App\Services\Finance\GuestFleet`.
+  It replaces rather than adds, in one transaction. Scheduled daily at 03:15 Chicago. The
+  nightly reset is also what makes "no restrictions" tolerable: a visitor who changes the
+  password or deletes things undoes it for everyone only until the next run.
+- **Password.** `GUEST_PASSWORD` in `.env` on both sides, value in
+  `~/secrets/eb-laravel-vilt-guest-password`. It starts with `#`, so it **must be quoted** in
+  `.env` — unquoted, the line reads as a comment and the command refuses to run. The source
+  user is `GUEST_SOURCE_USER_ID`, default 1 (the owner on both sides, per the 2026-10-10 entry).
+- **Login takes a username.** `LoginRequest` dropped the `email` format rule and the field reads
+  "Email or username". Registration and profile still require an address.
+- **WoT: the guest shares the owner's Wargaming account, without the token.** The dashboard
+  reads Wargaming live by `account_id`, so a placeholder id would have left it empty. The guest's
+  `wot_accounts` row carries the real `account_id` and a null token, so it gets the public stats
+  and never the private block (credits, Free XP). That needed **`wot_accounts.account_id` no
+  longer unique** (migration `drop_unique_account_id_from_wot_accounts_table`; `user_id` still is),
+  and **`AccountDashboard::cacheKey()`** giving a tokenless link its own cache keys
+  (`…:public`) — otherwise the owner's cached payload, private block and all, would be served to
+  the guest. `wot:snapshot` now captures the guest's link hourly too: one more public API call.
+- **Finance: scaled and generic.** Amounts (balances, contributions, flows, actuals, goals,
+  transfers, Social Security benefits, scenario and conversion overrides, snapshots) ×1.5 from
+  `config('guest.finance.scale')`. Names become the holding type / flow category / strategy kind
+  label, or "Scenario 2", "Goal 1", "Armada 3"; institutions, notes, symbols, descriptions and
+  snapshot notes are dropped. Rates, ages, dates, tax settings and birth dates are copied as they
+  are. Stored Monte Carlo results are not copied (they are the owner's amounts); the card starts
+  unrun. Copying is column for column, so **a new money or free-text column must be added to
+  GuestFleet** — recorded as a rule in `.ai/rules/models-finance.md`; the WoT equivalent (new
+  tables must be listed in GuestGarage) is in `.ai/rules/crews.md`.
+- Verified locally against the dev database: run twice, row counts match the owner's one for one,
+  every WoT and Finance page renders 200 signed in as `guest`, and the dashboard shows live
+  battles with `is_token_valid: false`.

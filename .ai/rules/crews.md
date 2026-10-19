@@ -2,10 +2,11 @@
 paths:
   - 'app/Models/Wot*Crew*.php'
   - 'app/Services/Wargaming/Crew*.php'
-  - 'app/Http/Controllers/Wot/CrewController.php'
-  - 'resources/js/wot/Pages/Crews.vue'
+  - app/Http/Controllers/Wot/CrewController.php
+  - resources/js/wot/Pages/Crews.vue
   - 'resources/js/wot/Components/Crew*.vue'
   - 'resources/js/wot/Components/Crews/**'
+  - 'app/Models/Wot*.php'
 ---
 
 # Crews
@@ -35,3 +36,6 @@ Every tech-tree board's filter row is a column on that one table, the Crews boar
 `wot_crew_guide_roles.included` is the ordered list of perks to train; the excluded bucket is never stored. It is whatever else `config('wargaming.crew_role_perks')` lists for the role, worked out in PerkOrganizer.vue, so a perk a patch adds lands in excluded without a row being touched and CrewGuideBoard drops a stored perk the role can no longer train. A role with nothing saved has no row. Do not add an `excluded` column or a third "undecided" state.
 
 The descriptions in `config('wargaming.crew_perks')` are Wargaming's own wording, copied from the article named in that file's header, not the API's (which is terse and missing for eleven perks). When a patch changes or adds a perk, take the new text from an official Wargaming page and say which; do not write game effects in from memory, and leave a description null (the tooltip handles it) where no such source exists.
+
+## New per-account or per-user wot_* tables must be added to GuestGarage
+`guest:refresh` copies the owner's WoT data to the guest via App\Services\Wargaming\GuestGarage, which lists its tables explicitly (ACCOUNT_TABLES, USER_TABLES, plus copyWithChildren for parent/child pairs). A new table keyed by wot_account_id or user_id is not copied until it is listed there. The guest's WotAccount shares the owner's account_id with no access token — which is why wot_accounts.account_id is not unique, and why AccountDashboard::cacheKey() keeps tokenless payloads under separate keys. Don't merge those keys: the owner's cached payload carries private balances.

@@ -40,3 +40,12 @@ Schedule::command('wot:sync-news')
     ->cron('0 7,12,17 * * *')
     ->timezone('America/Chicago')
     ->withoutOverlapping();
+
+// Puts the shared guest account back to a fresh copy of the owner's overnight,
+// undoing whatever visitors changed during the day — its password included.
+// Pinned to Chicago like the news sync, and well clear of 02:00 for the same
+// DST reason.
+Schedule::command('guest:refresh')
+    ->dailyAt('03:15')
+    ->timezone('America/Chicago')
+    ->withoutOverlapping();

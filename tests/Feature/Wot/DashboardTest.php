@@ -464,3 +464,24 @@ it('reports pinned state in the dashboard news panel', function () {
         ->has('news.pinned', 1),
     );
 });
+
+/**
+ * The guest is linked to the owner's Wargaming account without the token. The
+ * owner's cached payloads carry the private block, so the guest must fetch its
+ * own rather than be served theirs.
+ */
+it('does not serve a tokenless link the payloads cached for the same account with its token', function () {
+    $owner = WotAccount::factory()->create(['account_id' => 7]);
+    $guest = WotAccount::factory()->withoutToken()->create(['account_id' => 7]);
+    Http::fake([
+        '*/account/info/*' => Http::response(accountInfoResponse(7)),
+        '*/tanks/stats/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
+        '*/tanks/achievements/*' => Http::response(['status' => 'ok', 'data' => ['7' => []]]),
+    ]);
+
+    $this->actingAs($owner->user)->get(route('wot.dashboard'));
+    $this->actingAs($guest->user)->get(route('wot.dashboard'));
+
+    Http::assertSentCount(6);
+    Http::assertSent(fn ($request) => str_contains($request->url(), '/account/info/') && ! isset($request->data()['access_token']) && ! str_contains($request->url(), 'access_token'));
+});

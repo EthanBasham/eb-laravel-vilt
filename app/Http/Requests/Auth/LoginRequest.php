@@ -23,12 +23,16 @@ class LoginRequest extends FormRequest
     /**
      * Get the validation rules that apply to the request.
      *
+     * `email` is not held to an address's format: it also takes a plain
+     * username, which is what the shared guest account signs in with (its
+     * `email` column holds "guest"). Registration still requires an address.
+     *
      * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {
         return [
-            'email' => ['required', 'string', 'email'],
+            'email' => ['required', 'string'],
             'password' => ['required', 'string'],
         ];
     }

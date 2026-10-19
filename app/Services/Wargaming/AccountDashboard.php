@@ -62,7 +62,7 @@ class AccountDashboard
     private function payloads(WotAccount $account): array
     {
         return Cache::remember(
-            "wot:payloads:{$account->account_id}",
+            $this->cacheKey('payloads', $account),
             (int) config('wargaming.cache.dashboard'),
             fn () => $this->client->dashboardPayloads($account->account_id, $account->access_token),
         );
@@ -73,10 +73,27 @@ class AccountDashboard
      */
     public function forget(WotAccount $account): void
     {
-        Cache::forget("wot:payloads:{$account->account_id}");
+        Cache::forget($this->cacheKey('payloads', $account));
         // freeXp()'s own copy of account/info, so Refresh moves the Grinding
         // page's balance too rather than leaving it on the old figure.
-        Cache::forget("wot:account-info:{$account->account_id}");
+        Cache::forget($this->cacheKey('account-info', $account));
+    }
+
+    /**
+     * Where a payload for this account is cached.
+     *
+     * A link without a token gets keys of its own. One Wargaming account can
+     * be linked twice — the guest shows the owner's, tokenless — and a
+     * response fetched with the token carries the private block (credits,
+     * Free XP), which must never be served from cache to the link without it.
+     */
+    private function cacheKey(string $payload, WotAccount $account): string
+    {
+        if ($account->access_token === null) {
+            return "wot:{$payload}:{$account->account_id}:public";
+        }
+
+        return "wot:{$payload}:{$account->account_id}";
     }
 
     /**
@@ -145,7 +162,7 @@ class AccountDashboard
             return null;
         }
 
-        $payloads = Cache::get("wot:payloads:{$account->account_id}");
+        $payloads = Cache::get($this->cacheKey('payloads', $account));
 
         if (is_array($payloads)) {
             return $this->balancesFrom((array) ($payloads['info'] ?? []), $account);
@@ -153,7 +170,7 @@ class AccountDashboard
 
         try {
             $info = Cache::remember(
-                "wot:account-info:{$account->account_id}",
+                $this->cacheKey('account-info', $account),
                 (int) config('wargaming.cache.dashboard'),
                 fn (): array => $this->client->accountInfo([$account->account_id], $account->access_token),
             );
