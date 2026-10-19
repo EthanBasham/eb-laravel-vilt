@@ -5226,3 +5226,25 @@ to 100%". **Sixth Sense is not described there** and keeps the API's sentence. T
 (`/content/guide/crew/all-skills-perks/`), which the Crew 103 article links to, answered 404.
 
 The article also marks seventeen perks as "with a situational effect"; that label is not stored.
+
+---
+
+## 2026-10-18 — Vanity domain `financialfleet.ethanbasham.xyz` → `/finance`
+
+Same pattern as `wothub.ethanbasham.xyz` (2026-09-11 entry), for the Financial Fleet
+sub-project: a redirect, not a second hostname serving the app, for the same single-`APP_URL`
+reason given there.
+
+**DNS.** `A` record `financialfleet` → `54.211.52.97`, added manually in the Porkbun dashboard.
+
+**nginx + cert.** New vhost `/etc/nginx/conf.d/financialfleet.ethanbasham.xyz.conf`, written
+fresh as a port-80-only block (`return 301 https://laravel-vilt.ethanbasham.xyz/finance`)
+rather than copied from the wothub file, so none of wothub's Certbot-managed lines came along.
+`certbot --nginx -d financialfleet.ethanbasham.xyz --non-interactive --redirect` then added the
+HTTPS block and the HTTP→HTTPS redirect. Cert expires 2027-01-17; Certbot's scheduled renewal
+covers it.
+
+Verified with `curl`: `http://financialfleet…` → `https://financialfleet…/` →
+`https://laravel-vilt.ethanbasham.xyz/finance` → `/login` for a signed-out visitor (`/finance`
+is behind auth), ending in 200.
+
